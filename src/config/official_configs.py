@@ -626,6 +626,9 @@ class ResponseSplitterConfig(ConfigBase):
     enable_kaomoji_protection: bool = False
     """是否启用颜文字保护"""
 
+    enable_overflow_return_all: bool = False
+    """是否在超出句子数量限制时合并后一次性返回"""
+
 
 @dataclass
 class TelemetryConfig(ConfigBase):
