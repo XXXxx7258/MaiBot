@@ -1388,6 +1388,49 @@ async def update_plugin_config(
     logger.info(f"更新插件配置: {plugin_id}")
 
     try:
+        # 尝试获取已加载插件的 schema，用于纠正 WebUI 扁平键与类型
+        from src.plugin_system.core.plugin_manager import plugin_manager
+
+        def _normalize_dotted_keys(obj: Dict[str, Any]) -> Dict[str, Any]:
+            items = list(obj.items())
+            for k, v in items:
+                if "." in k:
+                    parts = k.split(".")
+                    current = obj
+                    for idx, part in enumerate(parts):
+                        if idx == len(parts) - 1:
+                            current[part] = v
+                        else:
+                            current = current.setdefault(part, {})
+                    obj.pop(k, None)
+                elif isinstance(v, dict):
+                    obj[k] = _normalize_dotted_keys(v)
+            return obj
+
+        def _coerce_types(schema_part: Dict[str, Any], config_part: Dict[str, Any]) -> None:
+            for key, schema_val in schema_part.items():
+                if isinstance(schema_val, ConfigField):
+                    if key in config_part:
+                        if schema_val.type is list and isinstance(config_part[key], str):
+                            # 将逗号分隔的字符串转为列表
+                            config_part[key] = [item.strip() for item in config_part[key].split(",") if item.strip()]
+                elif isinstance(schema_val, dict):
+                    if key in config_part and isinstance(config_part[key], dict):
+                        _coerce_types(schema_val, config_part[key])
+
+        plugin_instance = None
+        for loaded_plugin_name in plugin_manager.list_loaded_plugins():
+            instance = plugin_manager.get_plugin_instance(loaded_plugin_name)
+            if instance and (instance.plugin_name == plugin_id or instance.get_manifest_info("id", "") == plugin_id):
+                plugin_instance = instance
+                break
+
+        # 纠正 WebUI 提交的数据结构（扁平键与字符串列表）
+        if plugin_instance and isinstance(request.config, dict):
+            request.config = _normalize_dotted_keys(request.config)
+            if isinstance(plugin_instance.config_schema, dict):
+                _coerce_types(plugin_instance.config_schema, request.config)
+
         # 查找插件目录
         plugins_dir = Path("plugins")
         plugin_path = None
