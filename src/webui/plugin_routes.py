@@ -6,6 +6,7 @@ import json
 from src.common.logger import get_logger
 from src.common.toml_utils import save_toml_with_format
 from src.config.config import MMC_VERSION
+from src.plugin_system.base.config_types import ConfigField
 from .git_mirror_service import get_git_mirror_service, set_update_progress_callback
 from .token_manager import get_token_manager
 from .plugin_progress_ws import update_progress
@@ -63,6 +64,61 @@ def parse_version(version_str: str) -> tuple[int, int, int]:
     except (ValueError, IndexError):
         logger.warning(f"无法解析版本号: {version_str}，返回默认值 (0, 0, 0)")
         return (0, 0, 0)
+
+
+# ============ 工具函数（避免在请求内重复定义） ============
+
+
+def normalize_dotted_keys(obj: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将形如 {'a.b': 1} 的键展开为嵌套结构 {'a': {'b': 1}}。
+    若遇到中间节点已存在且非字典，记录日志并覆盖为字典。
+    """
+    result: Dict[str, Any] = {}
+    dotted_items = []
+
+    # 先处理非点号键，避免后续展开覆盖已有结构
+    for k, v in obj.items():
+        if "." in k:
+            dotted_items.append((k, v))
+        else:
+            result[k] = normalize_dotted_keys(v) if isinstance(v, dict) else v
+
+    # 再处理点号键
+    for dotted_key, v in dotted_items:
+        value = normalize_dotted_keys(v) if isinstance(v, dict) else v
+        parts = dotted_key.split(".")
+        current = result
+        for idx, part in enumerate(parts):
+            is_last = idx == len(parts) - 1
+            if not is_last:
+                if part in current and not isinstance(current[part], dict):
+                    logger.warning(f"键冲突：{part} 已存在且非字典，覆盖为字典以展开 {dotted_key}")
+                    current[part] = {}
+                current = current.setdefault(part, {})
+            else:
+                # 最后一级：如已有且为 dict 且 v 是 dict，可合并，否则覆盖
+                if part in current and isinstance(current[part], dict) and isinstance(value, dict):
+                    current[part].update(value)
+                else:
+                    current[part] = value
+
+    return result
+
+
+def coerce_types(schema_part: Dict[str, Any], config_part: Dict[str, Any]) -> None:
+    """
+    根据 schema 将配置中的类型纠正（目前只纠正 list-from-str）。
+    """
+    for key, schema_val in schema_part.items():
+        if key not in config_part:
+            continue
+        value = config_part[key]
+        if isinstance(schema_val, ConfigField):
+            if schema_val.type is list and isinstance(value, str):
+                config_part[key] = [item.strip() for item in value.split(",") if item.strip()]
+        elif isinstance(schema_val, dict) and isinstance(value, dict):
+            coerce_types(schema_val, value)
 
 
 # ============ 请求/响应模型 ============
@@ -1388,6 +1444,25 @@ async def update_plugin_config(
     logger.info(f"更新插件配置: {plugin_id}")
 
     try:
+        # 局部导入以避免循环依赖
+        from src.plugin_system.core.plugin_manager import plugin_manager
+
+        plugin_instance = next(
+            (
+                instance
+                for loaded_plugin_name in plugin_manager.list_loaded_plugins()
+                if (instance := plugin_manager.get_plugin_instance(loaded_plugin_name))
+                and (instance.plugin_name == plugin_id or instance.get_manifest_info("id", "") == plugin_id)
+            ),
+            None,
+        )
+
+        # 纠正 WebUI 提交的数据结构（扁平键与字符串列表）
+        if plugin_instance and isinstance(request.config, dict):
+            request.config = normalize_dotted_keys(request.config)
+            if isinstance(plugin_instance.config_schema, dict):
+                coerce_types(plugin_instance.config_schema, request.config)
+
         # 查找插件目录
         plugins_dir = Path("plugins")
         plugin_path = None
