@@ -154,6 +154,26 @@ def find_plugin_instance(plugin_id: str) -> Optional[Any]:
     return None
 
 
+def flatten_config(prefix: str, obj: Any, out: Dict[str, Any], *, warn_on_dot: bool = True) -> None:
+    """
+    将嵌套 dict 扁平化为点号键的单层 dict。
+    - 仅对 dict 递归；列表/标量保持原样。
+    - 如果 key 本身包含点号，记录警告但不进一步拆分，仍按字面拼接路径。
+    """
+    if isinstance(obj, dict):
+        if not obj:
+            # 保留空 dict
+            out[prefix] = {}
+            return
+        for k, v in obj.items():
+            if warn_on_dot and "." in k:
+                logger.warning(f"配置键包含点号，按字面处理: '{k}' (路径前缀: '{prefix}')")
+            next_prefix = f"{prefix}.{k}" if prefix else k
+            flatten_config(next_prefix, v, out, warn_on_dot=warn_on_dot)
+    else:
+        out[prefix] = obj
+
+
 # ============ 请求/响应模型 ============
 
 
@@ -1450,7 +1470,10 @@ async def get_plugin_config(plugin_id: str, maibot_session: Optional[str] = Cook
         with open(config_path, "r", encoding="utf-8") as f:
             config = tomlkit.load(f)
 
-        return {"success": True, "config": dict(config)}
+        flat_config: Dict[str, Any] = {}
+        flatten_config("", dict(config), flat_config, warn_on_dot=True)
+
+        return {"success": True, "config": flat_config}
 
     except HTTPException:
         raise
