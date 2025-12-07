@@ -1450,7 +1450,18 @@ async def get_plugin_config(plugin_id: str, maibot_session: Optional[str] = Cook
         with open(config_path, "r", encoding="utf-8") as f:
             config = tomlkit.load(f)
 
-        return {"success": True, "config": dict(config)}
+        def _flatten(prefix: str, obj: Any, out: Dict[str, Any]) -> None:
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    next_prefix = f"{prefix}.{k}" if prefix else k
+                    _flatten(next_prefix, v, out)
+            else:
+                out[prefix] = obj
+
+        flat_config: Dict[str, Any] = {}
+        _flatten("", dict(config), flat_config)
+
+        return {"success": True, "config": flat_config}
 
     except HTTPException:
         raise
