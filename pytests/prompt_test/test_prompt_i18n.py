@@ -60,6 +60,60 @@ def test_load_prompt_with_category_falls_back_to_default_locale_root(tmp_path: P
     assert rendered == "你好，Mai"
 
 
+def test_load_prompt_prefers_custom_prompt_override(tmp_path: Path) -> None:
+    prompts_root = tmp_path / "prompts"
+    custom_prompts_root = tmp_path / "data" / "custom_prompts"
+    write_prompt(prompts_root, "zh-CN", "replyer", "Base {user_name}")
+    write_prompt(custom_prompts_root, "zh-CN", "replyer", "Custom {user_name}")
+
+    rendered = load_prompt(
+        "replyer",
+        locale="zh-CN",
+        prompts_root=prompts_root,
+        custom_prompts_root=custom_prompts_root,
+        user_name="Mai",
+    )
+
+    assert rendered == "Custom Mai"
+
+
+def test_load_prompt_prefers_custom_prompt_requested_locale(tmp_path: Path) -> None:
+    prompts_root = tmp_path / "prompts"
+    custom_prompts_root = tmp_path / "data" / "custom_prompts"
+    write_prompt(prompts_root, "zh-CN", "replyer", "Base zh {user_name}")
+    write_prompt(prompts_root, "en-US", "replyer", "Base en {user_name}")
+    write_prompt(custom_prompts_root, "zh-CN", "replyer", "Custom zh {user_name}")
+    write_prompt(custom_prompts_root, "en-US", "replyer", "Custom en {user_name}")
+
+    rendered = load_prompt(
+        "replyer",
+        locale="en-US",
+        prompts_root=prompts_root,
+        custom_prompts_root=custom_prompts_root,
+        user_name="Mai",
+    )
+
+    assert rendered == "Custom en Mai"
+
+
+def test_load_prompt_uses_requested_locale_source_before_default_custom(tmp_path: Path) -> None:
+    prompts_root = tmp_path / "prompts"
+    custom_prompts_root = tmp_path / "data" / "custom_prompts"
+    write_prompt(prompts_root, "zh-CN", "replyer", "Base zh {user_name}")
+    write_prompt(prompts_root, "en-US", "replyer", "Base en {user_name}")
+    write_prompt(custom_prompts_root, "zh-CN", "replyer", "Custom zh {user_name}")
+
+    rendered = load_prompt(
+        "replyer",
+        locale="en-US",
+        prompts_root=prompts_root,
+        custom_prompts_root=custom_prompts_root,
+        user_name="Mai",
+    )
+
+    assert rendered == "Base en Mai"
+
+
 def test_load_prompt_strict_mode_raises_on_missing_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     prompts_root = tmp_path / "prompts"
     write_prompt(prompts_root, "zh-CN", "replyer", "你好，{user_name}，现在是 {current_time}")

@@ -388,7 +388,6 @@ class EmojiManager:
                 if existing_record := session.exec(statement).first():
                     existing_record.full_path = str(emoji.full_path)
                     existing_record.no_file_flag = False
-                    existing_record.is_banned = False
                     existing_record.last_used_time = datetime.now()
                     existing_record.query_count += 1
                     session.add(existing_record)
@@ -473,7 +472,6 @@ class EmojiManager:
                     image_record.full_path = str(new_emoji.full_path)
                     image_record.description = new_emoji.description
                     image_record.no_file_flag = False
-                    image_record.is_banned = False
                     session.add(image_record)
             except Exception as exc:
                 logger.error(f"Update cached emoji description failed: {exc}")
@@ -531,6 +529,9 @@ class EmojiManager:
                 statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
                 existing_record = session.exec(statement).first()
                 if existing_record:
+                    if existing_record.is_banned:
+                        logger.info(f"[register_emoji] Emoji is banned, skipping: {emoji.file_hash}")
+                        return "skipped"
                     if existing_record.is_registered and _is_available_emoji_record(existing_record):
                         # logger.info(f"[register_emoji] Emoji already registered, skipping: {emoji.file_hash}")
                         return "skipped"
@@ -1085,6 +1086,10 @@ class EmojiManager:
             return "failed"
 
         if existing_record is not None:
+            if existing_record.is_banned:
+                logger.info(f"[register_emoji] Emoji is banned, skipping: {target_emoji.file_name}")
+                return "skipped"
+
             if existing_record.is_registered and _is_available_emoji_record(existing_record):
                 logger.info(f"[register_emoji] Emoji already registered, skipping: {target_emoji.file_name}")
                 return "skipped"

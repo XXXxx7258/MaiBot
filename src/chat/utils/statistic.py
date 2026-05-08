@@ -1,10 +1,12 @@
+from collections import defaultdict
+from datetime import datetime, timedelta
+from os import getenv
+from pathlib import Path
+from typing import cast
+
 import asyncio
 import concurrent.futures
 import json
-
-from collections import defaultdict
-from datetime import datetime, timedelta
-from typing import cast
 
 from typing_extensions import TypedDict
 
@@ -25,6 +27,17 @@ from src.services.statistics_service import (
 )
 
 logger = get_logger("maibot_statistic")
+
+STATISTICS_REPORT_PATH_ENV = "MAIBOT_STATISTICS_REPORT_PATH"
+DEFAULT_STATISTICS_REPORT_PATH = "maibot_statistics.html"
+
+
+def _resolve_statistics_report_path(record_file_path: str | None = None) -> str:
+    if record_file_path:
+        return record_file_path
+
+    configured_path = getenv(STATISTICS_REPORT_PATH_ENV, "").strip()
+    return configured_path or DEFAULT_STATISTICS_REPORT_PATH
 
 
 class StatPeriodData(TypedDict):
@@ -233,7 +246,7 @@ class StatisticOutputTask(AsyncTask):
 
     SEP_LINE = "-" * 84
 
-    def __init__(self, record_file_path: str = "maibot_statistics.html"):
+    def __init__(self, record_file_path: str | None = None):
         # 延迟300秒启动，运行间隔300秒
         super().__init__(task_name="Statistics Data Output Task", wait_before_start=0, run_interval=300)
 
@@ -243,7 +256,7 @@ class StatisticOutputTask(AsyncTask):
             注：设计记录时间的目的是方便更新名称，使联系人/群聊名称保持最新
         """
 
-        self.record_file_path: str = record_file_path
+        self.record_file_path: str = _resolve_statistics_report_path(record_file_path)
         """
         记录文件路径
         """
@@ -1730,7 +1743,11 @@ class StatisticOutputTask(AsyncTask):
         """
         )
 
-        with open(self.record_file_path, "w", encoding="utf-8") as f:
+        record_file = Path(self.record_file_path)
+        if record_file.parent != Path("."):
+            record_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(record_file, "w", encoding="utf-8") as f:
             f.write(html_template)
 
     def _generate_chart_data(self, stat: StatPeriodMapping) -> dict[str, dict[str, object]]:
@@ -2431,7 +2448,7 @@ class StatisticOutputTask(AsyncTask):
 class AsyncStatisticOutputTask(AsyncTask):
     """完全异步的统计输出任务 - 更高性能版本"""
 
-    def __init__(self, record_file_path: str = "maibot_statistics.html"):
+    def __init__(self, record_file_path: str | None = None):
         # 延迟0秒启动，运行间隔300秒
         super().__init__(task_name="Async Statistics Data Output Task", wait_before_start=0, run_interval=300)
 

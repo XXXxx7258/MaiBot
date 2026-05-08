@@ -20,6 +20,8 @@ export interface HostApplication {
 export interface PluginManifest {
   /** 清单文件版本 */
   manifest_version: number
+  /** Manifest 声明的插件唯一标识 */
+  id?: string
   /** 插件名称 */
   name: string
   /** 插件版本 */

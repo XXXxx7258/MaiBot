@@ -47,3 +47,17 @@ def test_installed_plugins_only_scan_plugins_dir_and_exclude_a_memorix(client: T
     assert ids == ["test.demo"]
     assert "a-dawn.a-memorix" not in ids
     assert all("/src/plugins/built_in/" not in plugin["path"] for plugin in payload["plugins"])
+
+
+def test_resolve_installed_plugin_path_falls_back_to_manifest_id(client: TestClient):
+    plugin_path = support_module.resolve_installed_plugin_path("test.demo")
+
+    assert plugin_path is not None
+    assert plugin_path.name == "demo_plugin"
+
+
+def test_resolve_installed_plugin_path_accepts_manifest_id_case_mismatch(client: TestClient):
+    plugin_path = support_module.resolve_installed_plugin_path("Test.Demo")
+
+    assert plugin_path is not None
+    assert plugin_path.name == "demo_plugin"

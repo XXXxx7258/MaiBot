@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import tomlkit
 
 from src.common.logger import get_logger
-from src.common.prompt_i18n import list_prompt_templates
+from src.common.prompt_i18n import clear_prompt_cache, list_prompt_templates
 from src.config.config import CONFIG_DIR, PROJECT_ROOT, Config, ModelConfig
 from src.config.config_base import AttributeData, ConfigBase
 from src.config.model_configs import (
@@ -323,6 +323,7 @@ async def update_prompt_file(language: str, filename: str, content: PromptConten
     try:
         custom_prompt_path.parent.mkdir(parents=True, exist_ok=True)
         custom_prompt_path.write_text(content, encoding="utf-8", newline="\n")
+        clear_prompt_cache()
         return PromptFileResponse(language=language, filename=filename, content=content, customized=True)
     except Exception as e:
         logger.error(f"保存 Prompt 文件失败: {prompt_path} {e}", exc_info=True)
@@ -341,6 +342,7 @@ async def reset_prompt_file(language: str, filename: str):
     try:
         if custom_prompt_path.exists():
             custom_prompt_path.unlink()
+            clear_prompt_cache()
         content = prompt_path.read_text(encoding="utf-8")
         return PromptFileResponse(language=language, filename=filename, content=content, customized=False)
     except Exception as e:

@@ -213,7 +213,7 @@ def resolve_installed_plugin_path(plugin_id: str) -> Optional[Path]:
         return _resolve_safe_plugin_directory(new_format_path, plugins_dir, strict=True)
     if old_format_path.exists():
         return _resolve_safe_plugin_directory(old_format_path, plugins_dir, strict=True)
-    return None
+    return find_plugin_path_by_id(plugin_id)
 
 
 def parse_repository_url(repository_url: str) -> Tuple[str, str, str]:
@@ -256,11 +256,29 @@ def iter_plugin_directories() -> List[Path]:
 
 
 def find_plugin_path_by_id(plugin_id: str) -> Optional[Path]:
+    casefold_matched_path: Optional[Path] = None
+    normalized_plugin_id = plugin_id.casefold()
+
     for plugin_path in iter_plugin_directories():
         manifest_path = resolve_plugin_file_path(plugin_path, "_manifest.json")
         manifest = load_manifest_json(manifest_path)
-        if manifest is not None and (manifest.get("id") == plugin_id or plugin_path.name == plugin_id):
+        if manifest is None:
+            continue
+
+        manifest_id = str(manifest.get("id", ""))
+        if manifest_id == plugin_id or plugin_path.name == plugin_id:
             return plugin_path
+
+        if (
+            casefold_matched_path is None
+            and (manifest_id.casefold() == normalized_plugin_id or plugin_path.name.casefold() == normalized_plugin_id)
+        ):
+            casefold_matched_path = plugin_path
+
+    if casefold_matched_path is not None:
+        logger.warning(f"插件 ID 大小写不一致，已按大小写不敏感匹配: {plugin_id} -> {casefold_matched_path}")
+        return casefold_matched_path
+
     return None
 
 
@@ -269,7 +287,9 @@ def backup_file(file_path: Path, action: str, move_file: bool = False) -> Option
         return None
 
     backup_name = f"{file_path.name}.{action}.{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    backup_path = file_path.parent / backup_name
+    backup_dir = file_path.parent / "config_back"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_dir / backup_name
     if move_file:
         shutil.move(file_path, backup_path)
     else:

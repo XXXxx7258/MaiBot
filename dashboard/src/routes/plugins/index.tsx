@@ -48,6 +48,9 @@ export function PluginsPage() {
 function PluginsPageContent() {
   const navigate = useNavigate()
   const { triggerRestart, isRestarting } = useRestart()
+  const [restartNoticeVisible, setRestartNoticeVisible] = useState(
+    () => localStorage.getItem('plugins-restart-notice-dismissed') !== 'true'
+  )
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all')  // all | installed | updates
@@ -66,6 +69,11 @@ function PluginsPageContent() {
   const [installingPlugin, setInstallingPlugin] = useState<PluginInfo | null>(null)
   
   const { toast } = useToast()
+
+  const dismissRestartNotice = () => {
+    localStorage.setItem('plugins-restart-notice-dismissed', 'true')
+    setRestartNoticeVisible(false)
+  }
 
   // 加载插件统计数据
   const loadPluginStats = async (pluginList: PluginInfo[]) => {
@@ -220,6 +228,7 @@ function PluginsPageContent() {
                   id: installedPlugin.id,
                   manifest: {
                     manifest_version: installedPlugin.manifest.manifest_version || 1,
+                    id: installedPlugin.manifest.id || installedPlugin.id,
                     name: installedPlugin.manifest.name,
                     version: installedPlugin.manifest.version,
                     description: installedPlugin.manifest.description || '',
@@ -704,16 +713,23 @@ function PluginsPageContent() {
         </div>
 
         {/* 安装提示 */}
-        <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900">
-          <CardContent className="py-3">
-            <div className="flex items-center gap-2">
-              <Info className="h-4 w-4 text-blue-600 flex-shrink-0" />
-              <p className="text-sm text-blue-800 dark:text-blue-200">
-                安装、卸载或更新插件后，需要<span className="font-semibold">重启麦麦</span>才能使更改生效
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {restartNoticeVisible && (
+          <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-900">
+            <CardContent className="py-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Info className="h-4 w-4 text-blue-600 flex-shrink-0" />
+                  <p className="text-sm text-blue-800 dark:text-blue-200">
+                    安装、卸载或更新插件后，部分插件需要<span className="font-semibold">重启麦麦</span>才能生效
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={dismissRestartNotice}>
+                  我知道了
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Git 状态警告 */}
         {gitStatus && !gitStatus.installed && (

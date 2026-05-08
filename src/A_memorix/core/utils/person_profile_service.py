@@ -283,7 +283,13 @@ class PersonProfileService:
             logger.warning(f"解析人物别名失败: person_id={person_id}, err={e}")
         return aliases, primary_name, memory_traits
 
-    def _collect_relation_evidence(self, aliases: List[str], limit: int = 30) -> List[Dict[str, Any]]:
+    def _collect_relation_evidence(
+        self,
+        aliases: List[str],
+        limit: int = 30,
+        *,
+        person_id: str = "",
+    ) -> List[Dict[str, Any]]:
         relation_by_hash: Dict[str, Dict[str, Any]] = {}
         for alias in aliases:
             for rel in self.metadata_store.get_relations(subject=alias, include_inactive=False):
@@ -296,6 +302,12 @@ class PersonProfileService:
                     relation_by_hash[h] = rel
 
         relations = list(relation_by_hash.values())
+        if person_id:
+            relations = [
+                rel
+                for rel in relations
+                if self._is_relation_bound_to_person(rel, person_id=person_id)
+            ]
         relations.sort(key=lambda item: float(item.get("confidence", 0.0)), reverse=True)
         relations = relations[: max(1, int(limit))]
 
@@ -311,6 +323,38 @@ class PersonProfileService:
                 }
             )
         return edges
+
+    def _is_relation_bound_to_person(
+        self,
+        relation: Dict[str, Any],
+        *,
+        person_id: str,
+    ) -> bool:
+        pid = str(person_id or "").strip()
+        if not pid:
+            return False
+
+        metadata = self._metadata_dict(relation.get("metadata"))
+        if str(metadata.get("person_id", "") or "").strip() == pid:
+            return True
+        if pid in self._list_tokens(metadata.get("person_ids")):
+            return True
+
+        source_paragraph = str(relation.get("source_paragraph", "") or "").strip()
+        if source_paragraph:
+            try:
+                paragraph = self.metadata_store.get_paragraph(source_paragraph)
+            except Exception:
+                paragraph = None
+            if isinstance(paragraph, dict):
+                payload = {
+                    "hash": source_paragraph,
+                    "source": str(paragraph.get("source", "") or ""),
+                    "metadata": self._metadata_dict(paragraph.get("metadata")),
+                }
+                return self._is_evidence_bound_to_person(payload, person_id=pid)
+
+        return False
 
     def _collect_person_fact_evidence(self, person_id: str, limit: int = 4) -> List[Dict[str, Any]]:
         token = str(person_id or "").strip()
@@ -347,6 +391,42 @@ class PersonProfileService:
         return self._filter_stale_paragraph_evidence(evidence)
 
     @staticmethod
+    def _metadata_dict(value: Any) -> Dict[str, Any]:
+        return dict(value) if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _list_tokens(value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple, set)):
+            return [str(item or "").strip() for item in value if str(item or "").strip()]
+        token = str(value or "").strip()
+        return [token] if token else []
+
+    def _is_evidence_bound_to_person(
+        self,
+        item: Dict[str, Any],
+        *,
+        person_id: str,
+    ) -> bool:
+        """画像证据必须显式绑定到 person_id，避免别名全局召回串人。"""
+        pid = str(person_id or "").strip()
+        if not pid:
+            return False
+
+        metadata = self._metadata_dict(item.get("metadata"))
+        source = str(item.get("source", "") or metadata.get("source", "") or "").strip()
+        if source == f"person_fact:{pid}":
+            return True
+
+        if str(metadata.get("person_id", "") or "").strip() == pid:
+            return True
+        if pid in self._list_tokens(metadata.get("person_ids")):
+            return True
+
+        return False
+
+    @staticmethod
     def _source_type_from_source(source: str) -> str:
         token = str(source or "").strip()
         if token.startswith("chat_summary:"):
@@ -360,7 +440,7 @@ class PersonProfileService:
         paragraph_hash: str,
         metadata: Dict[str, Any],
     ) -> Tuple[Dict[str, Any], str]:
-        merged = dict(metadata or {})
+        merged = self._metadata_dict(metadata)
         source = str(merged.get("source", "") or "").strip()
         try:
             paragraph = self.metadata_store.get_paragraph(paragraph_hash)
@@ -458,9 +538,11 @@ class PersonProfileService:
                             "score": 0.0,
                             "content": str(para.get("content", ""))[:180],
                             "source": str(para.get("source", "") or ""),
-                            "metadata": dict(para.get("metadata", {}) or {}),
+                            "metadata": self._metadata_dict(para.get("metadata")),
                         }
                     )
+                    if not self._is_evidence_bound_to_person(fallback[-1], person_id=person_id):
+                        fallback.pop()
             return self._filter_stale_paragraph_evidence(fallback[:top_k])
 
         per_alias_top_k = max(2, int(top_k / max(1, len(alias_queries))))
@@ -483,21 +565,22 @@ class PersonProfileService:
                 h = str(getattr(item, "hash_value", "") or "")
                 if not h or h in seen_hash:
                     continue
-                seen_hash.add(h)
                 metadata, source = self._enrich_paragraph_evidence_metadata(
                     h,
-                    dict(getattr(item, "metadata", {}) or {}),
+                    self._metadata_dict(getattr(item, "metadata", {})),
                 )
-                evidence.append(
-                    {
-                        "hash": h,
-                        "type": str(getattr(item, "result_type", "")),
-                        "score": float(getattr(item, "score", 0.0) or 0.0),
-                        "content": str(getattr(item, "content", "") or "")[:220],
-                        "source": source,
-                        "metadata": metadata,
-                    }
-                )
+                payload = {
+                    "hash": h,
+                    "type": str(getattr(item, "result_type", "")),
+                    "score": float(getattr(item, "score", 0.0) or 0.0),
+                    "content": str(getattr(item, "content", "") or "")[:220],
+                    "source": source,
+                    "metadata": metadata,
+                }
+                if not self._is_evidence_bound_to_person(payload, person_id=person_id):
+                    continue
+                seen_hash.add(h)
+                evidence.append(payload)
         evidence.sort(key=lambda x: x.get("score", 0.0), reverse=True)
         return self._filter_stale_paragraph_evidence(evidence[:top_k])
 
@@ -640,7 +723,7 @@ class PersonProfileService:
         if not aliases and person_keyword:
             aliases = [person_keyword.strip()]
             primary_name = person_keyword.strip()
-        relation_edges = self._collect_relation_evidence(aliases, limit=max(10, top_k * 2))
+        relation_edges = self._collect_relation_evidence(aliases, limit=max(10, top_k * 2), person_id=pid)
         vector_evidence = await self._collect_vector_evidence(aliases, top_k=max(4, top_k), person_id=pid)
 
         evidence_ids = [

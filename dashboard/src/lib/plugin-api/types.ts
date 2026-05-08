@@ -25,6 +25,7 @@ export interface InstalledPlugin {
   id: string
   manifest: {
     manifest_version: number
+    id?: string
     name: string
     version: string
     description: string

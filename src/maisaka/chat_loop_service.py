@@ -10,7 +10,7 @@ from rich.console import RenderableType
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.i18n import get_locale
 from src.common.logger import get_logger
-from src.common.prompt_i18n import load_prompt
+from src.common.prompt_i18n import get_prompt_cache_revision, load_prompt
 from src.common.utils.utils_config import ChatConfigUtils
 from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolRegistry
@@ -219,6 +219,7 @@ class MaisakaChatLoopService:
         self._interrupt_flag: asyncio.Event | None = None
         self._tool_registry: ToolRegistry | None = None
         self._prompts_loaded = chat_system_prompt is not None
+        self._prompt_cache_revision = get_prompt_cache_revision()
         self._prompt_load_lock = asyncio.Lock()
         self._personality_prompt = self._build_personality_prompt()
         if chat_system_prompt is None:
@@ -354,6 +355,7 @@ class MaisakaChatLoopService:
                 self._chat_system_prompt = f"{self._personality_prompt}\n\nYou are a helpful AI assistant."
 
             self._prompts_loaded = True
+            self._prompt_cache_revision = get_prompt_cache_revision()
 
     def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
@@ -519,7 +521,7 @@ class MaisakaChatLoopService:
             ChatResponse: 本轮规划器返回结果。
         """
 
-        if not self._prompts_loaded:
+        if not self._prompts_loaded or self._prompt_cache_revision != get_prompt_cache_revision():
             await self.ensure_chat_prompt_loaded()
         enable_visual_message = self._resolve_enable_visual_message(request_kind)
         selected_history, selection_reason = self.select_llm_context_messages(

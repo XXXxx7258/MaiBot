@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Clock,
   Code2,
+  Copy,
   FileCode2,
   FileText,
   RefreshCw,
@@ -10,6 +11,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useToast } from '@/hooks/use-toast'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -49,6 +51,7 @@ function formatSize(size: number): string {
 }
 
 export function ReasoningProcessPage() {
+  const { toast } = useToast()
   const [items, setItems] = useState<ReasoningPromptFile[]>([])
   const [stages, setStages] = useState<string[]>([])
   const [sessions, setSessions] = useState<string[]>([])
@@ -163,6 +166,31 @@ export function ReasoningProcessPage() {
   function resetToFirstPage(nextAction: () => void) {
     nextAction()
     setPage(1)
+  }
+
+  async function handleCopyPrompt() {
+    if (!textContent || contentLoading) {
+      toast({
+        title: '暂无可复制内容',
+        description: '请先选择一条包含 txt 的 prompt 记录',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(textContent)
+      toast({
+        title: '已复制完整 Prompt',
+        description: selected ? `${selected.stage}/${selected.session_id}/${selected.stem}` : undefined,
+      })
+    } catch (err) {
+      toast({
+        title: '复制失败',
+        description: err instanceof Error ? err.message : '请手动选择文本复制',
+        variant: 'destructive',
+      })
+    }
   }
 
   return (
@@ -328,6 +356,17 @@ export function ReasoningProcessPage() {
             </div>
             {selected && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5"
+                  onClick={handleCopyPrompt}
+                  disabled={!selected.text_path || contentLoading || !textContent}
+                  title="复制完整 Prompt"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  复制
+                </Button>
                 {selected.text_path && (
                   <span className="inline-flex items-center gap-1">
                     <FileText className="h-3.5 w-3.5" />

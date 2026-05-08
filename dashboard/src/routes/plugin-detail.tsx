@@ -104,21 +104,23 @@ export function PluginDetailPage() {
         }
 
         const pluginList = JSON.parse(result.data)
-        const foundPlugin = pluginList.find((p: any) => p.id === search.pluginId)
+        const foundPlugin = pluginList.find((p: any) => (p.manifest?.id || p.id) === search.pluginId)
 
         if (!foundPlugin) {
           throw new Error('未找到该插件')
         }
 
         const rawManifest = foundPlugin.manifest || {}
+        const pluginId = rawManifest.id || foundPlugin.id
         const repositoryUrl = rawManifest.repository_url || rawManifest.urls?.repository
         const homepageUrl = rawManifest.homepage_url || rawManifest.urls?.homepage
 
         // 转换为 PluginInfo 格式
         const pluginInfo: PluginInfo = {
-          id: foundPlugin.id,
+          id: pluginId,
           manifest: {
             ...rawManifest,
+            id: pluginId,
             homepage_url: homepageUrl,
             repository_url: repositoryUrl,
             default_locale: rawManifest.default_locale || rawManifest.i18n?.default_locale || 'zh-CN',
@@ -170,8 +172,8 @@ export function PluginDetailPage() {
           return
         }
         
-        setIsInstalled(checkPluginInstalled(search.pluginId, installedPlugins.data))
-        setInstalledVersion(getInstalledPluginVersion(search.pluginId, installedPlugins.data))
+        setIsInstalled(checkPluginInstalled(pluginId, installedPlugins.data))
+        setInstalledVersion(getInstalledPluginVersion(pluginId, installedPlugins.data))
       } catch (err) {
         setError(err instanceof Error ? err.message : '加载失败')
       } finally {
@@ -196,7 +198,7 @@ export function PluginDetailPage() {
         // 如果插件已安装，优先尝试从本地读取 README
         if (isInstalled && search.pluginId) {
           try {
-            const localResponse = await fetchWithAuth(`/api/webui/plugins/local-readme/${search.pluginId}`)
+            const localResponse = await fetchWithAuth(`/api/webui/plugins/local-readme/${plugin.id}`)
             
             if (localResponse.ok) {
               const localResult = await localResponse.json()

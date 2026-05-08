@@ -44,10 +44,10 @@ export function PluginCard({
       key={plugin.id}
       className="flex flex-col hover:shadow-lg transition-shadow h-full"
     >
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-xl">{plugin.manifest?.name || plugin.id}</CardTitle>
-          <div className="flex flex-col gap-1">
+      <CardHeader className="p-5 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <CardTitle className="text-lg leading-snug">{plugin.manifest?.name || plugin.id}</CardTitle>
+          <div className="flex flex-col items-end gap-1 shrink-0">
             {plugin.manifest?.categories && plugin.manifest.categories[0] && (
               <Badge variant="secondary" className="text-xs whitespace-nowrap">
                 {CATEGORY_NAMES[plugin.manifest.categories[0]] || plugin.manifest.categories[0]}
@@ -56,18 +56,18 @@ export function PluginCard({
             {getStatusBadge(plugin)}
           </div>
         </div>
-        <CardDescription className="line-clamp-2">{plugin.manifest?.description || '无描述'}</CardDescription>
+        <CardDescription className="line-clamp-2 text-sm leading-snug">{plugin.manifest?.description || '无描述'}</CardDescription>
       </CardHeader>
-      <CardContent className="flex-1">
-        <div className="space-y-3">
+      <CardContent className="px-5 pb-3">
+        <div className="space-y-2.5">
           {/* 统计信息 */}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <div className="flex items-center gap-1">
-              <Download className="h-4 w-4" />
+              <Download className="h-3.5 w-3.5" />
               <span>{(pluginStats[plugin.id]?.downloads ?? plugin.downloads ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-1">
-              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+              <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
               <span>{(pluginStats[plugin.id]?.rating ?? plugin.rating ?? 0).toFixed(1)}</span>
             </div>
           </div>
@@ -85,7 +85,7 @@ export function PluginCard({
             )}
           </div>
           {/* 版本和作者 */}
-          <div className="text-xs text-muted-foreground pt-2 border-t space-y-1">
+          <div className="text-xs text-muted-foreground pt-2.5 border-t space-y-1">
             <div>v{plugin.manifest?.version || 'unknown'} · {plugin.manifest?.author?.name || 'Unknown'}</div>
             {/* 支持版本 */}
             {plugin.manifest?.host_application && (
@@ -103,7 +103,7 @@ export function PluginCard({
           </div>
         </div>
       </CardContent>
-      <CardFooter className="pt-4">
+      <CardFooter className="px-5 pt-2 pb-5">
         <div className="flex items-center justify-end gap-2 w-full">
           <Button 
             variant="outline"
@@ -169,7 +169,7 @@ export function PluginCard({
         (loadProgress.stage === 'loading' || loadProgress.stage === 'success' || loadProgress.stage === 'error') && 
         loadProgress.operation !== 'fetch' && 
         loadProgress.plugin_id === plugin.id && (
-        <div className="px-6 pb-4 -mt-2">
+        <div className="px-5 pb-5 -mt-1">
           <div className={`space-y-2 p-3 rounded-lg border ${
             loadProgress.stage === 'success' 
               ? 'bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-900' 

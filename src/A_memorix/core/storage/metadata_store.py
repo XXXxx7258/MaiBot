@@ -2608,7 +2608,9 @@ class MetadataStore:
         Returns:
             段落列表
         """
-        return self.query("SELECT * FROM paragraphs WHERE source = ?", (source,))
+        cursor = self._conn.cursor()
+        cursor.execute("SELECT * FROM paragraphs WHERE source = ?", (source,))
+        return [self._row_to_dict(row, "paragraph") for row in cursor.fetchall()]
 
     def get_all_sources(self) -> List[Dict[str, Any]]:
         """

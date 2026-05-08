@@ -291,7 +291,7 @@ async def handle_tool(
         )
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        "回复已生成并发送。",
+        f'已生成并发送回复"{combined_reply_text}"\n发送对象：{target_user_name}',
         structured_content={
             "msg_id": target_message_id,
             "set_quote": set_quote,

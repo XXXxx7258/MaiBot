@@ -18,6 +18,8 @@ logger = get_logger("webui.app")
 
 _DASHBOARD_PACKAGE_NAME = "maibot-dashboard"
 _LOCAL_DASHBOARD_ENV = "MAIBOT_WEBUI_USE_LOCAL_DASHBOARD"
+_STATISTICS_REPORT_PATH_ENV = "MAIBOT_STATISTICS_REPORT_PATH"
+_DEFAULT_STATISTICS_REPORT_PATH = "maibot_statistics.html"
 _MANUAL_INSTALL_COMMAND = f"pip install {_DASHBOARD_PACKAGE_NAME}"
 
 
@@ -36,6 +38,15 @@ def _resolve_safe_static_file_path(static_path: Path, full_path: str) -> Path | 
 
 def _get_project_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def _resolve_statistics_report_path() -> Path:
+    configured_path = getenv(_STATISTICS_REPORT_PATH_ENV, "").strip()
+    report_path = Path(configured_path or _DEFAULT_STATISTICS_REPORT_PATH)
+    if report_path.is_absolute():
+        return report_path.resolve()
+
+    return (_get_project_root() / report_path).resolve()
 
 
 def _is_local_dashboard_enabled() -> bool:
@@ -187,7 +198,7 @@ def _setup_static_files(app: FastAPI):
 
     @app.get("/maibot_statistics.html", include_in_schema=False)
     async def serve_statistics_report():
-        report_path = (_get_project_root() / "maibot_statistics.html").resolve()
+        report_path = _resolve_statistics_report_path()
         if not report_path.exists() or not report_path.is_file():
             raise HTTPException(status_code=404, detail=t("core.not_found"))
 

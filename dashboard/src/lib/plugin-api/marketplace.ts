@@ -21,6 +21,7 @@ interface PluginApiResponse {
   id: string
   manifest: {
     manifest_version: number
+    id?: string
     name: string
     version: string
     description: string
@@ -56,6 +57,7 @@ function normalizePluginManifest(manifest: PluginApiResponse['manifest']): Plugi
 
   return {
     manifest_version: manifest.manifest_version || 1,
+    id: manifest.id,
     name: manifest.name,
     version: manifest.version,
     description: manifest.description || '',
@@ -104,8 +106,13 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
   
   const pluginList = data
     .filter(item => {
-      if (!item?.id || !item?.manifest) {
+      if (!item?.manifest) {
         console.warn('跳过无效插件数据:', item)
+        return false
+      }
+      const pluginId = item.manifest.id || item.id
+      if (!pluginId) {
+        console.warn('跳过缺少 ID 的插件:', item)
         return false
       }
       if (!item.manifest.name || !item.manifest.version) {
@@ -115,7 +122,7 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
       return true
     })
     .map((item) => ({
-      id: item.id,
+      id: item.manifest.id || item.id,
       manifest: normalizePluginManifest(item.manifest),
       downloads: 0,
       rating: 0,
