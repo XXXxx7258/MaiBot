@@ -362,14 +362,9 @@ class MaisakaChatLoopService:
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
-            "time_block": self._build_time_block(),
         }
 
-    @staticmethod
-    def _build_time_block() -> str:
-        """构建静态时间提示块。"""
 
-        return "当前时间会在每次请求末尾以用户消息形式提供。"
 
     @staticmethod
     def _build_current_time_user_message() -> str:
