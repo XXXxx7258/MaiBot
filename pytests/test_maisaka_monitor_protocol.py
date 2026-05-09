@@ -199,7 +199,7 @@ async def test_reply_tool_puts_monitor_detail_into_metadata(monkeypatch: pytest.
         ),
     )
     runtime = SimpleNamespace(
-        _source_messages_by_id={"msg-1": target_message},
+        find_source_message_by_id=lambda message_id: target_message if message_id == "msg-1" else None,
         log_prefix="[test]",
         chat_stream=SimpleNamespace(platform=reply_tool_module.CLI_PLATFORM_NAME),
         session_id="session-1",

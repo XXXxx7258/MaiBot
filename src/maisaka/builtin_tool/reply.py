@@ -113,7 +113,7 @@ async def handle_tool(
             "reply 工具需要提供有效的 `msg_id` 参数。",
         )
 
-    target_message = tool_ctx.runtime._source_messages_by_id.get(target_message_id)
+    target_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
     if target_message is None:
         return tool_ctx.build_failure_result(
             invocation.tool_name,

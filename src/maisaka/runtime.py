@@ -90,7 +90,6 @@ class MaisakaHeartFlowChatting:
         self._mcp_manager: Optional[MCPManager] = None
         self._mcp_host_bridge: Optional[MCPHostLLMBridge] = None
         self._current_cycle_detail: Optional[CycleDetail] = None
-        self._source_messages_by_id: dict[str, SessionMessage] = {}
         self._running = False
         self._cycle_counter = 0
         self._internal_loop_task: Optional[asyncio.Task] = None
@@ -315,7 +314,6 @@ class MaisakaHeartFlowChatting:
         self._update_message_trigger_state(message)
         self.message_cache.append(message)
         self._message_received_at_by_id[message.message_id] = received_at
-        self._source_messages_by_id[message.message_id] = message
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
         if self._agent_state == self._STATE_RUNNING:
@@ -486,6 +484,23 @@ class MaisakaHeartFlowChatting:
             f"{self.log_prefix} 已记录消息回复时长: {reply_duration:.2f} 秒 "
             f"最近10分钟样本数={len(self._recent_reply_latencies)}"
         )
+
+    def find_source_message_by_id(self, message_id: str) -> Optional[SessionMessage]:
+        """从 Maisaka 历史中查找指定消息编号对应的原始消息。"""
+        normalized_message_id = str(message_id or "").strip()
+        if not normalized_message_id:
+            return None
+
+        for history_message in reversed(self._chat_history):
+            if str(getattr(history_message, "message_id", "") or "").strip() != normalized_message_id:
+                continue
+
+            original_message = getattr(history_message, "original_message", None)
+            if original_message is None:
+                continue
+            return original_message
+
+        return None
 
     def _should_trigger_message_turn_by_idle_compensation(
         self,

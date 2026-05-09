@@ -25,7 +25,7 @@ services:
       - ./data/MaiMBot/emoji:/data/emoji # 持久化表情包
       - ./data/MaiMBot/plugins:/MaiMBot/plugins # 插件目录
       - ./data/MaiMBot/logs:/MaiMBot/logs # 日志目录
-      - ./depends-data:/MaiMBot/depends-data:ro # 运行时资源文件
+      - ./depends-data:/MaiMBot/depends-data # 运行时资源文件
       # - site-packages:/usr/local/lib/python3.13/site-packages # 持久化Python包，需要时启用
     restart: always
     networks:
