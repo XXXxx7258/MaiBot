@@ -1169,6 +1169,8 @@ class TestVersionComparator:
 
         assert VersionComparator.normalize_version("0.8.0-snapshot.1") == "0.8.0"
         assert VersionComparator.normalize_version("1.2") == "1.2.0"
+        assert VersionComparator.normalize_version("1.0.0rc16") == "1.0.0"
+        assert VersionComparator.normalize_version("1.0.0-pre.16") == "1.0.0"
         assert VersionComparator.normalize_version("") == "0.0.0"
 
     def test_compare(self):
