@@ -3,7 +3,8 @@
 import json
 import time
 import traceback
-from datetime import datetime
+from datetime import date, datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from sqlalchemy import delete, func
@@ -19,14 +20,28 @@ if TYPE_CHECKING:
 logger = get_logger("database_service")
 
 
+def _to_msgpack_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {_to_msgpack_value(key): _to_msgpack_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_to_msgpack_value(item) for item in value]
+    return value
+
+
 def _to_dict(record: Any) -> dict[str, Any]:
     if record is None:
         return {}
     if isinstance(record, dict):
-        return record
+        return _to_msgpack_value(record)
     if hasattr(record, "model_dump"):
-        return record.model_dump()
-    return dict(record.__dict__) if hasattr(record, "__dict__") else {}
+        return _to_msgpack_value(record.model_dump())
+    return _to_msgpack_value(dict(record.__dict__)) if hasattr(record, "__dict__") else {}
 
 
 def _get_model_field(model_class: type[SQLModel], field_name: str) -> Any:
