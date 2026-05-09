@@ -149,7 +149,7 @@ class BuiltinToolRuntimeContext:
     def _build_at_component_for_message_id(self, message_id: str) -> Optional[AtComponent]:
         """根据消息编号构造 at 组件。"""
 
-        target_message = self.runtime._source_messages_by_id.get(message_id)
+        target_message = self.runtime.find_source_message_by_id(message_id)
         if target_message is None:
             return None
 

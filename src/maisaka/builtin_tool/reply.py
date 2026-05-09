@@ -113,7 +113,7 @@ async def handle_tool(
             "reply 工具需要提供有效的 `msg_id` 参数。",
         )
 
-    target_message = tool_ctx.runtime._source_messages_by_id.get(target_message_id)
+    target_message = tool_ctx.runtime.find_source_message_by_id(target_message_id)
     if target_message is None:
         return tool_ctx.build_failure_result(
             invocation.tool_name,
@@ -263,6 +263,7 @@ async def handle_tool(
 
     target_user_info = target_message.message_info.user_info
     target_user_name = target_user_info.user_cardname or target_user_info.user_nickname or target_user_info.user_id
+    bot_name = config_module.global_config.bot.nickname.strip() or "MaiSaka"
 
     if tool_ctx.runtime.chat_stream.platform == CLI_PLATFORM_NAME:
         tool_ctx.append_guided_reply_to_chat_history(combined_reply_text)
@@ -291,7 +292,7 @@ async def handle_tool(
         )
     return tool_ctx.build_success_result(
         invocation.tool_name,
-        f'已生成并发送回复"{combined_reply_text}"\n发送对象：{target_user_name}',
+        f'"{bot_name}"已生成并向"{target_user_name}"发送了回复"{combined_reply_text}"',
         structured_content={
             "msg_id": target_message_id,
             "set_quote": set_quote,

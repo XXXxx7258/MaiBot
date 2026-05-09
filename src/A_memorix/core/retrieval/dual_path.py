@@ -16,6 +16,7 @@ from src.common.logger import get_logger
 from ..storage import VectorStore, GraphStore, MetadataStore
 from ..embedding import EmbeddingAPIAdapter
 from ..utils.matcher import AhoCorasick
+from ..utils.metadata import coerce_metadata_dict
 from ..utils.time_parser import format_timestamp
 from .graph_relation_recall import GraphRelationRecallConfig, GraphRelationRecallService
 from .pagerank import PersonalizedPageRank, PageRankConfig
@@ -482,7 +483,7 @@ class DualPathRetriever:
             score=float(item.score),
             result_type=item.result_type,
             source=item.source,
-            metadata=dict(item.metadata or {}),
+            metadata=coerce_metadata_dict(item.metadata),
         )
 
     def _extract_graph_seed_entities(self, query: str, limit: int = 2) -> List[str]:
@@ -762,7 +763,7 @@ class DualPathRetriever:
                     existing = self._clone_retrieval_result(item)
                     merged[item.hash_value] = existing
                 else:
-                    for key, value in dict(item.metadata or {}).items():
+                    for key, value in coerce_metadata_dict(item.metadata).items():
                         if key not in existing.metadata or existing.metadata.get(key) in (None, "", []):
                             existing.metadata[key] = value
                 source_sets.setdefault(item.hash_value, set()).add(str(item.source or "").strip() or "relation_search")

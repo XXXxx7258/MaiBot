@@ -187,9 +187,10 @@ async def install_plugin(request: InstallPluginRequest, maibot_session: Optional
             for field in ["manifest_version", "name", "version", "author"]:
                 if field not in manifest:
                     raise ValueError(f"缺少必需字段: {field}")
-            manifest["id"] = plugin_id
-            with open(manifest_path, "w", encoding="utf-8") as file_obj:
-                json.dump(manifest, file_obj, ensure_ascii=False, indent=2)
+            if not str(manifest.get("id", "")).strip():
+                manifest["id"] = plugin_id
+                with open(manifest_path, "w", encoding="utf-8") as file_obj:
+                    json.dump(manifest, file_obj, ensure_ascii=False, indent=2)
         except Exception as e:
             remove_tree(target_path)
             await update_progress(

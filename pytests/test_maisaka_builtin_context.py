@@ -6,6 +6,7 @@ from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
 from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, ReplyComponent, TextComponent
 from src.config.config import global_config
 from src.maisaka.builtin_tool.context import BuiltinToolRuntimeContext
+from src.maisaka.runtime import MaisakaHeartFlowChatting
 
 
 def _build_sent_message() -> SessionMessage:
@@ -63,7 +64,9 @@ def test_post_process_reply_message_sequences_converts_at_marker_before_bracket_
             )
         )
     )
-    runtime = SimpleNamespace(_source_messages_by_id={"12160142": target_message})
+    runtime = SimpleNamespace(
+        find_source_message_by_id=lambda message_id: target_message if message_id == "12160142" else None
+    )
     engine = SimpleNamespace(_get_runtime_manager=lambda: None)
     tool_ctx = BuiltinToolRuntimeContext(engine=engine, runtime=runtime)
 
@@ -85,7 +88,7 @@ def test_post_process_reply_message_sequences_ignores_at_marker_when_disabled(mo
         "src.maisaka.builtin_tool.context.process_llm_response",
         lambda text: [text.strip()] if text.strip() else [],
     )
-    runtime = SimpleNamespace(_source_messages_by_id={})
+    runtime = SimpleNamespace(find_source_message_by_id=lambda message_id: None)
     engine = SimpleNamespace(_get_runtime_manager=lambda: None)
     tool_ctx = BuiltinToolRuntimeContext(engine=engine, runtime=runtime)
 
@@ -96,3 +99,15 @@ def test_post_process_reply_message_sequences_ignores_at_marker_when_disabled(mo
     assert len(components) == 1
     assert isinstance(components[0], TextComponent)
     assert components[0].text == "at[12160142] 就这个群"
+
+
+def test_runtime_finds_source_message_from_history() -> None:
+    target_message = _build_sent_message()
+    runtime = object.__new__(MaisakaHeartFlowChatting)
+    runtime._chat_history = [
+        SimpleNamespace(message_id="other-message-id", original_message=SimpleNamespace()),
+        SimpleNamespace(message_id="real-message-id", original_message=target_message),
+    ]
+
+    assert runtime.find_source_message_by_id("real-message-id") is target_message
+    assert runtime.find_source_message_by_id("missing-message-id") is None

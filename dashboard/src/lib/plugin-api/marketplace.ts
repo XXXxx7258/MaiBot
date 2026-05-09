@@ -18,7 +18,7 @@ const PLUGIN_DETAILS_FILE = 'plugin_details.json'
  * 插件列表 API 响应类型（只包含我们需要的字段）
  */
 interface PluginApiResponse {
-  id: string
+  id?: string
   manifest: {
     manifest_version: number
     id?: string
@@ -110,7 +110,7 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
         console.warn('跳过无效插件数据:', item)
         return false
       }
-      const pluginId = item.manifest.id || item.id
+      const pluginId = item.manifest.id
       if (!pluginId) {
         console.warn('跳过缺少 ID 的插件:', item)
         return false
@@ -122,7 +122,7 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
       return true
     })
     .map((item) => ({
-      id: item.manifest.id || item.id,
+      id: item.manifest.id!,
       manifest: normalizePluginManifest(item.manifest),
       downloads: 0,
       rating: 0,

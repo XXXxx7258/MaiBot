@@ -25,6 +25,7 @@ from ..utils.episode_retrieval_service import EpisodeRetrievalService
 from ..utils.episode_segmentation_service import EpisodeSegmentationService
 from ..utils.episode_service import EpisodeService
 from ..utils.hash import compute_hash, normalize_text
+from ..utils.metadata import coerce_metadata_dict
 from ..utils.person_profile_service import PersonProfileService
 from ..utils.relation_write_service import RelationWriteService
 from ..utils.retrieval_tuning_manager import RetrievalTuningManager
@@ -871,7 +872,7 @@ class SDKMemoryKernel:
                 "detail": "chat_filtered",
             }
 
-        summary_meta = dict(metadata or {})
+        summary_meta = coerce_metadata_dict(metadata)
         summary_meta.setdefault("kind", "chat_summary")
         if not str(text or "").strip() or bool(summary_meta.get("generate_from_chat", False)):
             result = await self.summarize_chat_stream(
@@ -961,7 +962,7 @@ class SDKMemoryKernel:
         participant_tokens = self._tokens(participants)
         entity_tokens = self._merge_tokens(entities, person_tokens, participant_tokens)
         source = self._build_source(source_type, chat_id, person_tokens)
-        paragraph_meta = dict(metadata or {})
+        paragraph_meta = coerce_metadata_dict(metadata)
         paragraph_meta.update(
             {
                 "external_id": external_token,

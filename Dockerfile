@@ -19,7 +19,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 # Copy project source
 COPY . .
 
-RUN git clone --depth 1 --branch plugin https://github.com/Mai-with-u/MaiBot-Napcat-Adapter.git plugin-templates/MaiBot-Napcat-Adapter
+RUN git clone --depth 1 --branch main https://github.com/Mai-with-u/MaiBot-Napcat-Adapter.git plugin-templates/MaiBot-Napcat-Adapter
 RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 8000

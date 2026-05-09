@@ -29,6 +29,7 @@ from src.learners.jargon_miner import JargonMiner
 from src.llm_models.payload_content.resp_format import RespFormat
 from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 from src.mcp_module import MCPManager
+from src.mcp_module.config import build_mcp_server_runtime_configs
 from src.mcp_module.host_llm_bridge import MCPHostLLMBridge
 from src.mcp_module.provider import MCPToolProvider
 from src.plugin_runtime.tool_provider import PluginToolProvider
@@ -56,6 +57,7 @@ from .tool_provider import MaisakaBuiltinToolProvider
 logger = get_logger("maisaka_runtime")
 
 MAX_INTERNAL_ROUNDS = 10
+MAX_RETAINED_MESSAGE_CACHE_SIZE = 200
 
 
 class MaisakaHeartFlowChatting:
@@ -90,7 +92,6 @@ class MaisakaHeartFlowChatting:
         self._mcp_manager: Optional[MCPManager] = None
         self._mcp_host_bridge: Optional[MCPHostLLMBridge] = None
         self._current_cycle_detail: Optional[CycleDetail] = None
-        self._source_messages_by_id: dict[str, SessionMessage] = {}
         self._running = False
         self._cycle_counter = 0
         self._internal_loop_task: Optional[asyncio.Task] = None
@@ -98,19 +99,13 @@ class MaisakaHeartFlowChatting:
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
         self._message_debounce_seconds = 1.0
         self._message_debounce_required = False
-        self._message_received_at_by_id: dict[str, float] = {}
+        self._oldest_pending_message_received_at: Optional[float] = None
         self._last_message_received_at = 0.0
         self._talk_frequency_adjust = 1.0
         self._reply_latency_measurement_started_at: Optional[float] = None
         self._recent_reply_latencies: deque[tuple[float, float]] = deque()
         self._wait_timeout_task: Optional[asyncio.Task[None]] = None
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
-        configured_context_size = (
-            global_config.chat.max_context_size
-            if self.chat_stream.is_group_session
-            else global_config.chat.max_private_context_size
-        )
-        self._max_context_size = max(1, int(configured_context_size))
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
         self._pending_wait_tool_call_id: Optional[str] = None
         self._force_next_timing_continue = False
@@ -151,6 +146,17 @@ class MaisakaHeartFlowChatting:
         )
         self._register_tool_providers()
         self._emit_monitor_session_start()
+
+    @property
+    def _max_context_size(self) -> int:
+        """返回当前会话实时生效的上下文窗口大小。"""
+
+        configured_context_size = (
+            global_config.chat.max_context_size
+            if self.chat_stream.is_group_session
+            else global_config.chat.max_private_context_size
+        )
+        return max(1, int(configured_context_size))
 
     def _emit_monitor_session_start(self) -> None:
         """向 WebUI 监控面板同步当前会话的展示标识。"""
@@ -312,10 +318,11 @@ class MaisakaHeartFlowChatting:
             self._ensure_background_tasks_running()
         received_at = time.time()
         self._last_message_received_at = received_at
+        if self._oldest_pending_message_received_at is None:
+            self._oldest_pending_message_received_at = received_at
         self._update_message_trigger_state(message)
         self.message_cache.append(message)
-        self._message_received_at_by_id[message.message_id] = received_at
-        self._source_messages_by_id[message.message_id] = message
+        self._prune_processed_message_cache()
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
         if self._agent_state == self._STATE_RUNNING:
@@ -487,6 +494,45 @@ class MaisakaHeartFlowChatting:
             f"最近10分钟样本数={len(self._recent_reply_latencies)}"
         )
 
+    def find_source_message_by_id(self, message_id: str) -> Optional[SessionMessage]:
+        """从 Maisaka 历史中查找指定消息编号对应的原始消息。"""
+        normalized_message_id = str(message_id or "").strip()
+        if not normalized_message_id:
+            return None
+
+        for history_message in reversed(self._chat_history):
+            if str(getattr(history_message, "message_id", "") or "").strip() != normalized_message_id:
+                continue
+
+            original_message = getattr(history_message, "original_message", None)
+            if original_message is None:
+                continue
+            return original_message
+
+        return None
+
+    def _prune_processed_message_cache(self) -> None:
+        """裁剪 runtime 与表达学习器都已经消费过的旧消息。"""
+        excess_count = len(self.message_cache) - MAX_RETAINED_MESSAGE_CACHE_SIZE
+        if excess_count <= 0:
+            return
+
+        removable_count = min(
+            excess_count,
+            self._last_processed_index,
+            self._expression_learner.last_processed_index,
+        )
+        if removable_count <= 0:
+            return
+
+        del self.message_cache[:removable_count]
+        self._last_processed_index = max(0, self._last_processed_index - removable_count)
+        self._expression_learner.discard_processed_prefix(removable_count)
+        logger.debug(
+            f"{self.log_prefix} 已清理 Maisaka 旧消息缓存: "
+            f"清理数量={removable_count} 保留数量={len(self.message_cache)}"
+        )
+
     def _should_trigger_message_turn_by_idle_compensation(
         self,
         *,
@@ -637,6 +683,7 @@ class MaisakaHeartFlowChatting:
             return
 
         if self._internal_loop_task is None or self._internal_loop_task.done():
+            is_restart = self._internal_loop_task is not None
             if self._internal_loop_task is not None and not self._internal_loop_task.cancelled():
                 try:
                     exc = self._internal_loop_task.exception()
@@ -645,7 +692,10 @@ class MaisakaHeartFlowChatting:
                 if exc is not None:
                     logger.error(f"{self.log_prefix} 内部循环任务异常退出: {exc}")
             self._internal_loop_task = asyncio.create_task(self._reasoning_engine.run_loop())
-            logger.warning(f"{self.log_prefix} 已重新拉起 Maisaka 内部循环任务")
+            if is_restart:
+                logger.warning(f"{self.log_prefix} 已重新拉起 Maisaka 内部循环任务")
+            else:
+                logger.debug(f"{self.log_prefix} 已启动 Maisaka 内部循环任务")
 
     def _register_tool_providers(self) -> None:
         """注册 Maisaka 运行时默认启用的工具 Provider。"""
@@ -1001,12 +1051,10 @@ class MaisakaHeartFlowChatting:
             # f"收集 {len(unique_messages)} 条新消息"
         # )
         if unique_messages and self._reply_latency_measurement_started_at is None:
-            self._reply_latency_measurement_started_at = min(
-                self._message_received_at_by_id.get(message.message_id, self._last_message_received_at)
-                for message in unique_messages
+            self._reply_latency_measurement_started_at = (
+                self._oldest_pending_message_received_at or self._last_message_received_at
             )
-        for message in unique_messages:
-            self._message_received_at_by_id.pop(message.message_id, None)
+        self._oldest_pending_message_received_at = None
         return unique_messages
 
     async def _wait_for_message_quiet_period(self) -> None:
@@ -1075,10 +1123,19 @@ class MaisakaHeartFlowChatting:
 
     async def _trigger_batch_learning(self, messages: list[SessionMessage]) -> None:
         """按同一批消息触发表达方式和黑话学习。"""
+        processed_end_index = len(self.message_cache)
+        if not self._enable_expression_learning:
+            self._expression_learner.mark_all_processed(self.message_cache)
+            self._prune_processed_message_cache()
+            return
+
         try:
             await self._trigger_expression_learning(messages)
         except Exception as exc:
             logger.error(f"{self.log_prefix} 表达学习任务异常退出: {exc}")
+            self._expression_learner.mark_processed_until(processed_end_index)
+        finally:
+            self._prune_processed_message_cache()
 
     def _should_trigger_learning(
         self,
@@ -1145,6 +1202,10 @@ class MaisakaHeartFlowChatting:
 
     async def _init_mcp(self) -> None:
         """初始化 MCP 工具并注册到统一工具层。"""
+        if not build_mcp_server_runtime_configs(global_config.mcp):
+            logger.debug(f"{self.log_prefix} 未配置可用的 MCP 服务，跳过 Maisaka MCP 初始化")
+            return
+
         self._mcp_host_bridge = MCPHostLLMBridge(
             sampling_task_name=global_config.mcp.client.sampling.task_name,
         )
@@ -1153,7 +1214,7 @@ class MaisakaHeartFlowChatting:
             host_callbacks=self._mcp_host_bridge.build_callbacks(),
         )
         if self._mcp_manager is None:
-            logger.info(f"{self.log_prefix} Maisaka MCP 管理器不可用")
+            logger.warning(f"{self.log_prefix} Maisaka MCP 管理器初始化失败，MCP 工具不会注册")
             return
 
         mcp_tool_specs = self._mcp_manager.get_tool_specs()

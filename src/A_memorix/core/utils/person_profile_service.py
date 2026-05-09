@@ -27,6 +27,7 @@ from ..retrieval import (
     GraphRelationRecallConfig,
 )
 from ..storage import MetadataStore, GraphStore, VectorStore
+from .metadata import coerce_metadata_dict
 
 logger = get_logger("A_Memorix.PersonProfileService")
 
@@ -334,7 +335,7 @@ class PersonProfileService:
         if not pid:
             return False
 
-        metadata = self._metadata_dict(relation.get("metadata"))
+        metadata = coerce_metadata_dict(relation.get("metadata"))
         if str(metadata.get("person_id", "") or "").strip() == pid:
             return True
         if pid in self._list_tokens(metadata.get("person_ids")):
@@ -350,7 +351,7 @@ class PersonProfileService:
                 payload = {
                     "hash": source_paragraph,
                     "source": str(paragraph.get("source", "") or ""),
-                    "metadata": self._metadata_dict(paragraph.get("metadata")),
+                    "metadata": coerce_metadata_dict(paragraph.get("metadata")),
                 }
                 return self._is_evidence_bound_to_person(payload, person_id=pid)
 
@@ -385,14 +386,10 @@ class PersonProfileService:
                     "score": 1.1,
                     "content": content[:220],
                     "source": str(row.get("source", "") or source),
-                    "metadata": dict(row.get("metadata", {}) or {}),
+                    "metadata": coerce_metadata_dict(row.get("metadata")),
                 }
             )
         return self._filter_stale_paragraph_evidence(evidence)
-
-    @staticmethod
-    def _metadata_dict(value: Any) -> Dict[str, Any]:
-        return dict(value) if isinstance(value, dict) else {}
 
     @staticmethod
     def _list_tokens(value: Any) -> List[str]:
@@ -414,7 +411,7 @@ class PersonProfileService:
         if not pid:
             return False
 
-        metadata = self._metadata_dict(item.get("metadata"))
+        metadata = coerce_metadata_dict(item.get("metadata"))
         source = str(item.get("source", "") or metadata.get("source", "") or "").strip()
         if source == f"person_fact:{pid}":
             return True
@@ -440,15 +437,15 @@ class PersonProfileService:
         paragraph_hash: str,
         metadata: Dict[str, Any],
     ) -> Tuple[Dict[str, Any], str]:
-        merged = self._metadata_dict(metadata)
+        merged = coerce_metadata_dict(metadata)
         source = str(merged.get("source", "") or "").strip()
         try:
             paragraph = self.metadata_store.get_paragraph(paragraph_hash)
         except Exception:
             paragraph = None
         if isinstance(paragraph, dict):
-            paragraph_metadata = paragraph.get("metadata", {}) or {}
-            if isinstance(paragraph_metadata, dict):
+            paragraph_metadata = coerce_metadata_dict(paragraph.get("metadata"))
+            if paragraph_metadata:
                 merged = {**paragraph_metadata, **merged}
             source = source or str(paragraph.get("source", "") or "").strip()
         source_type = str(merged.get("source_type", "") or "").strip() or self._source_type_from_source(source)
@@ -538,7 +535,7 @@ class PersonProfileService:
                             "score": 0.0,
                             "content": str(para.get("content", ""))[:180],
                             "source": str(para.get("source", "") or ""),
-                            "metadata": self._metadata_dict(para.get("metadata")),
+                            "metadata": coerce_metadata_dict(para.get("metadata")),
                         }
                     )
                     if not self._is_evidence_bound_to_person(fallback[-1], person_id=person_id):
@@ -562,18 +559,18 @@ class PersonProfileService:
                 logger.warning(f"向量证据召回失败: alias={alias}, err={e}")
                 continue
             for item in results:
-                h = str(getattr(item, "hash_value", "") or "")
+                h = str(item.hash_value or "")
                 if not h or h in seen_hash:
                     continue
                 metadata, source = self._enrich_paragraph_evidence_metadata(
                     h,
-                    self._metadata_dict(getattr(item, "metadata", {})),
+                    coerce_metadata_dict(item.metadata),
                 )
                 payload = {
                     "hash": h,
-                    "type": str(getattr(item, "result_type", "")),
-                    "score": float(getattr(item, "score", 0.0) or 0.0),
-                    "content": str(getattr(item, "content", "") or "")[:220],
+                    "type": str(item.result_type),
+                    "score": float(item.score or 0.0),
+                    "content": str(item.content or "")[:220],
                     "source": source,
                     "metadata": metadata,
                 }
