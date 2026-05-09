@@ -20,6 +20,7 @@ from src.common.logger import get_logger
 
 from ...paths import artifacts_root
 from ..runtime.search_runtime_initializer import build_search_runtime
+from .model_routing import get_text_generation_model_tasks, pick_text_generation_task
 from .search_execution_service import SearchExecutionRequest, SearchExecutionService
 
 try:
@@ -1282,11 +1283,11 @@ class RetrievalTuningManager:
         ]
         return templates[seq % len(templates)]
 
-    async def _select_llm_model(self) -> Optional[Any]:
+    async def _select_llm_model(self) -> Optional[Tuple[str, Any]]:
         if llm_api is None:
             return None
         try:
-            models = llm_api.get_available_models() or {}
+            models = get_text_generation_model_tasks(llm_api) or {}
         except Exception:
             return None
         if not models:
@@ -1294,19 +1295,24 @@ class RetrievalTuningManager:
 
         cfg_model = str(self._cfg("advanced.extraction_model", "auto") or "auto").strip()
         if cfg_model.lower() != "auto" and cfg_model in models:
-            return models[cfg_model]
-        for task_name in ["utils", "planner", "tool_use", "replyer", "embedding"]:
-            if task_name in models:
-                return models[task_name]
-        return models[next(iter(models))]
+            return cfg_model, models[cfg_model]
+        if cfg_model.lower() != "auto":
+            logger.warning(f"advanced.extraction_model={cfg_model!r} 不可用于文本生成，已回退自动选择")
+        task_name, task_config = pick_text_generation_task(
+            models,
+            preferred=("memory", "utils", "planner", "tool_use", "replyer"),
+        )
+        if task_name and task_config:
+            return task_name, task_config
+        return None
 
     async def _llm_call_text(self, prompt: str, *, request_type: str) -> str:
         if llm_api is None:
             raise RuntimeError("llm_api unavailable")
-        model_cfg = await self._select_llm_model()
-        if model_cfg is None:
+        resolved_model = await self._select_llm_model()
+        if resolved_model is None:
             raise RuntimeError("no_llm_model")
-        task_name = llm_api.resolve_task_name_from_model_config(model_cfg)
+        task_name, model_cfg = resolved_model
 
         retry = self._llm_retry_cfg()
         max_attempts = int(retry["max_attempts"])

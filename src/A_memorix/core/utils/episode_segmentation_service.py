@@ -13,9 +13,17 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.common.logger import get_logger
-from src.config.model_configs import TaskConfig
 from src.config.config import model_config as host_model_config
+from src.config.model_configs import TaskConfig
 from src.services import llm_service as llm_api
+
+from .model_routing import (
+    build_single_model_task,
+    find_text_generation_task_for_model,
+    get_text_generation_model_tasks,
+    pick_text_generation_task,
+    resolve_text_generation_task_name_from_model_config,
+)
 
 logger = get_logger("A_Memorix.EpisodeSegmentationService")
 
@@ -41,31 +49,15 @@ class EpisodeSegmentationService:
     def _is_task_config(obj: Any) -> bool:
         return hasattr(obj, "model_list") and bool(getattr(obj, "model_list", []))
 
-    def _build_single_model_task(self, model_name: str, template: TaskConfig) -> TaskConfig:
-        return TaskConfig(
-            model_list=[model_name],
-            max_tokens=template.max_tokens,
-            temperature=template.temperature,
-            slow_threshold=template.slow_threshold,
-            selection_strategy=template.selection_strategy,
-        )
-
     def _pick_template_task(self, available_tasks: Dict[str, Any]) -> Optional[TaskConfig]:
-        preferred = ("utils", "replyer", "planner", "tool_use")
-        for task_name in preferred:
-            cfg = available_tasks.get(task_name)
-            if self._is_task_config(cfg):
-                return cfg
-        for task_name, cfg in available_tasks.items():
-            if task_name != "embedding" and self._is_task_config(cfg):
-                return cfg
-        for cfg in available_tasks.values():
-            if self._is_task_config(cfg):
-                return cfg
-        return None
+        _, task_config = pick_text_generation_task(
+            available_tasks,
+            preferred=("memory", "utils", "replyer", "planner", "tool_use"),
+        )
+        return task_config
 
     def _resolve_model_config(self) -> Tuple[Optional[Any], str]:
-        available_tasks = llm_api.get_available_models() or {}
+        available_tasks = get_text_generation_model_tasks(llm_api) or {}
         if not available_tasks:
             return None, "unavailable"
 
@@ -78,16 +70,18 @@ class EpisodeSegmentationService:
                 return direct_task, selector
 
             if selector in model_dict:
-                template = self._pick_template_task(available_tasks)
-                if template is not None:
-                    return self._build_single_model_task(selector, template), selector
+                task_name, task_config = find_text_generation_task_for_model(available_tasks, selector)
+                if task_name and task_config:
+                    return build_single_model_task(selector, task_config), selector
 
             logger.warning(f"episode.segmentation_model='{selector}' 不可用，回退 auto")
 
-        for task_name in ("utils", "replyer", "planner", "tool_use"):
-            cfg = available_tasks.get(task_name)
-            if self._is_task_config(cfg):
-                return cfg, task_name
+        task_name, task_config = pick_text_generation_task(
+            available_tasks,
+            preferred=("memory", "utils", "replyer", "planner", "tool_use"),
+        )
+        if task_name and task_config:
+            return task_config, task_name
 
         fallback = self._pick_template_task(available_tasks)
         if fallback is not None:
@@ -277,7 +271,11 @@ class EpisodeSegmentationService:
         model_config, model_label = self._resolve_model_config()
         if model_config is None:
             raise RuntimeError("episode segmentation model unavailable")
-        task_name = llm_api.resolve_task_name_from_model_config(model_config, preferred_task_name=model_label)
+        task_name = resolve_text_generation_task_name_from_model_config(
+            llm_api,
+            model_config,
+            preferred_task_name=model_label,
+        )
 
         prompt = self._build_prompt(
             source=source,
@@ -308,4 +306,3 @@ class EpisodeSegmentationService:
             "segmentation_model": model_label,
             "segmentation_version": self.SEGMENTATION_VERSION,
         }
-
