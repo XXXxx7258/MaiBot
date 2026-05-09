@@ -105,12 +105,6 @@ class MaisakaHeartFlowChatting:
         self._recent_reply_latencies: deque[tuple[float, float]] = deque()
         self._wait_timeout_task: Optional[asyncio.Task[None]] = None
         self._max_internal_rounds = MAX_INTERNAL_ROUNDS
-        configured_context_size = (
-            global_config.chat.max_context_size
-            if self.chat_stream.is_group_session
-            else global_config.chat.max_private_context_size
-        )
-        self._max_context_size = max(1, int(configured_context_size))
         self._agent_state: Literal["running", "wait", "stop"] = self._STATE_STOP
         self._pending_wait_tool_call_id: Optional[str] = None
         self._force_next_timing_continue = False
@@ -151,6 +145,17 @@ class MaisakaHeartFlowChatting:
         )
         self._register_tool_providers()
         self._emit_monitor_session_start()
+
+    @property
+    def _max_context_size(self) -> int:
+        """返回当前会话实时生效的上下文窗口大小。"""
+
+        configured_context_size = (
+            global_config.chat.max_context_size
+            if self.chat_stream.is_group_session
+            else global_config.chat.max_private_context_size
+        )
+        return max(1, int(configured_context_size))
 
     def _emit_monitor_session_start(self) -> None:
         """向 WebUI 监控面板同步当前会话的展示标识。"""
