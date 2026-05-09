@@ -20,7 +20,13 @@ from src.common.logger import get_logger
 
 from ...paths import artifacts_root
 from ..runtime.search_runtime_initializer import build_search_runtime
-from .model_routing import get_text_generation_model_tasks, pick_text_generation_task
+from .model_routing import (
+    ResolvedLLMModel,
+    generate_with_resolved_model,
+    get_text_generation_model_tasks,
+    pick_text_generation_task,
+    resolve_text_generation_model_selector,
+)
 from .search_execution_service import SearchExecutionRequest, SearchExecutionService
 
 try:
@@ -1283,7 +1289,7 @@ class RetrievalTuningManager:
         ]
         return templates[seq % len(templates)]
 
-    async def _select_llm_model(self) -> Optional[Tuple[str, Any]]:
+    async def _select_llm_model(self) -> Optional[ResolvedLLMModel]:
         if llm_api is None:
             return None
         try:
@@ -1294,16 +1300,21 @@ class RetrievalTuningManager:
             return None
 
         cfg_model = str(self._cfg("advanced.extraction_model", "auto") or "auto").strip()
-        if cfg_model.lower() != "auto" and cfg_model in models:
-            return cfg_model, models[cfg_model]
         if cfg_model.lower() != "auto":
+            task_name, task_config, selected_model_name = resolve_text_generation_model_selector(models, cfg_model)
+            if task_name and task_config:
+                return ResolvedLLMModel(
+                    task_name=task_name,
+                    task_config=task_config,
+                    selected_model_name=selected_model_name,
+                )
             logger.warning(f"advanced.extraction_model={cfg_model!r} 不可用于文本生成，已回退自动选择")
         task_name, task_config = pick_text_generation_task(
             models,
             preferred=("memory", "utils", "planner", "tool_use", "replyer"),
         )
         if task_name and task_config:
-            return task_name, task_config
+            return ResolvedLLMModel(task_name=task_name, task_config=task_config)
         return None
 
     async def _llm_call_text(self, prompt: str, *, request_type: str) -> str:
@@ -1312,7 +1323,6 @@ class RetrievalTuningManager:
         resolved_model = await self._select_llm_model()
         if resolved_model is None:
             raise RuntimeError("no_llm_model")
-        task_name, model_cfg = resolved_model
 
         retry = self._llm_retry_cfg()
         max_attempts = int(retry["max_attempts"])
@@ -1323,14 +1333,12 @@ class RetrievalTuningManager:
         last_error: Optional[Exception] = None
         for idx in range(max_attempts):
             try:
-                result = await llm_api.generate(
-                    llm_api.LLMServiceRequest(
-                        task_name=task_name,
-                        request_type=request_type,
-                        prompt=prompt,
-                        temperature=getattr(model_cfg, "temperature", None),
-                        max_tokens=getattr(model_cfg, "max_tokens", None),
-                    )
+                result = await generate_with_resolved_model(
+                    resolved_model,
+                    request_type=request_type,
+                    prompt=prompt,
+                    temperature=getattr(resolved_model.task_config, "temperature", None),
+                    max_tokens=getattr(resolved_model.task_config, "max_tokens", None),
                 )
                 success = bool(result.success)
                 response = str(result.completion.response or "")

@@ -13,16 +13,15 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.common.logger import get_logger
-from src.config.config import model_config as host_model_config
 from src.config.model_configs import TaskConfig
 from src.services import llm_service as llm_api
 
 from .model_routing import (
-    build_single_model_task,
-    find_text_generation_task_for_model,
+    ResolvedLLMModel,
+    generate_with_resolved_model,
     get_text_generation_model_tasks,
     pick_text_generation_task,
-    resolve_text_generation_task_name_from_model_config,
+    resolve_text_generation_model_selector,
 )
 
 logger = get_logger("A_Memorix.EpisodeSegmentationService")
@@ -56,23 +55,27 @@ class EpisodeSegmentationService:
         )
         return task_config
 
-    def _resolve_model_config(self) -> Tuple[Optional[Any], str]:
+    def _resolve_model_config(self) -> Tuple[Optional[ResolvedLLMModel], str]:
         available_tasks = get_text_generation_model_tasks(llm_api) or {}
         if not available_tasks:
             return None, "unavailable"
 
         selector = str(self._cfg("episode.segmentation_model", "auto") or "auto").strip()
-        model_dict = getattr(host_model_config, "models_dict", {}) or {}
 
         if selector and selector.lower() != "auto":
-            direct_task = available_tasks.get(selector)
-            if self._is_task_config(direct_task):
-                return direct_task, selector
-
-            if selector in model_dict:
-                task_name, task_config = find_text_generation_task_for_model(available_tasks, selector)
-                if task_name and task_config:
-                    return build_single_model_task(selector, task_config), selector
+            task_name, task_config, selected_model_name = resolve_text_generation_model_selector(
+                available_tasks,
+                selector,
+            )
+            if task_name and task_config:
+                return (
+                    ResolvedLLMModel(
+                        task_name=task_name,
+                        task_config=task_config,
+                        selected_model_name=selected_model_name,
+                    ),
+                    selector,
+                )
 
             logger.warning(f"episode.segmentation_model='{selector}' 不可用，回退 auto")
 
@@ -81,11 +84,13 @@ class EpisodeSegmentationService:
             preferred=("memory", "utils", "replyer", "planner", "tool_use"),
         )
         if task_name and task_config:
-            return task_config, task_name
+            return ResolvedLLMModel(task_name=task_name, task_config=task_config), task_name
 
         fallback = self._pick_template_task(available_tasks)
         if fallback is not None:
-            return fallback, "auto"
+            task_name, task_config = pick_text_generation_task(available_tasks)
+            if task_name and task_config:
+                return ResolvedLLMModel(task_name=task_name, task_config=task_config), "auto"
         return None, "unavailable"
 
     @staticmethod
@@ -268,14 +273,9 @@ class EpisodeSegmentationService:
         if not paragraphs:
             raise ValueError("paragraphs_empty")
 
-        model_config, model_label = self._resolve_model_config()
-        if model_config is None:
+        resolved_model, model_label = self._resolve_model_config()
+        if resolved_model is None:
             raise RuntimeError("episode segmentation model unavailable")
-        task_name = resolve_text_generation_task_name_from_model_config(
-            llm_api,
-            model_config,
-            preferred_task_name=model_label,
-        )
 
         prompt = self._build_prompt(
             source=source,
@@ -283,14 +283,12 @@ class EpisodeSegmentationService:
             window_end=window_end,
             paragraphs=paragraphs,
         )
-        result = await llm_api.generate(
-            llm_api.LLMServiceRequest(
-                task_name=task_name,
-                request_type="A_Memorix.EpisodeSegmentation",
-                prompt=prompt,
-                temperature=getattr(model_config, "temperature", None),
-                max_tokens=getattr(model_config, "max_tokens", None),
-            )
+        result = await generate_with_resolved_model(
+            resolved_model,
+            request_type="A_Memorix.EpisodeSegmentation",
+            prompt=prompt,
+            temperature=getattr(resolved_model.task_config, "temperature", None),
+            max_tokens=getattr(resolved_model.task_config, "max_tokens", None),
         )
         success = bool(result.success)
         response = str(result.completion.response or "")

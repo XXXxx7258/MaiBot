@@ -1,8 +1,11 @@
 """A_Memorix 内部模型任务选择工具。"""
 
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from src.common.logger import get_logger
+from src.common.data_models.llm_service_data_models import LLMServiceResult
+from src.services import llm_service as llm_api
 
 logger = get_logger("A_Memorix.ModelRouting")
 
@@ -18,6 +21,19 @@ A_MEMORIX_TEXT_TASK_PRIORITY = (
     "emoji",
     "tool_use",
 )
+
+
+@dataclass(frozen=True)
+class ResolvedLLMModel:
+    """A_Memorix 内部使用的 LLM 选择结果。"""
+
+    task_name: str
+    task_config: Any
+    selected_model_name: str = ""
+
+    @property
+    def is_single_model(self) -> bool:
+        return bool(self.selected_model_name)
 
 
 def task_has_model_list(task_config: Any) -> bool:
@@ -95,6 +111,77 @@ def build_single_model_task(model_name: str, template: Any) -> Any:
         slow_threshold=template.slow_threshold,
         selection_strategy=template.selection_strategy,
     )
+
+
+def resolve_text_generation_model_selector(
+    available_tasks: Dict[str, Any],
+    selector: str,
+) -> Tuple[Optional[str], Optional[Any], str]:
+    """解析任务名或具体模型名选择器。"""
+
+    normalized_selector = str(selector or "").strip()
+    if not normalized_selector or normalized_selector.lower() == "auto":
+        return None, None, ""
+
+    task_config = available_tasks.get(normalized_selector)
+    if task_has_model_list(task_config):
+        return normalized_selector, task_config, ""
+
+    task_name, task_config = find_text_generation_task_for_model(available_tasks, normalized_selector)
+    if task_name and task_config:
+        return task_name, build_single_model_task(normalized_selector, task_config), normalized_selector
+    return None, None, ""
+
+
+async def generate_with_resolved_model(
+    model: ResolvedLLMModel,
+    request_type: str,
+    prompt: str,
+    *,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+) -> LLMServiceResult:
+    """按 A_Memorix 解析出的模型执行文本生成。"""
+
+    if not model.is_single_model:
+        return await llm_api.generate(
+            llm_api.LLMServiceRequest(
+                task_name=model.task_name,
+                request_type=request_type,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        )
+
+    client = llm_api.LLMServiceClient(task_name=model.task_name, request_type=request_type)
+    client._orchestrator.model_for_task = model.task_config
+    client._orchestrator.model_usage = {model.selected_model_name: (0, 0, 0)}
+
+    def _refresh_single_model_task() -> Any:
+        client._orchestrator.model_for_task = model.task_config
+        client._orchestrator.model_usage = {
+            model.selected_model_name: client._orchestrator.model_usage.get(
+                model.selected_model_name,
+                (0, 0, 0),
+            )
+        }
+        return model.task_config
+
+    client._orchestrator._refresh_task_config = _refresh_single_model_task
+    try:
+        completion = await client.generate_response(
+            prompt=prompt,
+            options=llm_api.LLMGenerationOptions(
+                temperature=temperature,
+                max_tokens=max_tokens,
+            ),
+        )
+        return llm_api.LLMServiceResult.from_response_result(completion)
+    except Exception as exc:
+        error_message = f"生成内容时出错: {exc}"
+        logger.error(f"[A_Memorix.ModelRouting] {error_message}")
+        return llm_api.LLMServiceResult.from_error(error_message, str(exc))
 
 
 def resolve_default_text_generation_task(llm_api: Any) -> str:
