@@ -160,6 +160,23 @@ class ExpressionLearner:
         self._last_processed_index = 0
         self.min_messages_for_extraction = 10
 
+    @property
+    def last_processed_index(self) -> int:
+        """返回表达学习已经消费到的消息缓存下标。"""
+        return self._last_processed_index
+
+    def mark_all_processed(self, message_cache: List["SessionMessage"]) -> None:
+        """在跳过表达学习时，将现有消息标记为已处理，避免阻塞缓存裁剪。"""
+        self._last_processed_index = len(message_cache)
+
+    def mark_processed_until(self, processed_end_index: int) -> None:
+        """将指定缓存下标之前的消息标记为已处理。"""
+        self._last_processed_index = max(self._last_processed_index, processed_end_index)
+
+    def discard_processed_prefix(self, removed_count: int) -> None:
+        """同步 runtime 对消息缓存前缀的裁剪。"""
+        self._last_processed_index = max(0, self._last_processed_index - removed_count)
+
     @staticmethod
     def _get_runtime_manager() -> Any:
         """获取插件运行时管理器。
@@ -274,7 +291,8 @@ class ExpressionLearner:
         jargon_miner: Optional["JargonMiner"] = None,
     ) -> bool:
         """学习表达方式"""
-        pending_messages = message_cache[self._last_processed_index :]
+        processed_end_index = len(message_cache)
+        pending_messages = message_cache[self._last_processed_index : processed_end_index]
         if not pending_messages:
             logger.debug("没有待处理消息")
             return False
@@ -303,6 +321,7 @@ class ExpressionLearner:
             response = generation_result.response
         except Exception as e:
             logger.error(f"学习表达方式失败: {e}")
+            self._last_processed_index = processed_end_index
             return False
 
         expressions: List[Tuple[str, str, str]]
@@ -336,7 +355,7 @@ class ExpressionLearner:
         )
         if after_extract_result.aborted:
             logger.info(f"{self.session_id} 表达方式选择 Hook 中止")
-            self._last_processed_index = len(message_cache)
+            self._last_processed_index = processed_end_index
             return False
 
         after_extract_kwargs = after_extract_result.kwargs
@@ -352,7 +371,7 @@ class ExpressionLearner:
 
         if not expressions:
             logger.info("没有可学习的表达方式")
-            self._last_processed_index = len(message_cache)
+            self._last_processed_index = processed_end_index
             return False
 
         logger.info(f"可学习的表达方式: {expressions}")
@@ -361,7 +380,7 @@ class ExpressionLearner:
         learnt_expressions = self._filter_expressions(expressions, pending_messages)
         if not learnt_expressions:
             logger.info("没有可学习的表达方式通过过滤")
-            self._last_processed_index = len(message_cache)
+            self._last_processed_index = processed_end_index
             return False
 
         learnt_expressions_str = "\n".join(f"{situation}->{style}" for situation, style in learnt_expressions)
@@ -386,7 +405,7 @@ class ExpressionLearner:
                 continue
             await self._upsert_expression_to_db(situation, style)
 
-        self._last_processed_index = len(message_cache)
+        self._last_processed_index = processed_end_index
         return True
 
     def _check_cached_jargons_in_messages(

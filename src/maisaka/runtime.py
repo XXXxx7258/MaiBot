@@ -56,6 +56,7 @@ from .tool_provider import MaisakaBuiltinToolProvider
 logger = get_logger("maisaka_runtime")
 
 MAX_INTERNAL_ROUNDS = 10
+MAX_RETAINED_MESSAGE_CACHE_SIZE = 200
 
 
 class MaisakaHeartFlowChatting:
@@ -97,7 +98,7 @@ class MaisakaHeartFlowChatting:
         self._deferred_message_turn_task: Optional[asyncio.Task[None]] = None
         self._message_debounce_seconds = 1.0
         self._message_debounce_required = False
-        self._message_received_at_by_id: dict[str, float] = {}
+        self._oldest_pending_message_received_at: Optional[float] = None
         self._last_message_received_at = 0.0
         self._talk_frequency_adjust = 1.0
         self._reply_latency_measurement_started_at: Optional[float] = None
@@ -311,9 +312,11 @@ class MaisakaHeartFlowChatting:
             self._ensure_background_tasks_running()
         received_at = time.time()
         self._last_message_received_at = received_at
+        if self._oldest_pending_message_received_at is None:
+            self._oldest_pending_message_received_at = received_at
         self._update_message_trigger_state(message)
         self.message_cache.append(message)
-        self._message_received_at_by_id[message.message_id] = received_at
+        self._prune_processed_message_cache()
         if self._is_reply_effect_tracking_enabled():
             asyncio.create_task(self._reply_effect_tracker.observe_user_message(message))
         if self._agent_state == self._STATE_RUNNING:
@@ -501,6 +504,28 @@ class MaisakaHeartFlowChatting:
             return original_message
 
         return None
+
+    def _prune_processed_message_cache(self) -> None:
+        """裁剪 runtime 与表达学习器都已经消费过的旧消息。"""
+        excess_count = len(self.message_cache) - MAX_RETAINED_MESSAGE_CACHE_SIZE
+        if excess_count <= 0:
+            return
+
+        removable_count = min(
+            excess_count,
+            self._last_processed_index,
+            self._expression_learner.last_processed_index,
+        )
+        if removable_count <= 0:
+            return
+
+        del self.message_cache[:removable_count]
+        self._last_processed_index = max(0, self._last_processed_index - removable_count)
+        self._expression_learner.discard_processed_prefix(removable_count)
+        logger.debug(
+            f"{self.log_prefix} 已清理 Maisaka 旧消息缓存: "
+            f"清理数量={removable_count} 保留数量={len(self.message_cache)}"
+        )
 
     def _should_trigger_message_turn_by_idle_compensation(
         self,
@@ -1016,12 +1041,10 @@ class MaisakaHeartFlowChatting:
             # f"收集 {len(unique_messages)} 条新消息"
         # )
         if unique_messages and self._reply_latency_measurement_started_at is None:
-            self._reply_latency_measurement_started_at = min(
-                self._message_received_at_by_id.get(message.message_id, self._last_message_received_at)
-                for message in unique_messages
+            self._reply_latency_measurement_started_at = (
+                self._oldest_pending_message_received_at or self._last_message_received_at
             )
-        for message in unique_messages:
-            self._message_received_at_by_id.pop(message.message_id, None)
+        self._oldest_pending_message_received_at = None
         return unique_messages
 
     async def _wait_for_message_quiet_period(self) -> None:
@@ -1090,10 +1113,19 @@ class MaisakaHeartFlowChatting:
 
     async def _trigger_batch_learning(self, messages: list[SessionMessage]) -> None:
         """按同一批消息触发表达方式和黑话学习。"""
+        processed_end_index = len(self.message_cache)
+        if not self._enable_expression_learning:
+            self._expression_learner.mark_all_processed(self.message_cache)
+            self._prune_processed_message_cache()
+            return
+
         try:
             await self._trigger_expression_learning(messages)
         except Exception as exc:
             logger.error(f"{self.log_prefix} 表达学习任务异常退出: {exc}")
+            self._expression_learner.mark_processed_until(processed_end_index)
+        finally:
+            self._prune_processed_message_cache()
 
     def _should_trigger_learning(
         self,
