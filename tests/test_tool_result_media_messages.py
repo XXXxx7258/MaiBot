@@ -36,6 +36,7 @@ def test_tool_result_image_item_is_split_into_tool_and_user_messages() -> None:
                 data=b64encode(PNG_1X1).decode("ascii"),
                 mime_type="image/png",
                 name="out.png",
+                metadata={"context_key": "search:cat:0:abc123", "source_url": "https://example.com/out.png"},
             )
         ],
     )
@@ -47,8 +48,13 @@ def test_tool_result_image_item_is_split_into_tool_and_user_messages() -> None:
     media_message = engine._runtime._chat_history[1]
     assert isinstance(tool_result, ToolResultMessage)
     assert "tool_result:call_1:1" in tool_result.content
+    assert "参数 context_key=search:cat:0:abc123" in tool_result.content
+    assert "source_url=https://example.com/out.png" in tool_result.content
     assert isinstance(media_message, SessionBackedMessage)
     assert media_message.source_kind == "tool_result_media"
+    assert "参数 context_key=search:cat:0:abc123" in media_message.visible_text
+    assert "参数 context_key=search:cat:0:abc123" in media_message.raw_message.components[0].text
+    assert "参数 source_url=https://example.com/out.png" in media_message.raw_message.components[0].text
     assert any(isinstance(component, ImageComponent) for component in media_message.raw_message.components)
 
 

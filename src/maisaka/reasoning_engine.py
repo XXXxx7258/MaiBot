@@ -1440,16 +1440,40 @@ class MaisakaReasoningEngine:
         return f"tool_result:{call_id}:{item_index}"
 
     @staticmethod
-    def _describe_tool_result_media_item(item: Any) -> str:
+    def _format_tool_result_media_metadata(item: Any) -> list[str]:
+        """把工具媒体项的 metadata 翻译成模型可读的参数行。"""
+
+        metadata = getattr(item, "metadata", None)
+        if not isinstance(metadata, dict):
+            return []
+
+        metadata_parts: list[str] = []
+        for key, value in metadata.items():
+            normalized_key = str(key or "").strip()
+            if not normalized_key:
+                continue
+            if isinstance(value, (dict, list, tuple, set)):
+                continue
+            normalized_value = str(value or "").strip()
+            if not normalized_value:
+                continue
+            metadata_parts.append(f"{normalized_key}={normalized_value}")
+        return metadata_parts
+
+    @classmethod
+    def _describe_tool_result_media_item(cls, item: Any) -> str:
         """生成 tool result 中的媒体索引描述。"""
 
         content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
         mime_type = str(getattr(item, "mime_type", "") or "").strip()
         name = str(getattr(item, "name", "") or "").strip()
         description = str(getattr(item, "description", "") or "").strip()
+        metadata_parts = cls._format_tool_result_media_metadata(item)
         label_parts = [content_type]
         if mime_type:
             label_parts.append(mime_type)
+        if metadata_parts:
+            label_parts.append("参数 " + ", ".join(metadata_parts))
         if name:
             label_parts.append(name)
         if description:
@@ -1511,6 +1535,9 @@ class MaisakaReasoningEngine:
             raw_data = uri
 
         header_parts = [f"[工具返回媒体]索引={media_index}", f"类型={content_type}"]
+        metadata_parts = self._format_tool_result_media_metadata(item)
+        if metadata_parts:
+            header_parts.extend(f"参数 {part}" for part in metadata_parts)
         if mime_type:
             header_parts.append(f"MIME={mime_type}")
         if name:
