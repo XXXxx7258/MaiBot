@@ -114,10 +114,6 @@ MODULE_COLORS: Dict[str, Tuple[str, Optional[str], bool]] = {
     "core_actions": ("#87d7ff", None, False),
     "tts_action": ("#5f5f00", None, False),
     "doubao_pic_plugin": ("#5f8700", None, False),
-    # Action组件
-    "no_reply_action": ("#ffaf00", None, False),  # 亮橙色，显眼但不像警告
-    "reply_action": ("#00ff00", None, False),
-    "base_action": ("#bcbcbc", None, False),
     # 数据库和消息
     "database_model": ("#875f00", None, False),
     "maim_message": ("#af87d7", None, False),

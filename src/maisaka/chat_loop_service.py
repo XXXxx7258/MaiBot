@@ -43,7 +43,7 @@ from .history_utils import drop_orphan_tool_results, normalize_tool_result_order
 from .display.prompt_cli_renderer import PromptCLIVisualizer
 from .visual_mode_utils import resolve_enable_visual_planner
 
-TIMING_GATE_TOOL_NAMES = {"continue", "no_reply", "wait"}
+TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "planner": "maisaka_planner",
     "timing_gate": "maisaka_timing_gate",

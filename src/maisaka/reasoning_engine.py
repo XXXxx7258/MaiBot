@@ -59,7 +59,7 @@ logger = get_logger("maisaka_reasoning_engine")
 
 TIMING_GATE_CONTEXT_DROP_HEAD_RATIO = 0.7
 TIMING_GATE_MAX_ATTEMPTS = 3
-TIMING_GATE_TOOL_NAMES = {"continue", "no_reply", "wait"}
+TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
 HISTORY_SILENT_TOOL_NAMES = {"finish"}
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
@@ -255,7 +255,7 @@ class MaisakaReasoningEngine:
     async def _run_timing_gate(
         self,
         anchor_message: SessionMessage,
-    ) -> tuple[Literal["continue", "no_reply", "wait"], Any, list[str], list[dict[str, Any]]]:
+    ) -> tuple[Literal["continue", "no_action", "wait"], Any, list[str], list[dict[str, Any]]]:
         """运行 Timing Gate 子代理并返回控制决策。"""
 
         if self._runtime._force_next_timing_continue:
@@ -307,20 +307,20 @@ class MaisakaReasoningEngine:
 
             logger.warning(
                 f"{self._runtime.log_prefix} Timing Gate 连续 {TIMING_GATE_MAX_ATTEMPTS} 次未返回有效控制工具："
-                f"{invalid_tool_text}，将按 no_reply 处理"
+                f"{invalid_tool_text}，将按 no_action 处理"
             )
             self._runtime._enter_stop_state()
             tool_result_summaries.append(
-                f"- no_reply [非法 Timing 工具]: 返回了 {invalid_tool_text}，已停止本轮并等待新消息"
+                f"- no_action [非法 Timing 工具]: 返回了 {invalid_tool_text}，已停止本轮并等待新消息"
             )
-            return "no_reply", response, tool_result_summaries, tool_monitor_results
+            return "no_action", response, tool_result_summaries, tool_monitor_results
 
         if selected_tool_call is None:
             self._runtime._enter_stop_state()
             tool_result_summaries.append(
-                "- no_reply [非法 Timing 工具]: 已停止本轮并等待新消息"
+                "- no_action [非法 Timing 工具]: 已停止本轮并等待新消息"
             )
-            return "no_reply", response, tool_result_summaries, tool_monitor_results
+            return "no_action", response, tool_result_summaries, tool_monitor_results
 
         if invalid_tool_text:
             self._runtime._chat_history = [
@@ -358,13 +358,13 @@ class MaisakaReasoningEngine:
         }
         if timing_action not in available_timing_action_names:
             logger.warning(
-                f"{self._runtime.log_prefix} Timing Gate 返回未知动作 {timing_action!r}，将按 no_reply 处理"
+                f"{self._runtime.log_prefix} Timing Gate 返回未知动作 {timing_action!r}，将按 no_action 处理"
             )
             self._runtime._enter_stop_state()
             tool_result_summaries.append(
-                f"- no_reply [未知 Timing 动作]: 返回了 {timing_action!r}，已停止本轮并等待新消息"
+                f"- no_action [未知 Timing 动作]: 返回了 {timing_action!r}，已停止本轮并等待新消息"
             )
-            return "no_reply", response, tool_result_summaries, tool_monitor_results
+            return "no_action", response, tool_result_summaries, tool_monitor_results
         return timing_action, response, tool_result_summaries, tool_monitor_results
 
     def _build_forced_continue_timing_result(
@@ -413,7 +413,7 @@ class MaisakaReasoningEngine:
         hint_content = (
             "Timing Gate 上一轮选择了非法工具："
             f"{normalized_tool_text}。\n"
-            "Timing Gate 只能调用当前可用的 continue、no_reply 或 wait 中的一个工具。"
+            "Timing Gate 只能调用当前可用的 continue、no_action 或 wait 中的一个工具。"
         )
         self._runtime._chat_history.append(
             SessionBackedMessage(
@@ -534,7 +534,7 @@ class MaisakaReasoningEngine:
                                     timing_tool_monitor_results,
                                 ) = await self._run_timing_gate(anchor_message)
                                 timing_elapsed_seconds = time.time() - timing_started_at
-                                if timing_action == "no_reply":
+                                if timing_action == "no_action":
                                     await self._runtime._wait_for_timing_gate_non_continue_cooldown(
                                         timing_elapsed_seconds
                                     )
@@ -557,8 +557,8 @@ class MaisakaReasoningEngine:
                                         cycle_end_reason = "timing_wait"
                                         cycle_end_detail = "Timing Gate 选择 wait，本轮不会进入 Planner，将在等待结束后继续。"
                                     else:
-                                        cycle_end_reason = "timing_no_reply"
-                                        cycle_end_detail = "Timing Gate 选择 no_reply，本轮不会进入 Planner。"
+                                        cycle_end_reason = "timing_no_action"
+                                        cycle_end_detail = "Timing Gate 选择 no_action，本轮不会进入 Planner。"
                                     logger.debug(
                                         f"{self._runtime.log_prefix} Timing Gate 结束当前回合: "
                                         f"回合={round_index + 1} 动作={timing_action}"
@@ -598,8 +598,8 @@ class MaisakaReasoningEngine:
                             # )
                             reasoning_content = response.content or ""
                             if self._should_replace_reasoning(reasoning_content):
-                                response.content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，以及我可以使用的工具，然后直接输出我的想法"
-                                response.raw_message.content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，以及我可以使用的工具，然后直接输出我的想法"
+                                response.content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，然后直接输出我的想法："
+                                response.raw_message.content = "我应该根据我上面思考的内容进行反思，重新思考我下一步的行动，我需要分析当前场景，对话，然后直接输出我的想法："
                                 logger.info(f"{self._runtime.log_prefix} 当前思考与上一轮过于相似，已替换为重新思考提示")
 
                             self._last_reasoning_content = reasoning_content
@@ -1271,7 +1271,7 @@ class MaisakaReasoningEngine:
             wait_seconds = invocation.arguments.get("seconds", 30)
             return f"你让当前对话先等待 {wait_seconds} 秒。"
 
-        if invocation.tool_name == "no_reply":
+        if invocation.tool_name == "no_action":
             return "你暂停了当前对话循环，等待新的外部消息。"
 
         if invocation.tool_name == "finish":

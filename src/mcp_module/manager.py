@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 BUILTIN_TOOL_NAMES = frozenset(
     {
         "reply",
-        "no_reply",
+        "no_action",
         "stop",
         "create_table",
         "list_tables",

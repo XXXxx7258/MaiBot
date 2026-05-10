@@ -14,8 +14,8 @@ from .continue_tool import get_tool_spec as get_continue_tool_spec
 from .continue_tool import handle_tool as handle_continue_tool
 from .finish import get_tool_spec as get_finish_tool_spec
 from .finish import handle_tool as handle_finish_tool
-from .no_reply import get_tool_spec as get_no_reply_tool_spec
-from .no_reply import handle_tool as handle_no_reply_tool
+from .no_action import get_tool_spec as get_no_action_tool_spec
+from .no_action import handle_tool as handle_no_action_tool
 from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
 from .query_jargon import handle_tool as handle_query_jargon_tool
 from .query_memory import get_tool_spec as get_query_memory_tool_spec
@@ -78,7 +78,7 @@ def _get_query_person_profile_tool_spec() -> ToolSpec:
 
 
 BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
-    BuiltinToolEntry("no_reply", get_no_reply_tool_spec, handle_no_reply_tool, stage="timing"),
+    BuiltinToolEntry("no_action", get_no_action_tool_spec, handle_no_action_tool, stage="timing"),
     BuiltinToolEntry("continue", get_continue_tool_spec, handle_continue_tool, stage="timing"),
     BuiltinToolEntry("wait", get_wait_tool_spec, handle_wait_tool, stage="timing", chat_scope="private"),
     BuiltinToolEntry("finish", get_finish_tool_spec, handle_finish_tool, stage="action"),

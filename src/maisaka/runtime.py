@@ -644,7 +644,7 @@ class MaisakaHeartFlowChatting:
         return self._force_next_timing_continue
 
     async def _wait_for_timing_gate_non_continue_cooldown(self, elapsed_seconds: float) -> None:
-        """仅对 Timing Gate 的 no_reply 动作应用冷却窗口。"""
+        """仅对 Timing Gate 的 no_action 动作应用冷却窗口。"""
 
         cooldown_seconds = self._timing_gate_non_continue_cooldown_seconds
         if cooldown_seconds <= 0:
