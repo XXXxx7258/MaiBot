@@ -26,6 +26,8 @@ export interface ChatInfo {
   chat_name: string
   platform: string | null
   is_group: boolean
+  use_expression: boolean
+  enable_learning: boolean
 }
 
 /**
@@ -34,6 +36,19 @@ export interface ChatInfo {
 export interface ChatListResponse {
   success: boolean
   data: ChatInfo[]
+}
+
+export interface ExpressionGroupInfo {
+  index: number
+  name: string
+  chat_ids: string[]
+  members: ChatInfo[]
+  is_global: boolean
+}
+
+export interface ExpressionGroupListResponse {
+  success: boolean
+  data: ExpressionGroupInfo[]
 }
 
 /**

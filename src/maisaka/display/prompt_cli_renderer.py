@@ -511,6 +511,8 @@ class PromptCLIVisualizer:
         request_kind: str,
         selection_reason: str,
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> PromptPreviewAccess:
         """保存 Prompt 预览文件，并返回 CLI 展示入口与浏览器可打开的 URI。"""
 
@@ -536,6 +538,9 @@ class PromptCLIVisualizer:
             viewer_messages.append(normalized_message)
 
         prompt_dump_text = cls._build_prompt_dump_text(messages)
+        if output_content not in (None, "", []):
+            output_dump_text = cls._serialize_message_content_for_dump(output_content)
+            prompt_dump_text = f"[{output_title}]\n\n{output_dump_text}\n\n{'=' * 80}\n\n{prompt_dump_text}"
         tool_definition_dump_text = cls._build_tool_definition_dump_text(tool_definitions)
         if tool_definition_dump_text:
             prompt_dump_text = f"{prompt_dump_text}\n\n{'=' * 80}\n\n{tool_definition_dump_text}"
@@ -544,6 +549,8 @@ class PromptCLIVisualizer:
             request_kind=request_kind,
             selection_reason=selection_reason,
             tool_definitions=tool_definitions,
+            output_content=output_content,
+            output_title=output_title,
         )
         saved_paths = PromptPreviewLogger.save_preview_files(
             chat_id,
@@ -589,6 +596,8 @@ class PromptCLIVisualizer:
         request_kind: str,
         selection_reason: str,
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> str:
         panel_title, _ = cls.get_request_panel_style(request_kind)
         message_cards: List[str] = []
@@ -630,6 +639,17 @@ class PromptCLIVisualizer:
                 "</section>"
             )
 
+        output_section_html = ""
+        if output_content not in (None, "", []):
+            output_section_html = (
+                "<section class='message-card output-card'>"
+                "<div class='message-head'>"
+                f"<span class='role-badge output'>{html.escape(output_title)}</span>"
+                "</div>"
+                f"<div class='message-content'>{cls._render_message_content_html(output_content)}</div>"
+                "</section>"
+            )
+
         subtitle_html = ""
         if selection_reason.strip():
             subtitle_html = f"<div class='subtitle'>{html.escape(selection_reason)}</div>"
@@ -666,6 +686,7 @@ class PromptCLIVisualizer:
       --user: #16a34a;
       --assistant: #ca8a04;
       --tool: #c026d3;
+      --output: #0f766e;
       --unknown: #475569;
       --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
     }}
@@ -728,7 +749,12 @@ class PromptCLIVisualizer:
     .role-badge.user {{ background: var(--user); }}
     .role-badge.assistant {{ background: var(--assistant); color: #1f2937; }}
     .role-badge.tool {{ background: var(--tool); }}
+    .role-badge.output {{ background: var(--output); }}
     .role-badge.unknown {{ background: var(--unknown); }}
+    .output-card {{
+      border-color: rgba(15, 118, 110, 0.38);
+      background: linear-gradient(180deg, #ffffff 0%, #f0fdfa 100%);
+    }}
     .message-index {{
       color: var(--muted);
       font-size: 13px;
@@ -886,6 +912,7 @@ class PromptCLIVisualizer:
       <div class="title">{html.escape(panel_title)}</div>
       {subtitle_html}
     </header>
+    {output_section_html}
     {''.join(message_cards)}
     {tool_definition_section_html}
   </main>
@@ -903,6 +930,8 @@ class PromptCLIVisualizer:
         selection_reason: str,
         image_display_mode: Literal["legacy", "path_link"] = "path_link",
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> RenderableType:
         """构建用于查看完整 prompt 的折叠入口内容。"""
 
@@ -913,6 +942,8 @@ class PromptCLIVisualizer:
             request_kind=request_kind,
             selection_reason=selection_reason,
             tool_definitions=tool_definitions,
+            output_content=output_content,
+            output_title=output_title,
         ).body
 
     @classmethod
@@ -927,6 +958,8 @@ class PromptCLIVisualizer:
         image_display_mode: Literal["legacy", "path_link"] = "path_link",
         folded: bool,
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> Panel:
         """构建用于嵌入结果面板中的 Prompt 区块。"""
 
@@ -939,6 +972,8 @@ class PromptCLIVisualizer:
             image_display_mode=image_display_mode,
             folded=folded,
             tool_definitions=tool_definitions,
+            output_content=output_content,
+            output_title=output_title,
         ).panel
 
     @classmethod
@@ -953,6 +988,8 @@ class PromptCLIVisualizer:
         image_display_mode: Literal["legacy", "path_link"] = "path_link",
         folded: bool,
         tool_definitions: list[dict[str, Any]] | None = None,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> PromptSectionResult:
         """构建 Prompt 面板，并在折叠模式下返回对应的 HTML 预览入口。"""
 
@@ -964,6 +1001,8 @@ class PromptCLIVisualizer:
             request_kind=request_kind,
             selection_reason=selection_reason,
             tool_definitions=tool_definitions,
+            output_content=output_content,
+            output_title=output_title,
         )
         if folded:
             prompt_renderable = preview_access.body
@@ -989,9 +1028,19 @@ class PromptCLIVisualizer:
         *,
         request_kind: str,
         subtitle: str,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> str:
         panel_title, _ = cls.get_request_panel_style(request_kind)
         subtitle_html = f"<div class='subtitle'>{html.escape(subtitle)}</div>" if subtitle.strip() else ""
+        output_section_html = ""
+        if output_content not in (None, "", []):
+            output_section_html = (
+                "<section class='content-card output-card'>"
+                f"<div class='output-title'>{html.escape(output_title)}</div>"
+                f"{cls._render_message_content_html(output_content)}"
+                "</section>"
+            )
         return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -1044,6 +1093,22 @@ class PromptCLIVisualizer:
       border-radius: 18px;
       box-shadow: var(--shadow);
       padding: 18px 20px;
+      margin-bottom: 14px;
+    }}
+    .output-card {{
+      border-color: rgba(15, 118, 110, 0.38);
+      background: linear-gradient(180deg, #ffffff 0%, #f0fdfa 100%);
+    }}
+    .output-title {{
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 5px 12px;
+      color: #fff;
+      background: #0f766e;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 12px;
     }}
     pre {{
       margin: 0;
@@ -1062,6 +1127,7 @@ class PromptCLIVisualizer:
       <div class="title">{html.escape(panel_title)}</div>
       {subtitle_html}
     </header>
+    {output_section_html}
     <section class="content-card">
       <pre>{html.escape(content)}</pre>
     </section>
@@ -1078,16 +1144,28 @@ class PromptCLIVisualizer:
         chat_id: str,
         request_kind: str,
         subtitle: str,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> RenderableType:
         """构建文本型 Prompt 的折叠入口内容。"""
 
-        html_content = cls._build_text_preview_html(content, request_kind=request_kind, subtitle=subtitle)
+        html_content = cls._build_text_preview_html(
+            content,
+            request_kind=request_kind,
+            subtitle=subtitle,
+            output_content=output_content,
+            output_title=output_title,
+        )
+        text_content = content
+        if output_content not in (None, "", []):
+            output_dump_text = cls._serialize_message_content_for_dump(output_content)
+            text_content = f"[{output_title}]\n\n{output_dump_text}\n\n{'=' * 80}\n\n{content}"
         saved_paths = PromptPreviewLogger.save_preview_files(
             chat_id,
             category,
             {
                 ".html": html_content,
-                ".txt": content,
+                ".txt": text_content,
             },
         )
         viewer_html_path = saved_paths[".html"]
@@ -1112,6 +1190,8 @@ class PromptCLIVisualizer:
         request_kind: str,
         subtitle: str,
         folded: bool,
+        output_content: Any | None = None,
+        output_title: str = "输出结果",
     ) -> Panel:
         """构建文本型 Prompt 的嵌入区块。"""
 
@@ -1123,6 +1203,8 @@ class PromptCLIVisualizer:
                 chat_id=chat_id,
                 request_kind=request_kind,
                 subtitle=subtitle,
+                output_content=output_content,
+                output_title=output_title,
             )
         else:
             prompt_renderable = Text(content)

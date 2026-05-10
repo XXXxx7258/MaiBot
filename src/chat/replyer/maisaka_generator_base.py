@@ -577,19 +577,6 @@ class BaseMaisakaReplyGenerator:
 
         preview_chat_id = self._resolve_session_id(stream_id)
         replyer_prompt_section: RenderableType | None = None
-        if show_replyer_prompt:
-            replyer_prompt_section = Panel(
-                PromptCLIVisualizer.build_prompt_access_panel(
-                    request_messages,
-                    category="replyer",
-                    chat_id=preview_chat_id,
-                    request_kind="replyer",
-                    selection_reason=f"ID: {preview_chat_id}",
-                ),
-                title="Reply Prompt",
-                border_style="bright_yellow",
-                padding=(0, 1),
-            )
 
         llm_started_at = time.perf_counter()
         try:
@@ -615,6 +602,20 @@ class BaseMaisakaReplyGenerator:
         )
         llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
         response_text = (generation_result.response or "").strip()
+        if show_replyer_prompt:
+            replyer_prompt_section = Panel(
+                PromptCLIVisualizer.build_prompt_access_panel(
+                    request_messages,
+                    category="replyer",
+                    chat_id=preview_chat_id,
+                    request_kind="replyer",
+                    selection_reason=f"ID: {preview_chat_id}",
+                    output_content=response_text,
+                ),
+                title="Reply Prompt",
+                border_style="bright_yellow",
+                padding=(0, 1),
+            )
         result.success = bool(response_text)
         result.completion = LLMCompletionResult(
             request_prompt=prompt_preview,

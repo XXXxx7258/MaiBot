@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, List, Optional, Sequence
 
 import asyncio
+import json
 
 from rich.console import RenderableType
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
@@ -580,19 +581,6 @@ class MaisakaChatLoopService:
 
         prompt_section: RenderableType | None = None
         prompt_html_uri: str | None = None
-        if global_config.debug.show_maisaka_thinking:
-            prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
-                built_messages,
-                category=self._resolve_prompt_preview_category(request_kind),
-                chat_id=self._session_id,
-                request_kind=request_kind,
-                selection_reason=selection_reason,
-                folded=global_config.debug.fold_maisaka_thinking,
-                tool_definitions=list(all_tools),
-            )
-            prompt_section = prompt_section_result.panel
-            if prompt_section_result.preview_access is not None:
-                prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
 
         llm_chat = self._get_llm_chat_client(request_kind)
         generation_result = await llm_chat.generate_response_with_messages(
@@ -640,6 +628,34 @@ class MaisakaChatLoopService:
         )
         total_tokens = self._coerce_int(after_response_kwargs.get("total_tokens"), generation_result.total_tokens)
 
+        if global_config.debug.show_maisaka_thinking:
+            output_parts = []
+            if final_response.strip():
+                output_parts.append(final_response.strip())
+            if final_tool_calls:
+                output_parts.append(
+                    "工具调用:\n"
+                    + json.dumps(
+                        [self._format_tool_call_for_preview(tool_call) for tool_call in final_tool_calls],
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+                )
+            prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
+                built_messages,
+                category=self._resolve_prompt_preview_category(request_kind),
+                chat_id=self._session_id,
+                request_kind=request_kind,
+                selection_reason=selection_reason,
+                folded=global_config.debug.fold_maisaka_thinking,
+                tool_definitions=list(all_tools),
+                output_content="\n\n".join(output_parts).strip(),
+            )
+            prompt_section = prompt_section_result.panel
+            if prompt_section_result.preview_access is not None:
+                prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
+
         raw_message = AssistantMessage(
             content=final_response,
             timestamp=datetime.now(),
@@ -659,6 +675,16 @@ class MaisakaChatLoopService:
             prompt_section=prompt_section,
             prompt_html_uri=prompt_html_uri,
         )
+
+    @staticmethod
+    def _format_tool_call_for_preview(tool_call: ToolCall) -> dict[str, Any]:
+        """构造 HTML 顶部输出区里的工具调用摘要。"""
+
+        return {
+            "id": tool_call.call_id,
+            "name": tool_call.func_name,
+            "arguments": tool_call.args,
+        }
 
     @staticmethod
     def select_llm_context_messages(

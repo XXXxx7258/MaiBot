@@ -460,7 +460,6 @@ class MaisakaReasoningEngine:
                         "消息整理",
                         f"待处理消息 {len(cached_messages)} 条",
                     )
-                    asyncio.create_task(self._runtime._trigger_batch_learning(cached_messages))
                     if timeout_triggered:
                         self._runtime._chat_history.append(
                             self._build_wait_completed_message(has_new_messages=True)
@@ -690,7 +689,6 @@ class MaisakaReasoningEngine:
                             if not interrupted_messages:
                                 break
 
-                            asyncio.create_task(self._runtime._trigger_batch_learning(interrupted_messages))
                             await self._ingest_messages(interrupted_messages)
                             cached_messages = interrupted_messages
                             anchor_message = interrupted_messages[-1]
@@ -998,6 +996,10 @@ class MaisakaReasoningEngine:
             process_result.removed_count,
             process_result.remaining_context_count,
         )
+        if process_result.removed_messages:
+            asyncio.create_task(
+                self._runtime._trigger_trimmed_history_learning(process_result.removed_messages)
+            )
 
     @staticmethod
     def _calculate_similarity(text1: str, text2: str) -> float:

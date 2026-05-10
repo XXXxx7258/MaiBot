@@ -3,20 +3,21 @@
  */
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 import type {
-  ExpressionListResponse,
-  ExpressionDetailResponse,
-  ExpressionCreateRequest,
-  ExpressionCreateResponse,
-  ExpressionUpdateRequest,
-  ExpressionUpdateResponse,
-  ExpressionDeleteResponse,
-  ExpressionStatsResponse,
-  ChatListResponse,
-  ChatInfo,
-  ReviewStats,
-  ReviewListResponse,
   BatchReviewItem,
   BatchReviewResponse,
+  ChatInfo,
+  ChatListResponse,
+  ExpressionCreateRequest,
+  ExpressionCreateResponse,
+  ExpressionDeleteResponse,
+  ExpressionDetailResponse,
+  ExpressionGroupListResponse,
+  ExpressionListResponse,
+  ExpressionStatsResponse,
+  ExpressionUpdateRequest,
+  ExpressionUpdateResponse,
+  ReviewListResponse,
+  ReviewStats,
 } from '@/types/expression'
 import type { ApiResponse } from '@/types/api'
 
@@ -67,6 +68,47 @@ export async function getChatList(): Promise<ApiResponse<ChatInfo[]>> {
 }
 
 /**
+ * 获取表达互通组列表
+ */
+export async function getExpressionGroups(): Promise<ApiResponse<ExpressionGroupListResponse['data']>> {
+  const response = await fetchWithAuth(`${API_BASE}/groups`, {})
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '获取表达互通组失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '获取表达互通组失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionGroupListResponse = await response.json()
+    if (data.success) {
+      return {
+        success: true,
+        data: data.data,
+      }
+    }
+    return {
+      success: false,
+      error: '获取表达互通组失败',
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析表达互通组响应',
+    }
+  }
+}
+
+/**
  * 获取表达方式列表
  */
 export async function getExpressionList(params: {
@@ -74,6 +116,7 @@ export async function getExpressionList(params: {
   page_size?: number
   search?: string
   chat_id?: string
+  chat_ids?: string[]
 }): Promise<ApiResponse<ExpressionListResponse>> {
   const queryParams = new URLSearchParams()
 
@@ -81,6 +124,7 @@ export async function getExpressionList(params: {
   if (params.page_size) queryParams.append('page_size', params.page_size.toString())
   if (params.search) queryParams.append('search', params.search)
   if (params.chat_id) queryParams.append('chat_id', params.chat_id)
+  params.chat_ids?.forEach((chatId) => queryParams.append('chat_ids', chatId))
 
   const response = await fetchWithAuth(`${API_BASE}/list?${queryParams}`, {
     

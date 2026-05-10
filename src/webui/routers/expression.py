@@ -12,6 +12,8 @@ from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
 from src.common.database.database import get_db_session
 from src.common.database.database_model import ChatSession, Expression, Messages, ModifiedBy
 from src.common.logger import get_logger
+from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
+from src.config.config import global_config
 from src.webui.dependencies import require_auth
 
 logger = get_logger("webui.expression")
@@ -92,6 +94,17 @@ class ExpressionCreateResponse(BaseModel):
     data: ExpressionResponse
 
 
+def require_existing_chat_id(chat_id: Optional[str]) -> str:
+    """校验资源归属的聊天流 ID 必须是真实存在的会话。"""
+
+    normalized_chat_id = str(chat_id or "").strip()
+    if not normalized_chat_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 ID")
+    if _chat_manager.get_existing_session_by_session_id(normalized_chat_id) is None:
+        raise HTTPException(status_code=400, detail=f"聊天流不存在: {normalized_chat_id}")
+    return normalized_chat_id
+
+
 def get_chat_name_from_latest_message(chat_id: str, db_session: Any) -> Optional[str]:
     """从最近消息中解析聊天显示名称。"""
 
@@ -103,7 +116,8 @@ def get_chat_name_from_latest_message(chat_id: str, db_session: Any) -> Optional
         return None
     if message.group_id:
         return message.group_name or f"群聊{message.group_id}"
-    return message.user_cardname or message.user_nickname or (f"用户{message.user_id}" if message.user_id else None)
+    private_name = message.user_cardname or message.user_nickname or (f"用户{message.user_id}" if message.user_id else None)
+    return f"{private_name}的私聊" if private_name else None
 
 
 def get_chat_name_from_session_record(chat_session: ChatSession) -> str:
@@ -112,7 +126,7 @@ def get_chat_name_from_session_record(chat_session: ChatSession) -> str:
     if chat_session.group_id:
         return f"群聊{chat_session.group_id}"
     if chat_session.user_id:
-        return f"用户{chat_session.user_id}"
+        return f"用户{chat_session.user_id}的私聊"
     return chat_session.session_id
 
 
@@ -194,6 +208,22 @@ class ChatInfo(BaseModel):
     chat_name: str
     platform: Optional[str] = None
     is_group: bool = False
+    use_expression: bool = True
+    enable_learning: bool = True
+
+
+def build_chat_info(chat_id: str, db_session: Any, chat_session: Optional[ChatSession] = None) -> ChatInfo:
+    """根据聊天流 ID 构建 WebUI 展示用的聊天信息。"""
+
+    use_expression, enable_learning, _ = ExpressionConfigUtils.get_expression_config_for_chat(chat_id)
+    return ChatInfo(
+        chat_id=chat_id,
+        chat_name=get_chat_name(chat_id, db_session),
+        platform=chat_session.platform if chat_session else None,
+        is_group=bool(chat_session and chat_session.group_id),
+        use_expression=use_expression,
+        enable_learning=enable_learning,
+    )
 
 
 class ChatListResponse(BaseModel):
@@ -201,6 +231,23 @@ class ChatListResponse(BaseModel):
 
     success: bool
     data: List[ChatInfo]
+
+
+class ExpressionGroupInfo(BaseModel):
+    """表达互通组信息。"""
+
+    index: int
+    name: str
+    chat_ids: List[str]
+    members: List[ChatInfo]
+    is_global: bool = False
+
+
+class ExpressionGroupListResponse(BaseModel):
+    """表达互通组列表响应。"""
+
+    success: bool
+    data: List[ExpressionGroupInfo]
 
 
 @router.get("/chats", response_model=ChatListResponse)
@@ -212,37 +259,11 @@ async def get_chat_list() -> ChatListResponse:
     """
     try:
         chat_by_id: Dict[str, ChatInfo] = {}
-        for session_id, session in _chat_manager.sessions.items():
-            chat_name = _chat_manager.get_session_name(session_id) or session_id
-            chat_by_id[session_id] = ChatInfo(
-                chat_id=session_id,
-                chat_name=chat_name,
-                platform=session.platform,
-                is_group=session.is_group_session,
-            )
-
         with get_db_session() as session:
-            for chat_session in session.exec(select(ChatSession)).all():
-                if chat_session.session_id in chat_by_id:
-                    continue
-                chat_name = get_chat_name_from_latest_message(chat_session.session_id, session)
-                chat_by_id[chat_session.session_id] = ChatInfo(
-                    chat_id=chat_session.session_id,
-                    chat_name=chat_name or get_chat_name_from_session_record(chat_session),
-                    platform=chat_session.platform,
-                    is_group=bool(chat_session.group_id),
-                )
-
             expression_chat_ids = {chat_id for chat_id in session.exec(select(Expression.session_id)).all() if chat_id}
             for session_id in expression_chat_ids:
-                if session_id in chat_by_id:
-                    continue
-                chat_by_id[session_id] = ChatInfo(
-                    chat_id=session_id,
-                    chat_name=get_chat_name(session_id, session),
-                    platform=None,
-                    is_group=False,
-                )
+                chat_session = session.exec(select(ChatSession).where(col(ChatSession.session_id) == session_id)).first()
+                chat_by_id[session_id] = build_chat_info(session_id, session, chat_session)
 
         # 按名称排序
         chat_list = list(chat_by_id.values())
@@ -257,12 +278,65 @@ async def get_chat_list() -> ChatListResponse:
         raise HTTPException(status_code=500, detail=f"获取聊天列表失败: {str(e)}") from e
 
 
+def is_global_expression_group_marker(platform: str, item_id: str) -> bool:
+    """判断互通组成员是否为全局共享标记。"""
+    return platform == "*" and item_id == "*"
+
+
+@router.get("/groups", response_model=ExpressionGroupListResponse)
+async def get_expression_groups() -> ExpressionGroupListResponse:
+    """获取已解析的表达互通组。"""
+    try:
+        groups: List[ExpressionGroupInfo] = []
+        with get_db_session() as session:
+            all_expression_chat_ids = {
+                chat_id for chat_id in session.exec(select(Expression.session_id)).all() if chat_id
+            }
+            for index, expression_group in enumerate(global_config.expression.expression_groups):
+                chat_ids: set[str] = set()
+                is_global = False
+
+                for target_item in expression_group.expression_groups:
+                    platform = str(target_item.platform or "").strip()
+                    item_id = str(target_item.item_id or "").strip()
+                    if not platform and not item_id:
+                        continue
+                    if is_global_expression_group_marker(platform, item_id):
+                        is_global = True
+                        continue
+                    chat_ids.update(ChatConfigUtils.get_target_session_ids(target_item))
+
+                if not expression_group.expression_groups:
+                    is_global = True
+
+                resolved_chat_ids = sorted(all_expression_chat_ids if is_global else chat_ids & all_expression_chat_ids)
+                members = [build_chat_info(chat_id, session) for chat_id in resolved_chat_ids]
+                groups.append(
+                    ExpressionGroupInfo(
+                        index=index,
+                        name=f"互通组 {index + 1}",
+                        chat_ids=resolved_chat_ids,
+                        members=members,
+                        is_global=is_global,
+                    )
+                )
+
+        return ExpressionGroupListResponse(success=True, data=groups)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取表达互通组失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取表达互通组失败: {str(e)}") from e
+
+
 @router.get("/list", response_model=ExpressionListResponse)
 async def get_expression_list(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
+    chat_ids: Optional[List[str]] = Query(None, description="multiple chat ids"),
 ) -> ExpressionListResponse:
     """获取表达方式列表。
 
@@ -288,6 +362,8 @@ async def get_expression_list(
         # 聊天ID过滤
         if chat_id:
             statement = statement.where(col(Expression.session_id) == chat_id)
+        elif chat_ids:
+            statement = statement.where(col(Expression.session_id).in_(chat_ids))
 
         # 排序：最后活跃时间倒序（NULL 值放在最后）
         statement = statement.order_by(
@@ -308,6 +384,8 @@ async def get_expression_list(
                 )
             if chat_id:
                 count_statement = count_statement.where(col(Expression.session_id) == chat_id)
+            elif chat_ids:
+                count_statement = count_statement.where(col(Expression.session_id).in_(chat_ids))
             total = len(session.exec(count_statement).all())
             data = [expression_to_response(expr, session) for expr in expressions]
 
@@ -363,6 +441,7 @@ async def create_expression(
     """
     try:
         current_time = datetime.now()
+        chat_id = require_existing_chat_id(request.chat_id)
 
         # 创建表达方式
         with get_db_session() as session:
@@ -373,7 +452,7 @@ async def create_expression(
                 count=0,
                 last_active_time=current_time,
                 create_time=current_time,
-                session_id=request.chat_id,
+                session_id=chat_id,
             )
             session.add(expression)
             session.flush()
@@ -411,7 +490,7 @@ async def update_expression(
 
         # 映射 API 字段名到数据库字段名
         if "chat_id" in update_data:
-            update_data["session_id"] = update_data.pop("chat_id")
+            update_data["session_id"] = require_existing_chat_id(update_data.pop("chat_id"))
 
         if not update_data:
             raise HTTPException(status_code=400, detail="未提供任何需要更新的字段")
