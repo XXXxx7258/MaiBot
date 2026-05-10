@@ -11,6 +11,10 @@ import type {
   ExpressionCreateResponse,
   ExpressionDeleteResponse,
   ExpressionDetailResponse,
+  ExpressionClearResponse,
+  ExpressionExportItem,
+  ExpressionExportResponse,
+  ExpressionImportResponse,
   ExpressionGroupListResponse,
   ExpressionListResponse,
   ExpressionStatsResponse,
@@ -162,6 +166,128 @@ export async function getExpressionList(params: {
     return {
       success: false,
       error: '无法解析表达方式列表响应',
+    }
+  }
+}
+
+/**
+ * 按聊天导出表达方式。导出的 JSON 不包含 session_id。
+ */
+export async function exportExpressions(params: {
+  chat_id: string
+  ids?: number[]
+}): Promise<ApiResponse<ExpressionExportResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/export`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '导出表达方式失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '导出表达方式失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionExportResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析表达方式导出响应',
+    }
+  }
+}
+
+/**
+ * 将表达方式 JSON 导入到指定聊天。
+ */
+export async function importExpressions(params: {
+  chat_id: string
+  expressions: ExpressionExportItem[]
+}): Promise<ApiResponse<ExpressionImportResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/import`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '导入表达方式失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '导入表达方式失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionImportResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析表达方式导入响应',
+    }
+  }
+}
+
+/**
+ * 清除指定聊天下的全部表达方式。
+ */
+export async function clearExpressions(params: {
+  chat_id: string
+}): Promise<ApiResponse<ExpressionClearResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/clear`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '清除表达方式失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '清除表达方式失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionClearResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析表达方式清除响应',
     }
   }
 }

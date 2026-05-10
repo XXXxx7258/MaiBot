@@ -94,6 +94,70 @@ class ExpressionCreateResponse(BaseModel):
     data: ExpressionResponse
 
 
+class ExpressionExportItem(BaseModel):
+    """表达方式导出条目，不包含会话 ID。"""
+
+    situation: str
+    style: str
+    content_list: str = "[]"
+    count: int = 0
+    last_active_time: Optional[str] = None
+    create_time: Optional[str] = None
+    checked: bool = False
+    rejected: bool = False
+    modified_by: Optional[str] = None
+
+
+class ExpressionExportRequest(BaseModel):
+    """表达方式导出请求。"""
+
+    chat_id: str
+    ids: Optional[List[int]] = None
+
+
+class ExpressionExportResponse(BaseModel):
+    """表达方式导出响应。"""
+
+    success: bool = True
+    version: int = 1
+    type: str = "maibot.expression.export"
+    exported_at: str
+    source_chat_name: str
+    count: int
+    expressions: List[ExpressionExportItem]
+
+
+class ExpressionImportRequest(BaseModel):
+    """表达方式导入请求。"""
+
+    chat_id: str
+    expressions: List[ExpressionExportItem]
+
+
+class ExpressionImportResponse(BaseModel):
+    """表达方式导入响应。"""
+
+    success: bool = True
+    message: str
+    imported_count: int
+    skipped_count: int = 0
+    failed_count: int = 0
+
+
+class ExpressionClearRequest(BaseModel):
+    """清除指定聊天流表达方式请求。"""
+
+    chat_id: str
+
+
+class ExpressionClearResponse(BaseModel):
+    """清除指定聊天流表达方式响应。"""
+
+    success: bool = True
+    message: str
+    deleted_count: int = 0
+
+
 def require_existing_chat_id(chat_id: Optional[str]) -> str:
     """校验资源归属的聊天流 ID 必须是真实存在的会话。"""
 
@@ -102,6 +166,15 @@ def require_existing_chat_id(chat_id: Optional[str]) -> str:
         raise HTTPException(status_code=400, detail="缺少聊天流 ID")
     if _chat_manager.get_existing_session_by_session_id(normalized_chat_id) is None:
         raise HTTPException(status_code=400, detail=f"聊天流不存在: {normalized_chat_id}")
+    return normalized_chat_id
+
+
+def require_non_empty_chat_id(chat_id: Optional[str]) -> str:
+    """校验聊天流 ID 非空，不要求会话仍存在。"""
+
+    normalized_chat_id = str(chat_id or "").strip()
+    if not normalized_chat_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 ID")
     return normalized_chat_id
 
 
@@ -181,6 +254,44 @@ def expression_to_response(expression: Expression, db_session: Optional[Any] = N
         rejected=expression.rejected,
         modified_by=expression.modified_by.value if expression.modified_by else None,
     )
+
+
+def expression_to_export_item(expression: Expression) -> ExpressionExportItem:
+    """将表达方式转换为可迁移的导出条目，不包含聊天流 ID。"""
+
+    return ExpressionExportItem(
+        situation=expression.situation,
+        style=expression.style,
+        content_list=expression.content_list,
+        count=expression.count,
+        last_active_time=expression.last_active_time.isoformat() if expression.last_active_time else None,
+        create_time=expression.create_time.isoformat() if expression.create_time else None,
+        checked=expression.checked,
+        rejected=expression.rejected,
+        modified_by=expression.modified_by.value if expression.modified_by else None,
+    )
+
+
+def parse_export_datetime(value: Optional[str]) -> datetime:
+    """解析导入文件中的时间字段，失败时使用当前时间。"""
+
+    if not value:
+        return datetime.now()
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return datetime.now()
+
+
+def parse_modified_by(value: Optional[str]) -> Optional[ModifiedBy]:
+    """解析导入文件中的修改来源字段。"""
+
+    if not value:
+        return None
+    try:
+        return ModifiedBy(value)
+    except ValueError:
+        return None
 
 
 def get_chat_names_batch(chat_ids: List[str]) -> Dict[str, str]:
@@ -396,6 +507,134 @@ async def get_expression_list(
     except Exception as e:
         logger.exception(f"获取表达方式列表失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取表达方式列表失败: {str(e)}") from e
+
+
+@router.post("/export", response_model=ExpressionExportResponse)
+async def export_expressions(request: ExpressionExportRequest) -> ExpressionExportResponse:
+    """按单个聊天流导出表达方式，导出内容不包含 session_id。"""
+
+    try:
+        chat_id = require_non_empty_chat_id(request.chat_id)
+
+        statement = select(Expression).where(col(Expression.session_id) == chat_id)
+        if request.ids:
+            statement = statement.where(col(Expression.id).in_(request.ids))
+        statement = statement.order_by(
+            case((col(Expression.last_active_time).is_(None), 1), else_=0),
+            col(Expression.last_active_time).desc(),
+        )
+
+        with get_db_session() as session:
+            expressions = session.exec(statement).all()
+            if request.ids and len(expressions) != len(set(request.ids)):
+                found_ids = {expression.id for expression in expressions}
+                missing_ids = sorted(set(request.ids) - found_ids)
+                raise HTTPException(status_code=400, detail=f"部分表达方式不属于该聊天或不存在: {missing_ids}")
+
+            items = [expression_to_export_item(expression) for expression in expressions]
+            chat_name = get_chat_name(chat_id, session)
+
+        return ExpressionExportResponse(
+            exported_at=datetime.now().isoformat(),
+            source_chat_name=chat_name,
+            count=len(items),
+            expressions=items,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"导出表达方式失败: {e}")
+        raise HTTPException(status_code=500, detail=f"导出表达方式失败: {str(e)}") from e
+
+
+@router.post("/import", response_model=ExpressionImportResponse)
+async def import_expressions(request: ExpressionImportRequest) -> ExpressionImportResponse:
+    """将表达方式 JSON 导入到指定聊天流。"""
+
+    try:
+        chat_id = require_existing_chat_id(request.chat_id)
+        if not request.expressions:
+            raise HTTPException(status_code=400, detail="导入文件中没有表达方式")
+
+        imported_count = 0
+        skipped_count = 0
+        failed_count = 0
+
+        with get_db_session() as session:
+            existing_pairs = {
+                (situation, style)
+                for situation, style in session.exec(
+                    select(Expression.situation, Expression.style).where(col(Expression.session_id) == chat_id)
+                ).all()
+            }
+
+            for item in request.expressions:
+                situation = item.situation.strip()
+                style = item.style.strip()
+                if not situation or not style:
+                    failed_count += 1
+                    continue
+
+                dedupe_key = (situation, style)
+                if dedupe_key in existing_pairs:
+                    skipped_count += 1
+                    continue
+
+                expression = Expression(
+                    situation=situation,
+                    style=style,
+                    content_list=item.content_list,
+                    count=item.count,
+                    last_active_time=parse_export_datetime(item.last_active_time),
+                    create_time=parse_export_datetime(item.create_time),
+                    session_id=chat_id,
+                    checked=item.checked,
+                    rejected=item.rejected,
+                    modified_by=parse_modified_by(item.modified_by),
+                )
+                session.add(expression)
+                existing_pairs.add(dedupe_key)
+                imported_count += 1
+
+        logger.info(
+            f"导入表达方式完成: chat_id={chat_id}, imported={imported_count}, "
+            f"skipped={skipped_count}, failed={failed_count}"
+        )
+        return ExpressionImportResponse(
+            message=f"导入完成：成功 {imported_count} 个，跳过 {skipped_count} 个，失败 {failed_count} 个",
+            imported_count=imported_count,
+            skipped_count=skipped_count,
+            failed_count=failed_count,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"导入表达方式失败: {e}")
+        raise HTTPException(status_code=500, detail=f"导入表达方式失败: {str(e)}") from e
+
+
+@router.post("/clear", response_model=ExpressionClearResponse)
+async def clear_expressions(request: ExpressionClearRequest) -> ExpressionClearResponse:
+    """清除指定聊天流下的全部表达方式，允许清除旧的无效 session_id 数据。"""
+
+    try:
+        chat_id = require_non_empty_chat_id(request.chat_id)
+        with get_db_session() as session:
+            existing_ids = list(session.exec(select(Expression.id).where(col(Expression.session_id) == chat_id)).all())
+            if existing_ids:
+                session.exec(delete(Expression).where(col(Expression.session_id) == chat_id))
+
+        deleted_count = len(existing_ids)
+        logger.info(f"清除聊天流表达方式完成: chat_id={chat_id}, deleted={deleted_count}")
+        return ExpressionClearResponse(message=f"成功清除 {deleted_count} 个表达方式", deleted_count=deleted_count)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"清除表达方式失败: {e}")
+        raise HTTPException(status_code=500, detail=f"清除表达方式失败: {str(e)}") from e
 
 
 @router.get("/{expression_id}", response_model=ExpressionDetailResponse)

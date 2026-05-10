@@ -530,6 +530,43 @@ export function BatchDeleteConfirmDialog({
 }
 
 /**
+ * 清除单个聊天全部表达方式确认对话框
+ */
+export function ClearChatExpressionsConfirmDialog({
+  open,
+  onOpenChange,
+  chatName,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  chatName: string
+  onConfirm: () => Promise<void>
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>确认清除表达方式</AlertDialogTitle>
+          <AlertDialogDescription>
+            即将清除“{chatName || '当前聊天'}”下的全部表达方式。此操作无法撤销，建议先导出备份。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            确认清除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+/**
  * 单个删除确认对话框
  */
 export function DeleteConfirmDialog({

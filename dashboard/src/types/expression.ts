@@ -51,6 +51,42 @@ export interface ExpressionGroupListResponse {
   data: ExpressionGroupInfo[]
 }
 
+export interface ExpressionExportItem {
+  situation: string
+  style: string
+  content_list: string
+  count: number
+  last_active_time: string | null
+  create_time: string | null
+  checked: boolean
+  rejected: boolean
+  modified_by: 'ai' | 'user' | null
+}
+
+export interface ExpressionExportResponse {
+  success: boolean
+  version: number
+  type: 'maibot.expression.export'
+  exported_at: string
+  source_chat_name: string
+  count: number
+  expressions: ExpressionExportItem[]
+}
+
+export interface ExpressionImportResponse {
+  success: boolean
+  message: string
+  imported_count: number
+  skipped_count: number
+  failed_count: number
+}
+
+export interface ExpressionClearResponse {
+  success: boolean
+  message: string
+  deleted_count: number
+}
+
 /**
  * 表达方式列表响应
  */
