@@ -28,6 +28,40 @@ export interface StatsResponse {
   [key: string]: unknown
 }
 
+function createEmptyStats(pluginId: string): PluginStatsData {
+  return {
+    plugin_id: pluginId,
+    likes: 0,
+    dislikes: 0,
+    downloads: 0,
+    rating: 0,
+    rating_count: 0,
+  }
+}
+
+function normalizePluginStatsResponse(data: unknown, pluginId: string): PluginStatsData | null {
+  if (!data || typeof data !== 'object') {
+    return null
+  }
+
+  const response = data as Partial<PluginStatsData> & {
+    stats?: Partial<PluginStatsData>
+  }
+  const stats = response.stats ?? response
+
+  return {
+    ...createEmptyStats(pluginId),
+    ...stats,
+    plugin_id: String(stats.plugin_id ?? pluginId),
+    likes: Number(stats.likes ?? 0),
+    dislikes: Number(stats.dislikes ?? 0),
+    downloads: Number(stats.downloads ?? 0),
+    rating: Number(stats.rating ?? 0),
+    rating_count: Number(stats.rating_count ?? 0),
+    recent_ratings: Array.isArray(stats.recent_ratings) ? stats.recent_ratings : undefined,
+  }
+}
+
 /**
  * 获取插件统计数据
  */
@@ -40,11 +74,27 @@ export async function getPluginStats(pluginId: string): Promise<PluginStatsData 
       return null
     }
     
-    return await response.json()
+    return normalizePluginStatsResponse(await response.json(), pluginId)
   } catch (error) {
     console.error('Error fetching plugin stats:', error)
     return null
   }
+}
+
+/**
+ * 按多个历史 ID 尝试读取统计数据，兼容 plugin-repo 顶层 ID 与 manifest.id 不一致的插件。
+ */
+export async function getPluginStatsByIds(pluginIds: string[]): Promise<PluginStatsData | null> {
+  const ids = Array.from(new Set(pluginIds.map(id => id.trim()).filter(Boolean)))
+
+  for (const pluginId of ids) {
+    const stats = await getPluginStats(pluginId)
+    if (stats) {
+      return stats
+    }
+  }
+
+  return null
 }
 
 /**

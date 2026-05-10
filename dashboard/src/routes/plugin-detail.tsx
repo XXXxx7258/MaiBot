@@ -111,13 +111,17 @@ export function PluginDetailPage() {
         }
 
         const rawManifest = foundPlugin.manifest || {}
-        const pluginId = rawManifest.id || foundPlugin.id
+        const manifestId = rawManifest.id?.trim()
+        const marketplaceId = foundPlugin.id?.trim()
+        const pluginId = manifestId || marketplaceId
         const repositoryUrl = rawManifest.repository_url || rawManifest.urls?.repository
         const homepageUrl = rawManifest.homepage_url || rawManifest.urls?.homepage
 
         // 转换为 PluginInfo 格式
         const pluginInfo: PluginInfo = {
           id: pluginId,
+          marketplace_id: marketplaceId,
+          stats_ids: Array.from(new Set([marketplaceId, manifestId, pluginId].filter(Boolean))),
           manifest: {
             ...rawManifest,
             id: pluginId,
@@ -611,7 +615,7 @@ export function PluginDetailPage() {
                   <CardTitle className="text-lg">统计信息</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <PluginStats pluginId={plugin.id} />
+                  <PluginStats pluginId={plugin.id} pluginIds={plugin.stats_ids} />
                 </CardContent>
               </Card>
 

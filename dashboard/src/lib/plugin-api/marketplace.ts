@@ -51,6 +51,10 @@ interface PluginApiResponse {
   [key: string]: unknown
 }
 
+function uniqueNonEmptyValues(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.map(value => value?.trim()).filter((value): value is string => Boolean(value))))
+}
+
 function normalizePluginManifest(manifest: PluginApiResponse['manifest']): PluginInfo['manifest'] {
   const repositoryUrl = manifest.repository_url || manifest.urls?.repository
   const homepageUrl = manifest.homepage_url || manifest.urls?.homepage
@@ -110,7 +114,7 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
         console.warn('跳过无效插件数据:', item)
         return false
       }
-      const pluginId = item.manifest.id
+      const pluginId = item.manifest.id || item.id
       if (!pluginId) {
         console.warn('跳过缺少 ID 的插件:', item)
         return false
@@ -121,17 +125,25 @@ export async function fetchPluginList(): Promise<ApiResponse<PluginInfo[]>> {
       }
       return true
     })
-    .map((item) => ({
-      id: item.manifest.id!,
-      manifest: normalizePluginManifest(item.manifest),
-      downloads: 0,
-      rating: 0,
-      review_count: 0,
-      installed: false,
-      source: 'market' as const,
-      published_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }))
+    .map((item) => {
+      const manifestId = item.manifest.id?.trim()
+      const marketplaceId = item.id?.trim()
+      const pluginId = manifestId || marketplaceId!
+
+      return {
+        id: pluginId,
+        marketplace_id: marketplaceId,
+        stats_ids: uniqueNonEmptyValues([marketplaceId, manifestId, pluginId]),
+        manifest: normalizePluginManifest({ ...item.manifest, id: pluginId }),
+        downloads: 0,
+        rating: 0,
+        review_count: 0,
+        installed: false,
+        source: 'market' as const,
+        published_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+    })
   
   return {
     success: true,
