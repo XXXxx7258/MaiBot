@@ -64,7 +64,6 @@ def migrate_legacy_v1_to_v2(context: MigrationExecutionContext) -> None:
     create_frozen_v2_schema(context.connection)
 
     table_migration_jobs: List[Tuple[str, Callable[[MigrationExecutionContext], int]]] = [
-        ("chat_sessions", _migrate_chat_sessions),
         ("llm_usage", _migrate_model_usage),
         ("images", _migrate_images),
         ("mai_messages", _migrate_messages),
@@ -567,8 +566,7 @@ def _estimate_total_record_count(connection: Connection) -> int:
         int: 本次迁移预计处理的总记录数。
     """
     return (
-        _count_legacy_table_rows(connection, "chat_streams")
-        + _count_legacy_table_rows(connection, "llm_usage")
+        _count_legacy_table_rows(connection, "llm_usage")
         + _count_legacy_table_rows(connection, "emoji")
         + _count_legacy_table_rows(connection, "images")
         + _count_legacy_table_rows(connection, "messages")
@@ -589,61 +587,6 @@ def _complete_table_progress(context: MigrationExecutionContext, table_name: str
         table_name: 已完成迁移的表名。
     """
     context.advance_progress(completed_tables=1, item_name=table_name)
-
-
-def _migrate_chat_sessions(context: MigrationExecutionContext) -> int:
-    """迁移旧版 ``chat_streams`` 到新版 ``chat_sessions``。
-
-    Args:
-        context: 当前迁移步骤执行上下文。
-
-    Returns:
-        int: 迁移成功的记录数。
-    """
-    connection = context.connection
-    legacy_table = _load_legacy_table_data(connection, "chat_streams")
-    if legacy_table is None:
-        _complete_table_progress(context, "chat_sessions")
-        return 0
-
-    migrated_count = 0
-    insert_sql = text(
-        """
-        INSERT OR IGNORE INTO chat_sessions (
-            session_id,
-            created_timestamp,
-            last_active_timestamp,
-            user_id,
-            group_id,
-            platform
-        ) VALUES (
-            :session_id,
-            :created_timestamp,
-            :last_active_timestamp,
-            :user_id,
-            :group_id,
-            :platform
-        )
-        """
-    )
-    for row in legacy_table.rows:
-        session_id = _normalize_required_text(row.get("stream_id"))
-        if session_id:
-            connection.execute(
-                insert_sql,
-                {
-                    "session_id": session_id,
-                    "created_timestamp": _coerce_datetime(row.get("create_time"), fallback_now=True),
-                    "last_active_timestamp": _coerce_datetime(row.get("last_active_time"), fallback_now=True),
-                    "user_id": _normalize_optional_text(row.get("user_id")),
-                    "group_id": _normalize_optional_text(row.get("group_id")),
-                    "platform": _normalize_required_text(row.get("platform"), default="unknown"),
-                },
-            )
-            migrated_count += 1
-        context.advance_progress(records=1)
-    _complete_table_progress(context, "chat_sessions")
-    return migrated_count
 
 
 def _migrate_model_usage(context: MigrationExecutionContext) -> int:

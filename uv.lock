@@ -1055,7 +1055,7 @@ wheels = [
 
 [[package]]
 name = "maibot"
-version = "1.0.0rc16"
+version = "1.0.0rc18"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },

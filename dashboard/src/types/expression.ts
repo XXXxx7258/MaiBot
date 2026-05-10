@@ -96,6 +96,12 @@ export interface LegacyExpressionGroupPreview {
   matched_session_id: string | null
   matched_chat_name: string | null
   matched: boolean
+  matched_sessions: LegacyExpressionMatchOption[]
+}
+
+export interface LegacyExpressionMatchOption {
+  session_id: string
+  chat_name: string
 }
 
 export interface LegacyExpressionImportPreviewResponse {

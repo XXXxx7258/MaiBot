@@ -63,6 +63,7 @@ export function ExpressionManagementPage() {
   const [pageSize, setPageSize] = useState(20)
   const [search, setSearch] = useState('')
   const [browseMode, setBrowseMode] = useState<'chat' | 'group' | 'all'>('chat')
+  const [showLegacyExpressions, setShowLegacyExpressions] = useState(false)
   const [selectedChatId, setSelectedChatId] = useState('')
   const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null)
   const [selectedExpression, setSelectedExpression] = useState<Expression | null>(null)
@@ -84,7 +85,11 @@ export function ExpressionManagementPage() {
   const importInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (browseMode === 'chat' && !selectedChatId && chatList.length > 0) {
+    if (browseMode !== 'chat') return
+    if (!selectedChatId && chatList.length > 0) {
+      setSelectedChatId(chatList[0].chat_id)
+    }
+    if (selectedChatId && chatList.length > 0 && !chatList.some((chat) => chat.chat_id === selectedChatId)) {
       setSelectedChatId(chatList[0].chat_id)
     }
   }, [browseMode, chatList, selectedChatId])
@@ -107,6 +112,7 @@ export function ExpressionManagementPage() {
         search: search || undefined,
         chat_id: browseMode === 'chat' ? selectedChatId || undefined : undefined,
         chat_ids: selectedGroup && !selectedGroup.is_global ? selectedGroup.chat_ids : undefined,
+        include_legacy: showLegacyExpressions,
       })
       if (result.success) {
         setExpressions(result.data.data)
@@ -132,7 +138,7 @@ export function ExpressionManagementPage() {
   // 加载统计数据
   const loadStats = async () => {
     try {
-      const result = await getExpressionStats()
+      const result = await getExpressionStats({ include_legacy: showLegacyExpressions })
       if (result.success) {
         setStats(result.data)
       } else {
@@ -158,7 +164,7 @@ export function ExpressionManagementPage() {
   // 加载聚天列表
   const loadChatList = async () => {
     try {
-      const result = await getChatList()
+      const result = await getChatList({ include_legacy: showLegacyExpressions })
       if (result.success) {
         setChatList(result.data)
         const nameMap = new Map<string, string>()
@@ -175,7 +181,7 @@ export function ExpressionManagementPage() {
   // 初始加载
   const loadExpressionGroups = async () => {
     try {
-      const result = await getExpressionGroups()
+      const result = await getExpressionGroups({ include_legacy: showLegacyExpressions })
       if (result.success) {
         setExpressionGroups(result.data)
       }
@@ -191,7 +197,7 @@ export function ExpressionManagementPage() {
     loadChatList()
     loadExpressionGroups()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, search, browseMode, selectedChatId, selectedGroupIndex])
+  }, [page, pageSize, search, browseMode, selectedChatId, selectedGroupIndex, showLegacyExpressions])
 
   // 查看详情
   const handleViewDetail = async (expression: Expression) => {
@@ -335,6 +341,14 @@ export function ExpressionManagementPage() {
 
   const handleGroupChange = (groupIndex: number | null) => {
     setSelectedGroupIndex(groupIndex)
+    setPage(1)
+    setSelectedIds(new Set())
+  }
+
+  const handleToggleLegacyExpressions = () => {
+    setShowLegacyExpressions((current) => !current)
+    setSelectedChatId('')
+    setSelectedGroupIndex(null)
     setPage(1)
     setSelectedIds(new Set())
   }
@@ -614,6 +628,15 @@ export function ExpressionManagementPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-xs text-muted-foreground"
+              title="显示旧格式的表达方式（这些项目会在运行中被转换为新格式）"
+              onClick={handleToggleLegacyExpressions}
+            >
+              {showLegacyExpressions ? '隐藏旧格式' : '显示旧格式'}
+            </Button>
             <Label htmlFor="page-size" className="text-sm whitespace-nowrap">每页显示</Label>
             <Select
               value={pageSize.toString()}

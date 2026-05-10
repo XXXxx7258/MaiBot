@@ -209,9 +209,15 @@ export function LegacyExpressionImportDialog({
   const [importing, setImporting] = useState(false)
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const isBusy = loadingPreview || importing
 
   const getLocalFilePath = (file: File): string => {
     return (file as File & { path?: string }).path || ''
+  }
+
+  const handleDialogOpenChange = (nextOpen: boolean) => {
+    if (isBusy) return
+    onOpenChange(nextOpen)
   }
 
   useEffect(() => {
@@ -253,10 +259,12 @@ export function LegacyExpressionImportDialog({
       const initialMap: Record<string, string> = {}
       const initialEnabledMap: Record<string, boolean> = {}
       result.data.groups.forEach((group) => {
-        if (group.matched_session_id) {
+        if (group.matched_sessions.length > 1) {
+          initialMap[group.old_chat_id] = '__all_matched__'
+        } else if (group.matched_session_id) {
           initialMap[group.old_chat_id] = group.matched_session_id
         }
-        initialEnabledMap[group.old_chat_id] = Boolean(group.matched_session_id)
+        initialEnabledMap[group.old_chat_id] = group.matched_sessions.length > 0 || Boolean(group.matched_session_id)
       })
       setPreview(result.data)
       setDbPath(localPath || result.data.db_path)
@@ -270,10 +278,19 @@ export function LegacyExpressionImportDialog({
   const handleImport = async () => {
     if (!preview) return
 
-    const mappings = preview.groups.map((group) => ({
-      old_chat_id: group.old_chat_id,
-      target_chat_id: enabledMap[group.old_chat_id] ? targetMap[group.old_chat_id] || null : null,
-    }))
+    const mappings = preview.groups.map((group) => {
+      const selectedTarget = targetMap[group.old_chat_id]
+      const targetChatIds = selectedTarget === '__all_matched__'
+        ? group.matched_sessions.map((session) => session.session_id)
+        : []
+      return {
+        old_chat_id: group.old_chat_id,
+        target_chat_id: enabledMap[group.old_chat_id] && selectedTarget !== '__all_matched__'
+          ? selectedTarget || null
+          : null,
+        target_chat_ids: enabledMap[group.old_chat_id] ? targetChatIds : [],
+      }
+    })
 
     setImporting(true)
     try {
@@ -309,8 +326,18 @@ export function LegacyExpressionImportDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="[--dialog-width:72rem]">
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
+      <DialogContent className="!fixed !top-4 !translate-y-0 [--dialog-width:72rem] sm:!top-6">
+        {isBusy && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm">
+            <div className="rounded-lg border bg-background px-5 py-4 text-center shadow-lg">
+              <div className="text-sm font-medium">
+                {loadingPreview ? '正在加载旧数据库，请勿关闭' : '正在导入表达方式，请勿关闭'}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">数据量较大时可能需要等待一会儿</div>
+            </div>
+          </div>
+        )}
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Database className="h-5 w-5" />
@@ -333,7 +360,7 @@ export function LegacyExpressionImportDialog({
                   placeholder="选择旧版 SQLite 数据库文件"
                 />
               </div>
-              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={loadingPreview}>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isBusy}>
                 浏览
               </Button>
               <input
@@ -386,8 +413,13 @@ export function LegacyExpressionImportDialog({
                       <div className="text-sm">{group.expression_count}</div>
                       <div className="min-w-0 text-sm">
                         {group.matched ? (
-                          <span className="truncate text-green-600" title={group.matched_chat_name || undefined}>
-                            {group.matched_chat_name || group.matched_session_id}
+                          <span
+                            className="truncate text-green-600"
+                            title={group.matched_sessions.map((session) => session.chat_name).join(' / ') || undefined}
+                          >
+                            {group.matched_sessions.length > 1
+                              ? `${group.matched_sessions.length} 个匹配`
+                              : group.matched_chat_name || group.matched_session_id}
                           </span>
                         ) : (
                           <span className="text-amber-600">未找到</span>
@@ -411,7 +443,17 @@ export function LegacyExpressionImportDialog({
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="skip">跳过</SelectItem>
-                          {targetChatList.map((chat) => (
+                          {group.matched_sessions.length > 1 && (
+                            <SelectItem value="__all_matched__">全部匹配项</SelectItem>
+                          )}
+                          {group.matched_sessions.map((session) => (
+                            <SelectItem key={`matched-${session.session_id}`} value={session.session_id}>
+                              {session.chat_name}
+                            </SelectItem>
+                          ))}
+                          {targetChatList
+                            .filter((chat) => !group.matched_sessions.some((session) => session.session_id === chat.chat_id))
+                            .map((chat) => (
                             <SelectItem key={chat.chat_id} value={chat.chat_id}>
                               {chat.chat_name}
                             </SelectItem>
@@ -432,10 +474,10 @@ export function LegacyExpressionImportDialog({
         </DialogBody>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isBusy}>
             取消
           </Button>
-          <Button onClick={handleImport} disabled={!preview || importing}>
+          <Button onClick={handleImport} disabled={!preview || isBusy}>
             {importing ? '导入中...' : '确认导入'}
           </Button>
         </DialogFooter>

@@ -31,6 +31,8 @@ from src.common.database.migrations import (
     SchemaVersionSource,
     SQLiteSchemaInspector,
     SQLiteUserVersionStore,
+    V4_SCHEMA_VERSION,
+    V5_SCHEMA_VERSION,
     build_default_migration_registry,
     build_default_schema_version_resolver,
     create_database_migration_bootstrapper,
@@ -727,6 +729,128 @@ def test_bootstrapper_runs_registered_steps_for_versioned_database(tmp_path: Pat
     assert snapshot.has_column("bootstrap_records", "email")
 
 
+def test_default_bootstrapper_clears_group_session_user_id_from_v4_database(tmp_path: Path) -> None:
+    """v4 -> v5 迁移应清空群聊会话中无归属语义的 ``user_id``。"""
+
+    engine = _create_sqlite_engine(tmp_path / "v4_to_v5.db")
+    bootstrapper = create_database_migration_bootstrapper(engine)
+
+    with engine.begin() as connection:
+        _create_current_schema(connection)
+        connection.execute(
+            text(
+                """
+                INSERT INTO chat_sessions (
+                    session_id,
+                    created_timestamp,
+                    last_active_timestamp,
+                    user_id,
+                    group_id,
+                    platform
+                ) VALUES
+                    ('group-session', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'first-user', 'group-1', 'qq'),
+                    ('private-session', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'private-user', NULL, 'qq')
+                """
+            )
+        )
+        SQLiteUserVersionStore().write_version(connection, V4_SCHEMA_VERSION)
+
+    migration_state = bootstrapper.prepare_database()
+
+    assert migration_state.resolved_version.version == LATEST_SCHEMA_VERSION
+
+    with engine.connect() as connection:
+        rows = {
+            row["session_id"]: row["user_id"]
+            for row in connection.execute(
+                text(
+                    """
+                    SELECT session_id, user_id
+                    FROM chat_sessions
+                    ORDER BY session_id
+                    """
+                )
+            ).mappings()
+        }
+        recorded_version = SQLiteUserVersionStore().read_version(connection)
+
+    assert recorded_version == LATEST_SCHEMA_VERSION
+    assert rows["group-session"] is None
+    assert rows["private-session"] == "private-user"
+
+
+def test_default_bootstrapper_adds_chat_session_route_columns_from_v5_database(tmp_path: Path) -> None:
+    """v5 -> v6 迁移应添加路由字段，历史数据默认保持为空。"""
+
+    engine = _create_sqlite_engine(tmp_path / "v5_to_v6.db")
+    bootstrapper = create_database_migration_bootstrapper(engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_sessions (
+                    id INTEGER NOT NULL,
+                    session_id VARCHAR(255) NOT NULL,
+                    created_timestamp DATETIME,
+                    last_active_timestamp DATETIME,
+                    user_id VARCHAR(255),
+                    group_id VARCHAR(255),
+                    platform VARCHAR(100) NOT NULL,
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO chat_sessions (
+                    id,
+                    session_id,
+                    created_timestamp,
+                    last_active_timestamp,
+                    user_id,
+                    group_id,
+                    platform
+                ) VALUES (
+                    1,
+                    'group-session',
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP,
+                    NULL,
+                    'group-1',
+                    'qq'
+                )
+                """
+            )
+        )
+        SQLiteUserVersionStore().write_version(connection, V5_SCHEMA_VERSION)
+
+    migration_state = bootstrapper.prepare_database()
+
+    assert migration_state.resolved_version.version == LATEST_SCHEMA_VERSION
+
+    with engine.connect() as connection:
+        snapshot = SQLiteSchemaInspector().inspect(connection)
+        row = connection.execute(
+            text(
+                """
+                SELECT account_id, scope
+                FROM chat_sessions
+                WHERE session_id = 'group-session'
+                """
+            )
+        ).mappings().one()
+        recorded_version = SQLiteUserVersionStore().read_version(connection)
+
+    assert recorded_version == LATEST_SCHEMA_VERSION
+    assert snapshot.has_column("chat_sessions", "account_id")
+    assert snapshot.has_column("chat_sessions", "scope")
+    assert row["account_id"] is None
+    assert row["scope"] is None
+
+
 def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> None:
     """默认桥接器应能把旧版 ``0.x`` 数据库整体迁移到最新结构。"""
     engine = _create_sqlite_engine(tmp_path / "legacy_v1_to_v2.db")
@@ -779,6 +903,14 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
                 """
             )
         ).scalar_one()
+        chat_session_count = connection.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM chat_sessions
+                """
+            )
+        ).scalar_one()
 
     assert recorded_version == LATEST_SCHEMA_VERSION
     assert snapshot.has_table("__legacy_v1_messages")
@@ -799,6 +931,7 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
     assert tool_row["tool_display_prompt"] == "执行搜索"
     assert expression_count == 0
     assert jargon_count == 0
+    assert chat_session_count == 0
 
 
 def test_legacy_v1_migration_reports_table_progress(tmp_path: Path) -> None:
@@ -828,17 +961,17 @@ def test_legacy_v1_migration_reports_table_progress(tmp_path: Path) -> None:
 
     migration_plan = manager.migrate(target_version=LATEST_SCHEMA_VERSION)
 
-    assert migration_plan.step_count() == 3
-    assert len(reporter_instances) == 3
+    assert migration_plan.step_count() == 5
+    assert len(reporter_instances) == 5
     reporter_events = reporter_instances[0].events
 
     assert reporter_events[0] == ("open", None, None, None)
-    assert reporter_events[1] == ("start", 4, 12, "总迁移进度")
+    assert reporter_events[1] == ("start", 3, 11, "总迁移进度")
     assert reporter_events[-1] == ("close", None, None, None)
-    assert reporter_events.count(("advance", 1, 0, None)) == 4
-    assert reporter_events.count(("advance", 0, 1, "chat_sessions")) == 1
+    assert reporter_events.count(("advance", 1, 0, None)) == 3
+    assert reporter_events.count(("advance", 0, 1, "chat_sessions")) == 0
     assert reporter_events.count(("advance", 0, 1, "thinking_questions")) == 1
-    assert len([event for event in reporter_events if event[0] == "advance"]) == 16
+    assert len([event for event in reporter_events if event[0] == "advance"]) == 14
 
 
 def test_initialize_database_calls_bootstrapper_before_create_all(

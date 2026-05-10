@@ -40,6 +40,8 @@ class BotChatSession(MaiChatSession):
         platform: str,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
+        account_id: Optional[str] = None,
+        scope: Optional[str] = None,
         created_timestamp: Optional[datetime] = None,
         last_active_timestamp: Optional[datetime] = None,
     ):
@@ -51,6 +53,8 @@ class BotChatSession(MaiChatSession):
             platform=platform,
             user_id=user_id,
             group_id=group_id,
+            account_id=account_id,
+            scope=scope,
             created_timestamp=created_timestamp,
             last_active_timestamp=last_active_timestamp,
         )
@@ -112,7 +116,10 @@ class ChatManager:
             scope=scope,
         )
         if session := self.get_session_by_session_id(session_id):
+            route_metadata_changed = self._apply_route_metadata(session, account_id=account_id, scope=scope)
             session.update_active_time()
+            if route_metadata_changed:
+                self._save_session(session)
             return session
 
         # 内存没有就找db
@@ -121,6 +128,10 @@ class ChatManager:
                 statement = select(ChatSession).filter_by(session_id=session_id).limit(1)
                 if result := db_session.exec(statement).first():
                     session = BotChatSession.from_db_instance(result)
+                    if self._apply_route_metadata(session, account_id=account_id, scope=scope):
+                        result.account_id = session.account_id
+                        result.scope = session.scope
+                        db_session.add(result)
                     self.sessions[session.session_id] = session
                     return session
         except Exception as e:
@@ -133,6 +144,8 @@ class ChatManager:
             platform=platform,
             user_id=user_id,
             group_id=group_id,
+            account_id=account_id,
+            scope=scope,
         )
         self.sessions[new_session.session_id] = new_session
         if new_session.session_id in self.last_messages:
@@ -329,6 +342,31 @@ class ChatManager:
             and str(getattr(session, target_attr) or "").strip() == target_id
         )
 
+    @staticmethod
+    def _normalize_route_value(value: Optional[str]) -> Optional[str]:
+        normalized_value = str(value or "").strip()
+        return normalized_value or None
+
+    @classmethod
+    def _apply_route_metadata(
+        cls,
+        session: BotChatSession,
+        *,
+        account_id: Optional[str],
+        scope: Optional[str],
+    ) -> bool:
+        changed = False
+        normalized_account_id = cls._normalize_route_value(account_id)
+        normalized_scope = cls._normalize_route_value(scope)
+
+        if normalized_account_id and not cls._normalize_route_value(session.account_id):
+            session.account_id = normalized_account_id
+            changed = True
+        if normalized_scope and not cls._normalize_route_value(session.scope):
+            session.scope = normalized_scope
+            changed = True
+        return changed
+
     def get_session_by_session_id(self, session_id: str) -> Optional[BotChatSession]:
         """根据会话ID获取对应的会话
 
@@ -385,6 +423,8 @@ class ChatManager:
             if result := db_session.exec(statement).first():
                 result.created_timestamp = db_instance.created_timestamp
                 result.last_active_timestamp = db_instance.last_active_timestamp
+                result.account_id = db_instance.account_id
+                result.scope = db_instance.scope
                 db_session.add(result)
             else:
                 db_session.add(db_instance)

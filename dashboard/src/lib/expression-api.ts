@@ -32,8 +32,10 @@ const API_BASE = '/api/webui/expression'
 /**
  * 获取聊天列表
  */
-export async function getChatList(): Promise<ApiResponse<ChatInfo[]>> {
-  const response = await fetchWithAuth(`${API_BASE}/chats`, {
+export async function getChatList(params: { include_legacy?: boolean } = {}): Promise<ApiResponse<ChatInfo[]>> {
+  const queryParams = new URLSearchParams()
+  if (params.include_legacy) queryParams.append('include_legacy', 'true')
+  const response = await fetchWithAuth(`${API_BASE}/chats?${queryParams}`, {
     
   })
 
@@ -76,8 +78,12 @@ export async function getChatList(): Promise<ApiResponse<ChatInfo[]>> {
 /**
  * 获取可作为导入目标的全部聊天流。
  */
-export async function getExpressionChatTargets(): Promise<ApiResponse<ChatInfo[]>> {
-  const response = await fetchWithAuth(`${API_BASE}/chat-targets`, {})
+export async function getExpressionChatTargets(
+  params: { include_legacy?: boolean } = {}
+): Promise<ApiResponse<ChatInfo[]>> {
+  const queryParams = new URLSearchParams()
+  if (params.include_legacy) queryParams.append('include_legacy', 'true')
+  const response = await fetchWithAuth(`${API_BASE}/chat-targets?${queryParams}`, {})
 
   if (!response.ok) {
     try {
@@ -117,8 +123,12 @@ export async function getExpressionChatTargets(): Promise<ApiResponse<ChatInfo[]
 /**
  * 获取表达互通组列表
  */
-export async function getExpressionGroups(): Promise<ApiResponse<ExpressionGroupListResponse['data']>> {
-  const response = await fetchWithAuth(`${API_BASE}/groups`, {})
+export async function getExpressionGroups(
+  params: { include_legacy?: boolean } = {}
+): Promise<ApiResponse<ExpressionGroupListResponse['data']>> {
+  const queryParams = new URLSearchParams()
+  if (params.include_legacy) queryParams.append('include_legacy', 'true')
+  const response = await fetchWithAuth(`${API_BASE}/groups?${queryParams}`, {})
 
   if (!response.ok) {
     try {
@@ -164,6 +174,7 @@ export async function getExpressionList(params: {
   search?: string
   chat_id?: string
   chat_ids?: string[]
+  include_legacy?: boolean
 }): Promise<ApiResponse<ExpressionListResponse>> {
   const queryParams = new URLSearchParams()
 
@@ -171,6 +182,7 @@ export async function getExpressionList(params: {
   if (params.page_size) queryParams.append('page_size', params.page_size.toString())
   if (params.search) queryParams.append('search', params.search)
   if (params.chat_id) queryParams.append('chat_id', params.chat_id)
+  if (params.include_legacy) queryParams.append('include_legacy', 'true')
   params.chat_ids?.forEach((chatId) => queryParams.append('chat_ids', chatId))
 
   const response = await fetchWithAuth(`${API_BASE}/list?${queryParams}`, {
@@ -422,7 +434,7 @@ export async function previewLegacyExpressionImportFile(
  */
 export async function importLegacyExpressions(params: {
   db_path: string
-  mappings: Array<{ old_chat_id: string; target_chat_id?: string | null }>
+  mappings: Array<{ old_chat_id: string; target_chat_id?: string | null; target_chat_ids?: string[] }>
 }): Promise<ApiResponse<LegacyExpressionImportResponse>> {
   const response = await fetchWithAuth(`${API_BASE}/legacy-import/import`, {
     method: 'POST',
@@ -693,8 +705,10 @@ export async function batchDeleteExpressions(expressionIds: number[]): Promise<A
 /**
  * 获取表达方式统计数据
  */
-export async function getExpressionStats(): Promise<ApiResponse<any>> {
-  const response = await fetchWithAuth(`${API_BASE}/stats/summary`, {
+export async function getExpressionStats(params: { include_legacy?: boolean } = {}): Promise<ApiResponse<any>> {
+  const queryParams = new URLSearchParams()
+  if (params.include_legacy) queryParams.append('include_legacy', 'true')
+  const response = await fetchWithAuth(`${API_BASE}/stats/summary?${queryParams}`, {
     
   })
 
