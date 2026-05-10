@@ -14,7 +14,7 @@ class TempMethodsExpression:
         return ExpressionConfigUtils._find_expression_config_item(chat_stream_id)
 
     @staticmethod
-    def get_expression_config_for_chat(chat_stream_id: Optional[str] = None) -> tuple[bool, bool, bool]:
+    def get_expression_config_for_chat(chat_stream_id: Optional[str] = None) -> tuple[bool, bool]:
         """
         根据聊天流 ID 获取表达配置。
 
@@ -22,7 +22,7 @@ class TempMethodsExpression:
             chat_stream_id: 聊天流 ID，格式为哈希值
 
         Returns:
-            tuple: (是否使用表达, 是否学习表达, 是否启用 jargon 学习)
+            tuple: (是否使用表达, 是否学习表达)
         """
         return ExpressionConfigUtils.get_expression_config_for_chat(chat_stream_id)
 

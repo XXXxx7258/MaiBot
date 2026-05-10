@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import json
 
+from src.common.utils.utils_config import JargonConfigUtils
 from src.core.tooling import ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.learners.jargon_explainer import search_jargon
 
@@ -54,6 +55,10 @@ async def handle_tool(
             invocation.tool_name,
             "查询黑话工具至少需要一个非空词条。",
         )
+
+    use_jargon, _ = JargonConfigUtils.get_jargon_config_for_chat(tool_ctx.runtime.session_id)
+    if not use_jargon:
+        return tool_ctx.build_failure_result(invocation.tool_name, "当前聊天流未启用黑话使用。")
 
     limit = 5
     case_sensitive = False

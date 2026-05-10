@@ -35,6 +35,8 @@ import {
   ChatTalkValueRulesHook,
   ExpressionGroupsHook,
   ExpressionLearningListHook,
+  JargonGroupsHook,
+  JargonLearningListHook,
   KeywordRulesHook,
   HiddenFieldHook,
   MCPRootItemsHook,
@@ -171,6 +173,7 @@ function BotConfigPageContent() {
   const [personalityConfig, setPersonalityConfig] = useState<ConfigSectionData | null>(null)
   const [chatConfig, setChatConfig] = useState<ConfigSectionData | null>(null)
   const [expressionConfig, setExpressionConfig] = useState<ConfigSectionData | null>(null)
+  const [jargonConfig, setJargonConfig] = useState<ConfigSectionData | null>(null)
   const [emojiConfig, setEmojiConfig] = useState<ConfigSectionData | null>(null)
   const [visualConfig, setVisualConfig] = useState<ConfigSectionData | null>(null)
   const [voiceConfig, setVoiceConfig] = useState<ConfigSectionData | null>(null)
@@ -267,6 +270,7 @@ function BotConfigPageContent() {
     setPersonalityConfig((config.personality ?? {}) as ConfigSectionData)
     setChatConfig((config.chat ?? {}) as ConfigSectionData)
     setExpressionConfig((config.expression ?? {}) as ConfigSectionData)
+    setJargonConfig((config.jargon ?? {}) as ConfigSectionData)
     setEmojiConfig((config.emoji ?? {}) as ConfigSectionData)
     setVisualConfig((config.visual ?? {}) as ConfigSectionData)
     setVoiceConfig((config.voice ?? {}) as ConfigSectionData)
@@ -297,6 +301,7 @@ function BotConfigPageContent() {
       personality: personalityConfig,
       chat: chatConfig,
       expression: expressionConfig,
+      jargon: jargonConfig,
       emoji: emojiConfig,
       visual: visualConfig,
       voice: voiceConfig,
@@ -320,6 +325,7 @@ function BotConfigPageContent() {
     personalityConfig,
     chatConfig,
     expressionConfig,
+    jargonConfig,
     emojiConfig,
     visualConfig,
     voiceConfig,
@@ -424,6 +430,8 @@ function BotConfigPageContent() {
       ['chat.talk_value_rules', ChatTalkValueRulesHook],
       ['expression.expression_groups', ExpressionGroupsHook],
       ['expression.learning_list', ExpressionLearningListHook],
+      ['jargon.jargon_groups', JargonGroupsHook],
+      ['jargon.learning_list', JargonLearningListHook],
       ['keyword_reaction.keyword_rules', KeywordRulesHook],
       ['keyword_reaction.regex_rules', RegexRulesHook],
       ['mcp.client.roots.items', MCPRootItemsHook],
@@ -455,6 +463,7 @@ function BotConfigPageContent() {
   useConfigAutoSave(personalityConfig, 'personality', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(chatConfig, 'chat', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(expressionConfig, 'expression', initialLoadRef.current, triggerAutoSave)
+  useConfigAutoSave(jargonConfig, 'jargon', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(emojiConfig, 'emoji', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(visualConfig, 'visual', initialLoadRef.current, triggerAutoSave)
   useConfigAutoSave(voiceConfig, 'voice', initialLoadRef.current, triggerAutoSave)
@@ -682,6 +691,7 @@ function BotConfigPageContent() {
       personality: personalityConfig,
       chat: chatConfig,
       expression: expressionConfig,
+      jargon: jargonConfig,
       emoji: emojiConfig,
       visual: visualConfig,
       voice: voiceConfig,
@@ -705,6 +715,7 @@ function BotConfigPageContent() {
       personalityConfig,
       chatConfig,
       expressionConfig,
+      jargonConfig,
       emojiConfig,
       visualConfig,
       voiceConfig,
@@ -731,6 +742,7 @@ function BotConfigPageContent() {
       personality: setPersonalityConfig,
       chat: setChatConfig,
       expression: setExpressionConfig,
+      jargon: setJargonConfig,
       emoji: setEmojiConfig,
       visual: setVisualConfig,
       voice: setVoiceConfig,

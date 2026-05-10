@@ -21,7 +21,7 @@ from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_mentioned_bot_in_message
 from src.common.data_models.mai_message_data_model import GroupInfo, UserInfo
 from src.common.logger import get_logger
-from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
+from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
@@ -126,10 +126,10 @@ class MaisakaHeartFlowChatting:
             int(global_config.chat.planner_interrupt_max_consecutive_count),
         )
 
-        expr_use, expr_learn, jargon_learn = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
+        expr_use, expr_learn = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
         self._enable_expression_use = expr_use
         self._enable_expression_learning = expr_learn
-        self._enable_jargon_learning = jargon_learn
+        self._enable_jargon_use, self._enable_jargon_learning = JargonConfigUtils.get_jargon_config_for_chat(session_id)
         self._min_extraction_interval = 30
         self._last_expression_extraction_time = 0.0
         self._expression_learner = ExpressionLearner(session_id)

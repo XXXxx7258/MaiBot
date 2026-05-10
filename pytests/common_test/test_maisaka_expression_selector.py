@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+﻿from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +22,7 @@ def test_resolve_expression_group_scope_returns_related_sessions(monkeypatch: py
             expression=SimpleNamespace(
                 expression_groups=[
                     SimpleNamespace(
-                        expression_groups=[
+                        targets=[
                             _build_target("qq", "10001"),
                             _build_target("qq", "10002"),
                         ]
@@ -30,6 +30,20 @@ def test_resolve_expression_group_scope_returns_related_sessions(monkeypatch: py
                 ]
             )
         ),
+    )
+    target_session_ids = {
+        "10001": current_session_id,
+        "10002": related_session_id,
+    }
+    monkeypatch.setattr(
+        selector_module.ChatConfigUtils,
+        "get_target_session_ids",
+        lambda target_item: {target_session_ids[target_item.item_id]},
+    )
+    monkeypatch.setattr(
+        selector_module.ChatConfigUtils,
+        "target_matches_session",
+        lambda target_item, session_id: target_item.item_id == "10001" and session_id == current_session_id,
     )
 
     selector = MaisakaExpressionSelector()
@@ -50,7 +64,7 @@ def test_resolve_expression_group_scope_matches_routed_sessions(monkeypatch: pyt
             expression=SimpleNamespace(
                 expression_groups=[
                     SimpleNamespace(
-                        expression_groups=[
+                        targets=[
                             _build_target("qq", "10001"),
                             _build_target("qq", "10002"),
                         ]
@@ -93,7 +107,7 @@ def test_resolve_expression_group_scope_uses_star_as_global_share(monkeypatch: p
             expression=SimpleNamespace(
                 expression_groups=[
                     SimpleNamespace(
-                        expression_groups=[
+                        targets=[
                             _build_target("*", "*"),
                         ]
                     )
@@ -119,7 +133,7 @@ def test_resolve_expression_group_scope_does_not_treat_empty_target_as_global(mo
             expression=SimpleNamespace(
                 expression_groups=[
                     SimpleNamespace(
-                        expression_groups=[
+                        targets=[
                             _build_target("", ""),
                         ]
                     )
@@ -133,3 +147,4 @@ def test_resolve_expression_group_scope_does_not_treat_empty_target_as_global(mo
 
     assert related_session_ids == {current_session_id}
     assert has_global_share is False
+

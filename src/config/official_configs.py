@@ -2160,7 +2160,7 @@ class LearningItem(ConfigBase):
     )
     """用户ID，与平台一起留空表示全局"""
 
-    rule_type: Literal["group", "private"] = Field(
+    type: Literal["group", "private"] = Field(
         default="group",
         json_schema_extra={
             "label": {
@@ -2175,52 +2175,39 @@ class LearningItem(ConfigBase):
     )
     """聊天流类型，group（群聊）或private（私聊）"""
 
-    use_expression: bool = Field(
+    use: bool = Field(
         default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "使用表达",
-                "en_US": "Use expressions",
-                "ja_JP": "表現を使用",
+                "zh_CN": "使用",
+                "en_US": "Use",
+                "ja_JP": "使用",
             },
             "x-widget": "switch",
             "x-icon": "message-square",
         },
     )
-    """是否使用表达"""
+    """是否使用"""
 
-    enable_learning: bool = Field(
+    learn: bool = Field(
         default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "学习表达",
-                "en_US": "Learn expressions",
-                "ja_JP": "表現を学習",
+                "zh_CN": "学习",
+                "en_US": "Learn",
+                "ja_JP": "学習",
             },
             "x-widget": "switch",
             "x-icon": "graduation-cap",
         },
     )
-    """是否学习表达"""
+    """是否学习"""
 
-    enable_jargon_learning: bool = Field(
-        default=False,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "学习黑话",
-                "en_US": "Learn jargon",
-                "ja_JP": "隠語を学習",
-            },
-            "x-widget": "switch",
-            "x-icon": "book",
-        },
-    )
-    """是否学习黑话"""
 
-class ExpressionGroup(ConfigBase):
-    """表达互通组配置类，若列表为空代表全局共享"""
+class ChatStreamGroup(ConfigBase):
+    """聊天流互通组配置类"""
 
-    expression_groups: list[TargetItem] = Field(
+    targets: list[TargetItem] = Field(
         default_factory=lambda: [],
         json_schema_extra={
             "label": {
@@ -2232,13 +2219,13 @@ class ExpressionGroup(ConfigBase):
             "x-icon": "users",
         },
     )
-    """_wrap_表达学习互通组"""
+    """_wrap_互通聊天流"""
 
 
 class ExpressionConfig(ConfigBase):
     """表达配置类"""
 
-    __ui_label__ = "表达"
+    __ui_label__ = "表达与黑话"
     __ui_icon__ = "pen-tool"
 
     learning_list: list[LearningItem] = Field(
@@ -2246,10 +2233,9 @@ class ExpressionConfig(ConfigBase):
             LearningItem(
                 platform="",
                 item_id="",
-                rule_type="group",
-                use_expression=True,
-                enable_learning=True,
-                enable_jargon_learning=True,
+                type="group",
+                use=True,
+                learn=True,
             )
         ],
         json_schema_extra={
@@ -2264,7 +2250,7 @@ class ExpressionConfig(ConfigBase):
     )
     """_wrap_表达学习配置列表，支持按聊天流配置"""
 
-    expression_groups: list[ExpressionGroup] = Field(
+    expression_groups: list[ChatStreamGroup] = Field(
         default_factory=list,
         json_schema_extra={
             "label": {
@@ -2336,19 +2322,50 @@ class ExpressionConfig(ConfigBase):
     )
     """表达方式自动检查的额外自定义评估标准"""
 
-    all_global_jargon: bool = Field(
-        default=True,
+
+class JargonConfig(ConfigBase):
+    """黑话配置类"""
+
+    __ui_parent__ = "expression"
+    __ui_label__ = "黑话"
+    __ui_icon__ = "book-open"
+
+    learning_list: list[LearningItem] = Field(
+        default_factory=lambda: [
+            LearningItem(
+                platform="",
+                item_id="",
+                type="group",
+                use=True,
+                learn=True,
+            )
+        ],
         json_schema_extra={
             "label": {
-                "zh_CN": "全局黑话",
-                "en_US": "Global jargon",
-                "ja_JP": "グローバル隠語",
+                "zh_CN": "学习配置",
+                "en_US": "Learning settings",
+                "ja_JP": "学習設定",
             },
-            "x-widget": "switch",
-            "x-icon": "globe",
+            "x-widget": "custom",
+            "x-icon": "list",
         },
     )
-    """是否开启全局黑话模式，注意，此功能关闭后，已经记录的全局黑话不会改变，需要手动删除"""
+    """_wrap_黑话学习配置列表，支持按聊天流配置，platform 或 item_id 可使用 * 通配"""
+
+    jargon_groups: list[ChatStreamGroup] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "黑话互通组",
+                "en_US": "Jargon sharing groups",
+                "ja_JP": "隠語共有グループ",
+            },
+            "x-widget": "custom",
+            "x-icon": "users",
+        },
+    )
+    """_wrap_黑话学习互通组，默认不互通；platform 或 item_id 可使用 * 通配"""
+
 
 class VoiceConfig(ConfigBase):
     """语音识别配置类"""

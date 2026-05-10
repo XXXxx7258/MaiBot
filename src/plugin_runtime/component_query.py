@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, Optional, Tupl
 
 from src.common.logger import get_logger
 from src.core.tooling import (
+    ToolContentItem,
     ToolAvailabilityContext,
     ToolExecutionContext,
     ToolExecutionResult,
@@ -769,6 +770,7 @@ class ComponentQueryService:
         if isinstance(result, dict):
             success = bool(result.get("success", True))
             content = str(result.get("content", result.get("message", "")) or "").strip()
+            content_items = ComponentQueryService._parse_tool_content_items(result.get("content_items"))
             error_message = ""
             if not success:
                 error_message = str(result.get("error", result.get("message", "插件工具执行失败")) or "").strip()
@@ -778,6 +780,7 @@ class ComponentQueryService:
                 content=content,
                 error_message=error_message,
                 structured_content=result,
+                content_items=content_items,
                 metadata={"plugin_id": entry.plugin_id},
             )
 
@@ -802,6 +805,37 @@ class ComponentQueryService:
             structured_content=result,
             metadata={"plugin_id": entry.plugin_id},
         )
+
+    @staticmethod
+    def _parse_tool_content_items(raw_items: Any) -> list[ToolContentItem]:
+        """从插件工具返回值中解析结构化内容项。"""
+
+        if not isinstance(raw_items, list):
+            return []
+
+        content_items: list[ToolContentItem] = []
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                continue
+
+            raw_content_type = str(raw_item.get("content_type") or raw_item.get("type") or "unknown").strip()
+            if raw_content_type not in {"text", "image", "audio", "resource_link", "resource", "binary", "unknown"}:
+                raw_content_type = "unknown"
+
+            metadata = raw_item.get("metadata")
+            content_items.append(
+                ToolContentItem(
+                    content_type=cast(Any, raw_content_type),
+                    text=str(raw_item.get("text") or ""),
+                    data=str(raw_item.get("data") or raw_item.get("base64") or ""),
+                    mime_type=str(raw_item.get("mime_type") or ""),
+                    uri=str(raw_item.get("uri") or ""),
+                    name=str(raw_item.get("name") or ""),
+                    description=str(raw_item.get("description") or ""),
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                )
+            )
+        return content_items
 
     async def invoke_tool_as_tool(
         self,

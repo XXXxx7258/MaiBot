@@ -729,7 +729,7 @@ class ChatInfo(BaseModel):
 def build_chat_info(chat_id: str, db_session: Any, chat_session: Optional[ChatSession] = None) -> ChatInfo:
     """根据聊天流 ID 构建 WebUI 展示用的聊天信息。"""
 
-    use_expression, enable_learning, _ = ExpressionConfigUtils.get_expression_config_for_chat(chat_id)
+    use_expression, enable_learning = ExpressionConfigUtils.get_expression_config_for_chat(chat_id)
     return ChatInfo(
         chat_id=chat_id,
         chat_name=get_chat_name(chat_id, db_session),
@@ -841,7 +841,7 @@ async def get_expression_groups(
                 chat_ids: set[str] = set()
                 is_global = False
 
-                for target_item in expression_group.expression_groups:
+                for target_item in expression_group.targets:
                     platform = str(target_item.platform or "").strip()
                     item_id = str(target_item.item_id or "").strip()
                     if not platform and not item_id:
@@ -851,7 +851,7 @@ async def get_expression_groups(
                         continue
                     chat_ids.update(ChatConfigUtils.get_target_session_ids(target_item))
 
-                if not expression_group.expression_groups:
+                if not expression_group.targets:
                     is_global = True
 
                 resolved_chat_ids = sorted(all_expression_chat_ids if is_global else chat_ids & all_expression_chat_ids)

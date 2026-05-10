@@ -13,6 +13,7 @@ from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.database.database import get_db_session
 from src.common.database.database_model import Jargon
 from src.common.logger import get_logger
+from src.common.utils.utils_config import JargonConfigUtils
 from src.config.config import global_config
 from src.plugin_runtime.hook_schema_utils import build_object_schema
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
@@ -502,24 +503,22 @@ class JargonMiner:
             except Exception as e:
                 logger.error(f"查询黑话 '{content}' 失败: {e}")
                 continue
+            related_session_ids, _ = JargonConfigUtils.resolve_jargon_group_scope(self.session_id)
             # 找匹配项
             matched_jargon: Optional[Jargon] = None
             for item in jargon_items:
-                if global_config.expression.all_global_jargon:
-                    # 开启all_global：所有content匹配的记录都可以
+                if item.is_global:
                     matched_jargon = item
                     break
-                else:
-                    # 检查列表是否包含目标session_id
-                    if item.session_id_dict:
-                        try:
-                            session_id_dict = json.loads(item.session_id_dict)
-                            if self.session_id in session_id_dict:
-                                matched_jargon = item
-                                break
-                        except Exception as e:
-                            logger.error(f"解析Jargon id={item.id} session_id_list失败: {e}")
-                            continue
+                if item.session_id_dict:
+                    try:
+                        session_id_dict = json.loads(item.session_id_dict)
+                        if related_session_ids.intersection(session_id_dict):
+                            matched_jargon = item
+                            break
+                    except Exception as e:
+                        logger.error(f"解析Jargon id={item.id} session_id_list失败: {e}")
+                        continue
             if matched_jargon:
                 # 已存在记录，更新count和raw_content
                 self._update_jargon(matched_jargon, raw_content_set)
@@ -528,13 +527,12 @@ class JargonMiner:
                 updated += 1
             else:
                 # 没找到匹配记录，创建新记录
-                is_global_new = global_config.expression.all_global_jargon
                 session_dict_str = json.dumps({self.session_id: 1})
                 new_jargon = Jargon(
                     content=content,
                     raw_content=json.dumps(list(raw_content_set), ensure_ascii=False),
                     session_id_dict=session_dict_str,
-                    is_global=is_global_new,
+                    is_global=False,
                     count=1,
                     meaning="",
                 )
@@ -594,10 +592,6 @@ class JargonMiner:
         session_id_dict: Dict[str, int] = json.loads(db_jargon.session_id_dict)
         session_id_dict[self.session_id] = session_id_dict.get(self.session_id, 0) + 1
         db_jargon.session_id_dict = json.dumps(session_id_dict)
-
-        # 开启all_global时，确保记录标记为is_global=True
-        if global_config.expression.all_global_jargon:
-            db_jargon.is_global = True
 
         try:
             with get_db_session() as session:
