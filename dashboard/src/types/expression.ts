@@ -87,6 +87,35 @@ export interface ExpressionClearResponse {
   deleted_count: number
 }
 
+export interface LegacyExpressionGroupPreview {
+  old_chat_id: string
+  expression_count: number
+  platform: string | null
+  target_id: string | null
+  chat_type: 'group' | 'private' | null
+  matched_session_id: string | null
+  matched_chat_name: string | null
+  matched: boolean
+}
+
+export interface LegacyExpressionImportPreviewResponse {
+  success: boolean
+  db_path: string
+  total_count: number
+  matched_count: number
+  unmatched_count: number
+  groups: LegacyExpressionGroupPreview[]
+}
+
+export interface LegacyExpressionImportResponse {
+  success: boolean
+  message: string
+  imported_count: number
+  skipped_count: number
+  failed_count: number
+  ignored_group_count: number
+}
+
 /**
  * 表达方式列表响应
  */

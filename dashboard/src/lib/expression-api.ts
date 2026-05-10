@@ -20,6 +20,8 @@ import type {
   ExpressionStatsResponse,
   ExpressionUpdateRequest,
   ExpressionUpdateResponse,
+  LegacyExpressionImportPreviewResponse,
+  LegacyExpressionImportResponse,
   ReviewListResponse,
   ReviewStats,
 } from '@/types/expression'
@@ -67,6 +69,47 @@ export async function getChatList(): Promise<ApiResponse<ChatInfo[]>> {
     return {
       success: false,
       error: '无法解析聊天列表响应',
+    }
+  }
+}
+
+/**
+ * 获取可作为导入目标的全部聊天流。
+ */
+export async function getExpressionChatTargets(): Promise<ApiResponse<ChatInfo[]>> {
+  const response = await fetchWithAuth(`${API_BASE}/chat-targets`, {})
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '获取导入目标聊天流失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '获取导入目标聊天流失败',
+      }
+    }
+  }
+
+  try {
+    const data: ChatListResponse = await response.json()
+    if (data.success) {
+      return {
+        success: true,
+        data: data.data,
+      }
+    }
+    return {
+      success: false,
+      error: '获取导入目标聊天流失败',
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析导入目标聊天流响应',
     }
   }
 }
@@ -288,6 +331,129 @@ export async function clearExpressions(params: {
     return {
       success: false,
       error: '无法解析表达方式清除响应',
+    }
+  }
+}
+
+/**
+ * 预览旧版数据库表达方式导入。
+ */
+export async function previewLegacyExpressionImport(params: {
+  db_path: string
+}): Promise<ApiResponse<LegacyExpressionImportPreviewResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/legacy-import/preview`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '预览旧版导入失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '预览旧版导入失败',
+      }
+    }
+  }
+
+  try {
+    const data: LegacyExpressionImportPreviewResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析旧版导入预览响应',
+    }
+  }
+}
+
+/**
+ * 上传旧版数据库并预览表达方式导入。
+ */
+export async function previewLegacyExpressionImportFile(
+  file: File
+): Promise<ApiResponse<LegacyExpressionImportPreviewResponse>> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetchWithAuth(`${API_BASE}/legacy-import/preview-file`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '预览旧版导入失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '预览旧版导入失败',
+      }
+    }
+  }
+
+  try {
+    const data: LegacyExpressionImportPreviewResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析旧版导入预览响应',
+    }
+  }
+}
+
+/**
+ * 按映射从旧版数据库导入表达方式。
+ */
+export async function importLegacyExpressions(params: {
+  db_path: string
+  mappings: Array<{ old_chat_id: string; target_chat_id?: string | null }>
+}): Promise<ApiResponse<LegacyExpressionImportResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/legacy-import/import`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '旧版导入失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '旧版导入失败',
+      }
+    }
+  }
+
+  try {
+    const data: LegacyExpressionImportResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析旧版导入响应',
     }
   }
 }

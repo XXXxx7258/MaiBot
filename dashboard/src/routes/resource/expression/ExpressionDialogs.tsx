@@ -1,5 +1,6 @@
-import { CheckCircle2, Circle, Clock, Hash, Info, XCircle } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { CheckCircle2, Circle, Clock, Database, Hash, Info, XCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
@@ -13,6 +14,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogBody,
@@ -35,9 +37,23 @@ import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
-import { createExpression, updateExpression } from '@/lib/expression-api'
+import {
+  createExpression,
+  getExpressionChatTargets,
+  importLegacyExpressions,
+  previewLegacyExpressionImport,
+  previewLegacyExpressionImportFile,
+  updateExpression,
+} from '@/lib/expression-api'
 
-import type { Expression, ExpressionCreateRequest, ExpressionUpdateRequest, ChatInfo } from '@/types/expression'
+import type {
+  ChatInfo,
+  Expression,
+  ExpressionCreateRequest,
+  ExpressionUpdateRequest,
+  LegacyExpressionGroupPreview,
+  LegacyExpressionImportPreviewResponse,
+} from '@/types/expression'
 
 /**
  * 表达方式详情对话框
@@ -167,6 +183,264 @@ function InfoItem({
         {value || '-'}
       </div>
     </div>
+  )
+}
+
+/**
+ * 从旧版数据库导入表达方式对话框
+ */
+export function LegacyExpressionImportDialog({
+  open,
+  onOpenChange,
+  chatList,
+  onSuccess,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  chatList: ChatInfo[]
+  onSuccess: () => void
+}) {
+  const [dbPath, setDbPath] = useState('')
+  const [preview, setPreview] = useState<LegacyExpressionImportPreviewResponse | null>(null)
+  const [targetMap, setTargetMap] = useState<Record<string, string>>({})
+  const [enabledMap, setEnabledMap] = useState<Record<string, boolean>>({})
+  const [targetChatList, setTargetChatList] = useState<ChatInfo[]>(chatList)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const getLocalFilePath = (file: File): string => {
+    return (file as File & { path?: string }).path || ''
+  }
+
+  useEffect(() => {
+    if (!open) return
+
+    const loadTargets = async () => {
+      const result = await getExpressionChatTargets()
+      if (result.success) {
+        setTargetChatList(result.data)
+      } else {
+        setTargetChatList(chatList)
+      }
+    }
+
+    loadTargets()
+  }, [open, chatList])
+
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    const localPath = getLocalFilePath(file)
+    setDbPath(localPath || file.name)
+    setLoadingPreview(true)
+    try {
+      const result = localPath
+        ? await previewLegacyExpressionImport({ db_path: localPath })
+        : await previewLegacyExpressionImportFile(file)
+      if (!result.success) {
+        toast({
+          title: '预览失败',
+          description: result.error,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      const initialMap: Record<string, string> = {}
+      const initialEnabledMap: Record<string, boolean> = {}
+      result.data.groups.forEach((group) => {
+        if (group.matched_session_id) {
+          initialMap[group.old_chat_id] = group.matched_session_id
+        }
+        initialEnabledMap[group.old_chat_id] = Boolean(group.matched_session_id)
+      })
+      setPreview(result.data)
+      setDbPath(localPath || result.data.db_path)
+      setTargetMap(initialMap)
+      setEnabledMap(initialEnabledMap)
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  const handleImport = async () => {
+    if (!preview) return
+
+    const mappings = preview.groups.map((group) => ({
+      old_chat_id: group.old_chat_id,
+      target_chat_id: enabledMap[group.old_chat_id] ? targetMap[group.old_chat_id] || null : null,
+    }))
+
+    setImporting(true)
+    try {
+      const result = await importLegacyExpressions({
+        db_path: preview.db_path,
+        mappings,
+      })
+      if (!result.success) {
+        toast({
+          title: '导入失败',
+          description: result.error,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      toast({
+        title: '导入完成',
+        description: result.data.message,
+      })
+      onSuccess()
+      onOpenChange(false)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const renderGroupLabel = (group: LegacyExpressionGroupPreview) => {
+    if (group.platform && group.target_id && group.chat_type) {
+      return `${group.platform}:${group.chat_type === 'group' ? '群' : '私聊'}:${group.target_id}`
+    }
+    return group.old_chat_id
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="[--dialog-width:72rem]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Database className="h-5 w-5" />
+            从旧版本导入
+          </DialogTitle>
+          <DialogDescription>
+            读取旧数据库中的 expression 表，并根据 chat_streams 自动匹配当前聊天流。
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogBody>
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="legacy-db-path">旧数据库路径</Label>
+                <Input
+                  id="legacy-db-path"
+                  value={dbPath}
+                  readOnly
+                  placeholder="选择旧版 SQLite 数据库文件"
+                />
+              </div>
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={loadingPreview}>
+                浏览
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+
+            {preview && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                  <span>表达方式 {preview.total_count} 条</span>
+                  <span>已匹配 {preview.matched_count} 组</span>
+                  <span>未匹配 {preview.unmatched_count} 组</span>
+                </div>
+
+                <div className="max-h-[50vh] overflow-y-auto rounded-lg border">
+                  <div className="grid grid-cols-[2.5rem_minmax(0,1.4fr)_5rem_minmax(0,1.1fr)_minmax(14rem,1fr)] gap-3 border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
+                    <div>导入</div>
+                    <div>旧聊天流</div>
+                    <div>数量</div>
+                    <div>自动匹配</div>
+                    <div>导入到</div>
+                  </div>
+                  {preview.groups.map((group) => (
+                    <div
+                      key={group.old_chat_id}
+                      className="grid grid-cols-[2.5rem_minmax(0,1.4fr)_5rem_minmax(0,1.1fr)_minmax(14rem,1fr)] items-center gap-3 border-b px-3 py-2 last:border-b-0"
+                    >
+                      <Checkbox
+                        checked={enabledMap[group.old_chat_id] ?? false}
+                        onCheckedChange={(checked) => {
+                          setEnabledMap((current) => ({
+                            ...current,
+                            [group.old_chat_id]: checked === true,
+                          }))
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium" title={renderGroupLabel(group)}>
+                          {renderGroupLabel(group)}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground" title={group.old_chat_id}>
+                          {group.old_chat_id}
+                        </div>
+                      </div>
+                      <div className="text-sm">{group.expression_count}</div>
+                      <div className="min-w-0 text-sm">
+                        {group.matched ? (
+                          <span className="truncate text-green-600" title={group.matched_chat_name || undefined}>
+                            {group.matched_chat_name || group.matched_session_id}
+                          </span>
+                        ) : (
+                          <span className="text-amber-600">未找到</span>
+                        )}
+                      </div>
+                      <Select
+                        value={targetMap[group.old_chat_id] || 'skip'}
+                        onValueChange={(value) => {
+                          setTargetMap((current) => ({
+                            ...current,
+                            [group.old_chat_id]: value === 'skip' ? '' : value,
+                          }))
+                          setEnabledMap((current) => ({
+                            ...current,
+                            [group.old_chat_id]: value !== 'skip',
+                          }))
+                        }}
+                      >
+                        <SelectTrigger className="h-8">
+                          <SelectValue placeholder="跳过" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="skip">跳过</SelectItem>
+                          {targetChatList.map((chat) => (
+                            <SelectItem key={chat.chat_id} value={chat.chat_id}>
+                              {chat.chat_name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                  {preview.groups.length === 0 && (
+                    <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+                      未读取到可导入的表达方式
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogBody>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button onClick={handleImport} disabled={!preview || importing}>
+            {importing ? '导入中...' : '确认导入'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

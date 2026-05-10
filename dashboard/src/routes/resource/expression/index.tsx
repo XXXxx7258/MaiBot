@@ -37,6 +37,7 @@ import {
   ExpressionCreateDialog,
   ExpressionDetailDialog,
   ExpressionEditDialog,
+  LegacyExpressionImportDialog,
 } from './ExpressionDialogs'
 import { ExpressionList } from './ExpressionList'
 
@@ -68,6 +69,7 @@ export function ExpressionManagementPage() {
   const [isDetailDialogOpen, setIsDetailDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const [isLegacyImportOpen, setIsLegacyImportOpen] = useState(false)
   const [deleteConfirmExpression, setDeleteConfirmExpression] = useState<Expression | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [isBatchDeleteDialogOpen, setIsBatchDeleteDialogOpen] = useState(false)
@@ -568,6 +570,10 @@ export function ExpressionManagementPage() {
               <Plus className="h-4 w-4" />
               新增表达方式
             </Button>
+            <Button variant="outline" onClick={() => setIsLegacyImportOpen(true)} className="gap-2">
+              <Upload className="h-4 w-4" />
+              从旧版本导入
+            </Button>
           </div>
         </div>
       </div>
@@ -879,6 +885,19 @@ export function ExpressionManagementPage() {
           loadExpressions()
           loadStats()
           setIsEditDialogOpen(false)
+        }}
+      />
+
+      <LegacyExpressionImportDialog
+        open={isLegacyImportOpen}
+        onOpenChange={setIsLegacyImportOpen}
+        chatList={chatList}
+        onSuccess={() => {
+          loadExpressions()
+          loadStats()
+          loadReviewStats()
+          loadChatList()
+          loadExpressionGroups()
         }}
       />
 

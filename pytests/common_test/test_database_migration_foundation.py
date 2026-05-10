@@ -763,24 +763,22 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
                 """
             )
         ).mappings().one()
-        expression_row = connection.execute(
+        expression_count = connection.execute(
             text(
                 """
-                SELECT session_id, content_list, modified_by
+                SELECT COUNT(*)
                 FROM expressions
-                WHERE id = 1
                 """
             )
-        ).mappings().one()
-        jargon_row = connection.execute(
+        ).scalar_one()
+        jargon_count = connection.execute(
             text(
                 """
-                SELECT session_id_dict, raw_content, inference_with_content_only
+                SELECT COUNT(*)
                 FROM jargons
-                WHERE id = 1
                 """
             )
-        ).mappings().one()
+        ).scalar_one()
 
     assert recorded_version == LATEST_SCHEMA_VERSION
     assert snapshot.has_table("__legacy_v1_messages")
@@ -792,10 +790,6 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
 
     unpacked_raw_content = msgpack.unpackb(message_row["raw_content"], raw=False)
     additional_config = json.loads(message_row["additional_config"])
-    expression_content_list = json.loads(expression_row["content_list"])
-    jargon_session_id_dict = json.loads(jargon_row["session_id_dict"])
-    jargon_raw_content = json.loads(jargon_row["raw_content"])
-
     assert message_row["session_id"] == "session-1"
     assert message_row["processed_plain_text"] == "你好"
     assert unpacked_raw_content == [{"type": "text", "data": "你好呀"}]
@@ -803,12 +797,8 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
     assert tool_row["session_id"] == "session-1"
     assert tool_row["tool_name"] == "search"
     assert tool_row["tool_display_prompt"] == "执行搜索"
-    assert expression_row["session_id"] == "session-1"
-    assert expression_row["modified_by"] == "AI"
-    assert expression_content_list == ["你好呀", "早上好"]
-    assert jargon_session_id_dict == {"session-1": 5}
-    assert jargon_raw_content == ["上分"]
-    assert jargon_row["inference_with_content_only"] == '{"guess":"content"}'
+    assert expression_count == 0
+    assert jargon_count == 0
 
 
 def test_legacy_v1_migration_reports_table_progress(tmp_path: Path) -> None:
@@ -843,12 +833,12 @@ def test_legacy_v1_migration_reports_table_progress(tmp_path: Path) -> None:
     reporter_events = reporter_instances[0].events
 
     assert reporter_events[0] == ("open", None, None, None)
-    assert reporter_events[1] == ("start", 6, 12, "总迁移进度")
+    assert reporter_events[1] == ("start", 4, 12, "总迁移进度")
     assert reporter_events[-1] == ("close", None, None, None)
-    assert reporter_events.count(("advance", 1, 0, None)) == 6
+    assert reporter_events.count(("advance", 1, 0, None)) == 4
     assert reporter_events.count(("advance", 0, 1, "chat_sessions")) == 1
     assert reporter_events.count(("advance", 0, 1, "thinking_questions")) == 1
-    assert len([event for event in reporter_events if event[0] == "advance"]) == 18
+    assert len([event for event in reporter_events if event[0] == "advance"]) == 16
 
 
 def test_initialize_database_calls_bootstrapper_before_create_all(
