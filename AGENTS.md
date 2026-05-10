@@ -60,5 +60,8 @@
 # maibot插件开发文档
 https://github.com/Mai-with-u/maibot-plugin-sdk/blob/main/docs/guide.md
 
+如果你要编写插件，不要改动根目录的.gitignore，而是给插件所属的文件夹单独管理。
+如果你要编写插件有需求需要改动主程序代码，请你先请求许可。
+
 # 如何提交maibot插件
 https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md

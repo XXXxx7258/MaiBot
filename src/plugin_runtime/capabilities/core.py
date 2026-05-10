@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Dict, List
 
 from src.common.logger import get_logger
@@ -56,8 +57,99 @@ def _normalize_prompt_arg(prompt: Any) -> str | List[Dict[str, Any]]:
     raise ValueError("缺少必要参数 prompt")
 
 
+def _normalize_context_segment(raw_segment: Any) -> Dict[str, Any] | None:
+    """将插件传入的上下文消息段规范化为宿主消息段结构。"""
+
+    if not isinstance(raw_segment, dict):
+        return None
+
+    segment = dict(raw_segment)
+    segment_type = str(segment.get("type") or "").strip().lower()
+    if not segment_type:
+        return None
+    segment["type"] = segment_type
+
+    if "data" not in segment and "content" in segment:
+        segment["data"] = segment.get("content")
+
+    if segment_type in {"image", "emoji", "voice"}:
+        binary_base64 = (
+            str(segment.get("binary_data_base64") or "").strip()
+            or str(segment.get("base64") or "").strip()
+            or str(segment.get("image_base64") or "").strip()
+            or str(segment.get("emoji_base64") or "").strip()
+        )
+        if binary_base64:
+            segment["binary_data_base64"] = binary_base64
+            if "data" not in segment or str(segment.get("data") or "").strip() == binary_base64:
+                segment["data"] = str(segment.get("description") or "")
+
+    return segment
+
+
+def _normalize_context_segments(raw_segments: Any) -> List[Dict[str, Any]]:
+    """规范化插件传入的一组上下文消息段。"""
+
+    if not isinstance(raw_segments, list):
+        return []
+
+    segments: List[Dict[str, Any]] = []
+    for raw_segment in raw_segments:
+        segment = _normalize_context_segment(raw_segment)
+        if segment is not None:
+            segments.append(segment)
+    return segments
+
+
 class RuntimeCoreCapabilityMixin:
     """插件运行时的核心能力混入。"""
+
+    async def _cap_maisaka_context_append(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """向指定 Maisaka 聊天运行时插入一条图文上下文消息。"""
+
+        del capability
+
+        stream_id = str(args.get("stream_id") or args.get("chat_id") or "").strip()
+        if not stream_id:
+            return {"success": False, "error": "缺少必要参数 stream_id 或 chat_id"}
+
+        segments = _normalize_context_segments(args.get("segments"))
+        if not segments:
+            return {"success": False, "error": "缺少有效的 segments"}
+
+        try:
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+            from src.maisaka.context_messages import SessionBackedMessage
+            from src.maisaka.message_adapter import build_visible_text_from_sequence
+            from src.plugin_runtime.host.message_utils import PluginMessageUtils
+
+            runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)
+            message_sequence = PluginMessageUtils._message_sequence_from_dict(segments)
+            visible_text = str(args.get("visible_text") or "").strip()
+            if not visible_text:
+                visible_text = build_visible_text_from_sequence(message_sequence)
+            if not visible_text:
+                visible_text = "[插件上下文消息]"
+
+            source_kind = str(args.get("source_kind") or f"plugin:{plugin_id}").strip() or f"plugin:{plugin_id}"
+            context_message = SessionBackedMessage(
+                raw_message=message_sequence,
+                visible_text=visible_text,
+                timestamp=datetime.now(),
+                message_id=str(args.get("message_id") or "").strip() or None,
+                source_kind=source_kind,
+            )
+            runtime._chat_history.append(context_message)
+            return {
+                "success": True,
+                "index": len(runtime._chat_history) - 1,
+                "stream_id": stream_id,
+                "visible_text": visible_text,
+                "source_kind": source_kind,
+            }
+        except Exception as exc:
+            logger.error(f"[cap.maisaka.context.append] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
 
     async def _cap_send_text(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
         """向指定流发送文本消息。
