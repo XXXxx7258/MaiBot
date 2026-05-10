@@ -26,8 +26,6 @@ from src.common.data_models.message_component_data_model import (
 from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
 from src.llm_models.payload_content.tool_option import ToolCall
 
-from .message_adapter import parse_speaker_content
-
 FORWARD_PREVIEW_LIMIT = 4
 TIMING_GATE_INVALID_TOOL_HINT_SOURCE = "timing_gate_invalid_tool_hint"
 
@@ -359,13 +357,6 @@ class SessionBackedMessage(LLMContextMessage):
         return self.source_kind
 
     def to_llm_message(self, enable_visual_message: bool = True) -> Optional[Message]:
-        if self.source_kind == "guided_reply":
-            _, reply_body = parse_speaker_content(self.processed_plain_text)
-            normalized_reply_body = reply_body.strip()
-            if not normalized_reply_body:
-                return None
-            return MessageBuilder().set_role(RoleType.Assistant).add_text_content(normalized_reply_body).build()
-
         return _build_message_from_sequence(
             RoleType.User,
             self.raw_message,

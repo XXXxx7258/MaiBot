@@ -30,6 +30,7 @@ from .official_configs import (
     MCPConfig,
     MessageReceiveConfig,
     PersonalityConfig,
+    PluginConfig,
     PluginRuntimeConfig,
     ResponsePostProcessConfig,
     ResponseSplitterConfig,
@@ -57,7 +58,7 @@ MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute(
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
 MMC_VERSION: str = "1.0.0-pre.17"
-CONFIG_VERSION: str = "8.10.16"
+CONFIG_VERSION: str = "8.10.17"
 MODEL_CONFIG_VERSION: str = "1.16.1"
 
 logger = get_logger("config")
@@ -128,6 +129,9 @@ class Config(ConfigBase):
 
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     """MCP 配置类"""
+
+    plugin: PluginConfig = Field(default_factory=PluginConfig)
+    """插件管理配置类"""
 
     plugin_runtime: PluginRuntimeConfig = Field(default_factory=PluginRuntimeConfig)
     """插件运行时配置类"""

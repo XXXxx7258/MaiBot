@@ -3698,6 +3698,27 @@ class MCPConfig(ConfigBase):
         return super().model_post_init(context)
 
 
+class PluginConfig(ConfigBase):
+    """插件管理配置类"""
+
+    __ui_label__ = "插件管理"
+    __ui_icon__ = "shield"
+
+    permission: list[str] = Field(
+        default_factory=list,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "插件管理权限",
+                "en_US": "Plugin management permissions",
+                "ja_JP": "プラグイン管理権限",
+            },
+            "x-widget": "tags",
+            "x-icon": "shield-check",
+        },
+    )
+    """允许使用内置插件管理命令的用户 ID 列表，格式为 platform:id，例如 qq:123456789"""
+
+
 class PluginRuntimeRenderConfig(ConfigBase):
     """插件运行时浏览器渲染配置。"""
 

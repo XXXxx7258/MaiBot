@@ -482,6 +482,7 @@ class ComponentQueryService:
                 "text": str(getattr(message, "processed_plain_text", "") or ""),
                 "stream_id": str(getattr(message, "session_id", "") or ""),
                 "group_id": str(getattr(group_info, "group_id", "") or ""),
+                "platform": str(getattr(message, "platform", "") or ""),
                 "user_id": str(getattr(user_info, "user_id", "") or ""),
                 "matched_groups": matched_groups if isinstance(matched_groups, dict) else {},
             }
