@@ -1293,6 +1293,7 @@ class MaisakaHeartFlowChatting:
         time_records: Optional[dict[str, float]] = None,
         timing_selected_history_count: Optional[int] = None,
         timing_prompt_tokens: Optional[int] = None,
+        timing_model_name: Optional[str] = None,
         timing_action: str = "",
         timing_response: str = "",
         timing_tool_calls: Optional[list[Any]] = None,
@@ -1301,6 +1302,7 @@ class MaisakaHeartFlowChatting:
         timing_prompt_section: Optional[RenderableType] = None,
         planner_selected_history_count: Optional[int] = None,
         planner_prompt_tokens: Optional[int] = None,
+        planner_model_name: Optional[str] = None,
         planner_response: str = "",
         planner_tool_calls: Optional[list[Any]] = None,
         planner_tool_results: Optional[list[str]] = None,
@@ -1327,6 +1329,7 @@ class MaisakaHeartFlowChatting:
             border_style="bright_magenta",
             selected_history_count=timing_selected_history_count,
             prompt_tokens=timing_prompt_tokens,
+            model_name=timing_model_name,
             response_text=timing_response,
             prompt_section=timing_prompt_section,
             extra_lines=None,
@@ -1349,6 +1352,7 @@ class MaisakaHeartFlowChatting:
             border_style="green",
             selected_history_count=planner_selected_history_count,
             prompt_tokens=planner_prompt_tokens,
+            model_name=planner_model_name,
             response_text=planner_response,
             prompt_section=planner_prompt_section,
             extra_lines=planner_extra_lines,
@@ -1383,6 +1387,7 @@ class MaisakaHeartFlowChatting:
         border_style: str,
         selected_history_count: Optional[int],
         prompt_tokens: Optional[int],
+        model_name: Optional[str] = None,
         response_text: str = "",
         prompt_section: Optional[RenderableType] = None,
         extra_lines: Optional[list[str]] = None,
@@ -1392,6 +1397,7 @@ class MaisakaHeartFlowChatting:
         has_content = any([
             selected_history_count is not None,
             prompt_tokens is not None,
+            bool((model_name or "").strip()),
             bool(response_text.strip()),
             prompt_section is not None,
             bool(extra_lines),
@@ -1400,6 +1406,9 @@ class MaisakaHeartFlowChatting:
             return None
 
         body_lines: list[str] = []
+        normalized_model_name = (model_name or "").strip()
+        if normalized_model_name:
+            body_lines.append(f"请求模型：{normalized_model_name}")
         if prompt_tokens is not None:
             body_lines.append(f"本次请求token消耗：{format_token_count(prompt_tokens)}")
         if extra_lines:

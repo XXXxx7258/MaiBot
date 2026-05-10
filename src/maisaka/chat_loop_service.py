@@ -74,6 +74,7 @@ class ChatResponse:
     built_message_count: int
     completion_tokens: int
     total_tokens: int
+    model_name: str = ""
     prompt_section: Optional[RenderableType] = None
     prompt_html_uri: Optional[str] = None
 
@@ -736,6 +737,11 @@ class MaisakaChatLoopService:
             ),
         )
 
+        display_model_name = (generation_result.model_name or "").strip()
+        prompt_selection_reason = selection_reason
+        if display_model_name:
+            prompt_selection_reason = f"{selection_reason}\n请求模型：{display_model_name}"
+
         if global_config.debug.show_maisaka_thinking:
             output_parts = []
             if final_response.strip():
@@ -755,7 +761,7 @@ class MaisakaChatLoopService:
                 category=self._resolve_prompt_preview_category(request_kind),
                 chat_id=self._session_id,
                 request_kind=request_kind,
-                selection_reason=selection_reason,
+                selection_reason=prompt_selection_reason,
                 folded=global_config.debug.fold_maisaka_thinking,
                 tool_definitions=list(all_tools),
                 output_content="\n\n".join(output_parts).strip(),
@@ -780,6 +786,7 @@ class MaisakaChatLoopService:
             built_message_count=len(built_messages),
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            model_name=display_model_name,
             prompt_section=prompt_section,
             prompt_html_uri=prompt_html_uri,
         )

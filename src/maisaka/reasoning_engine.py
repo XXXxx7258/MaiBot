@@ -1,5 +1,7 @@
 """Maisaka 推理引擎。"""
 
+from base64 import b64decode
+from binascii import Error as BinasciiError
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
@@ -14,6 +16,7 @@ from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.message_component_data_model import EmojiComponent, ImageComponent, MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.common.prompt_i18n import load_prompt
+from src.config.config import global_config
 from src.core.tooling import ToolAvailabilityContext, ToolExecutionContext, ToolExecutionResult, ToolInvocation, ToolSpec
 from src.llm_models.exceptions import ReqAbortException
 from src.llm_models.payload_content.tool_option import ToolCall
@@ -24,7 +27,7 @@ from .builtin_tool import build_builtin_tool_handlers as build_split_builtin_too
 from .builtin_tool import get_builtin_tool_visibility, is_builtin_tool_in_action_stage
 from .builtin_tool import get_timing_tools
 from .chat_loop_service import ChatResponse
-from .chat_history_visual_refresher import refresh_chat_history_visual_placeholders
+from .chat_history_visual_refresher import has_pending_image_recognition, refresh_chat_history_visual_placeholders
 from .builtin_tool.context import BuiltinToolRuntimeContext
 from .context_messages import (
     AssistantMessage,
@@ -58,6 +61,8 @@ TIMING_GATE_CONTEXT_DROP_HEAD_RATIO = 0.7
 TIMING_GATE_MAX_ATTEMPTS = 3
 TIMING_GATE_TOOL_NAMES = {"continue", "no_reply", "wait"}
 HISTORY_SILENT_TOOL_NAMES = {"finish"}
+TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
+TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 
 
 class MaisakaReasoningEngine:
@@ -389,6 +394,7 @@ class MaisakaReasoningEngine:
                 built_message_count=0,
                 completion_tokens=0,
                 total_tokens=0,
+                model_name="",
                 prompt_section=None,
             ),
             [f"- continue [强制跳过]: {reason}"],
@@ -660,6 +666,7 @@ class MaisakaReasoningEngine:
                                 built_message_count=0,
                                 completion_tokens=0,
                                 total_tokens=0,
+                                model_name="",
                                 prompt_section=None,
                             )
                             interrupted_extra_lines = [
@@ -717,6 +724,7 @@ class MaisakaReasoningEngine:
                                 timing_prompt_tokens=(
                                     timing_response.prompt_tokens if timing_response is not None else None
                                 ),
+                                timing_model_name=timing_response.model_name if timing_response is not None else None,
                                 timing_action=timing_action or "",
                                 timing_response=timing_response.content or "" if timing_response is not None else "",
                                 timing_tool_calls=timing_response.tool_calls if timing_response is not None else None,
@@ -729,6 +737,7 @@ class MaisakaReasoningEngine:
                                     response.selected_history_count if response is not None else None
                                 ),
                                 planner_prompt_tokens=response.prompt_tokens if response is not None else None,
+                                planner_model_name=response.model_name if response is not None else None,
                                 planner_response=response.content or "" if response is not None else "",
                                 planner_tool_calls=response.tool_calls if response is not None else None,
                                 planner_tool_results=tool_result_summaries,
@@ -928,6 +937,35 @@ class MaisakaReasoningEngine:
     async def _refresh_chat_history_visual_placeholders(self) -> int:
         """在进入新一轮规划前，尝试用已完成的识图结果刷新历史占位。"""
 
+        refreshed_count = await self._refresh_chat_history_visual_placeholders_once()
+        wait_seconds = self._resolve_image_recognition_wait_seconds()
+        if wait_seconds <= 0:
+            return refreshed_count
+
+        deadline = time.monotonic() + wait_seconds
+        while has_pending_image_recognition(self._runtime._chat_history):
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                break
+
+            await asyncio.sleep(min(0.2, remaining_seconds))
+            refreshed_count += await self._refresh_chat_history_visual_placeholders_once()
+
+        refreshed_count += await self._refresh_chat_history_visual_placeholders_once()
+        return refreshed_count
+
+    def _resolve_image_recognition_wait_seconds(self) -> float:
+        if resolve_enable_visual_planner():
+            return 0.0
+
+        try:
+            wait_seconds = float(global_config.visual.wait_image_recognize_max_time)
+        except (TypeError, ValueError):
+            return 0.0
+
+        return max(0.0, wait_seconds)
+
+    async def _refresh_chat_history_visual_placeholders_once(self) -> int:
         return await refresh_chat_history_visual_placeholders(
             chat_history=self._runtime._chat_history,
             build_history_message=lambda message, source_kind: self._build_history_message(
@@ -1362,7 +1400,7 @@ class MaisakaReasoningEngine:
             self._remove_tool_call_from_history(tool_call)
             return
 
-        history_content = result.get_history_content()
+        history_content = self._build_tool_result_history_content(tool_call, result)
         if not history_content:
             history_content = "工具执行成功。" if result.success else f"工具 {tool_call.func_name} 执行失败。"
 
@@ -1375,6 +1413,155 @@ class MaisakaReasoningEngine:
                 success=result.success,
             )
         )
+        self._append_tool_result_media_messages(tool_call, result)
+
+    @staticmethod
+    def _iter_tool_result_media_items(result: ToolExecutionResult) -> list[tuple[int, Any]]:
+        """获取需要从 tool result 拆分成普通上下文消息的媒体内容。"""
+
+        media_items: list[tuple[int, Any]] = []
+        for index, item in enumerate(result.content_items, start=1):
+            content_type = str(getattr(item, "content_type", "") or "").strip()
+            if content_type not in TOOL_RESULT_MEDIA_TYPES:
+                continue
+            if not any(
+                str(getattr(item, field_name, "") or "").strip()
+                for field_name in ("data", "uri", "name", "description", "mime_type")
+            ):
+                continue
+            media_items.append((index, item))
+        return media_items
+
+    @staticmethod
+    def _build_tool_result_media_index(tool_call: ToolCall, item_index: int) -> str:
+        """构造 tool result 与媒体 user message 对齐的稳定索引。"""
+
+        call_id = str(tool_call.call_id or "").strip() or str(tool_call.func_name or "tool").strip() or "tool"
+        return f"tool_result:{call_id}:{item_index}"
+
+    @staticmethod
+    def _describe_tool_result_media_item(item: Any) -> str:
+        """生成 tool result 中的媒体索引描述。"""
+
+        content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
+        mime_type = str(getattr(item, "mime_type", "") or "").strip()
+        name = str(getattr(item, "name", "") or "").strip()
+        description = str(getattr(item, "description", "") or "").strip()
+        label_parts = [content_type]
+        if mime_type:
+            label_parts.append(mime_type)
+        if name:
+            label_parts.append(name)
+        if description:
+            label_parts.append(description)
+        return " / ".join(label_parts)
+
+    def _build_tool_result_history_content(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
+        """构造纯文本 tool result，并在其中引用拆分出去的媒体索引。"""
+
+        history_content = result.get_history_content()
+        media_items = self._iter_tool_result_media_items(result)
+        if not media_items:
+            return history_content
+
+        media_lines = ["[工具返回媒体索引]"]
+        for item_index, item in media_items:
+            media_index = self._build_tool_result_media_index(tool_call, item_index)
+            media_description = self._describe_tool_result_media_item(item)
+            media_lines.append(f"- {media_index}: {media_description}，媒体本体已作为随后的用户消息提供。")
+
+        if not history_content.strip():
+            return "\n".join(media_lines).strip()
+        return f"{history_content.strip()}\n\n" + "\n".join(media_lines).strip()
+
+    @staticmethod
+    def _decode_tool_result_base64_data(raw_data: str) -> bytes:
+        """解析 tool result content_item 中的 base64 或 data URL 数据。"""
+
+        normalized_data = raw_data.strip()
+        if not normalized_data:
+            return b""
+        if normalized_data.startswith("data:") and "," in normalized_data:
+            normalized_data = normalized_data.split(",", 1)[1].strip()
+        try:
+            return b64decode(normalized_data, validate=True)
+        except (BinasciiError, ValueError):
+            padded_data = normalized_data + "=" * (-len(normalized_data) % 4)
+            try:
+                return b64decode(padded_data)
+            except (BinasciiError, ValueError):
+                return b""
+
+    def _build_tool_result_media_message_sequence(
+        self,
+        tool_call: ToolCall,
+        item_index: int,
+        item: Any,
+    ) -> MessageSequence:
+        """将单个 tool result 媒体项转成普通 user message 的组件序列。"""
+
+        media_index = self._build_tool_result_media_index(tool_call, item_index)
+        content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
+        mime_type = str(getattr(item, "mime_type", "") or "").strip()
+        name = str(getattr(item, "name", "") or "").strip()
+        description = str(getattr(item, "description", "") or "").strip()
+        uri = str(getattr(item, "uri", "") or "").strip()
+        raw_data = str(getattr(item, "data", "") or "").strip()
+        if not raw_data and uri.startswith("data:"):
+            raw_data = uri
+
+        header_parts = [f"[工具返回媒体]索引={media_index}", f"类型={content_type}"]
+        if mime_type:
+            header_parts.append(f"MIME={mime_type}")
+        if name:
+            header_parts.append(f"名称={name}")
+        if description:
+            header_parts.append(f"说明={description}")
+        if uri:
+            header_parts.append(f"URI={uri}")
+        header_text = "\n".join(header_parts)
+
+        message_sequence = MessageSequence([TextComponent(header_text)])
+        if content_type == "image" or (content_type == "binary" and mime_type.startswith("image/")):
+            image_binary = self._decode_tool_result_base64_data(raw_data)
+            if image_binary:
+                message_sequence.image(image_binary, content=header_text)
+        return message_sequence
+
+    def _build_tool_result_media_visible_text(
+        self,
+        tool_call: ToolCall,
+        item_index: int,
+        item: Any,
+        media_sequence: MessageSequence,
+    ) -> str:
+        """构造媒体 user message 在历史/监控中的可读文本。"""
+
+        media_index = self._build_tool_result_media_index(tool_call, item_index)
+        visible_parts = [f"[工具返回媒体]索引={media_index}", self._describe_tool_result_media_item(item)]
+        if any(isinstance(component, ImageComponent) for component in media_sequence.components):
+            visible_parts.append("[图片内容]")
+        uri = str(getattr(item, "uri", "") or "").strip()
+        if uri:
+            visible_parts.append(f"URI={uri}")
+        return "\n".join(part for part in visible_parts if part).strip()
+
+    def _append_tool_result_media_messages(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
+        """将 tool result 中的媒体项拆分为紧跟其后的 user context message。"""
+
+        for item_index, item in self._iter_tool_result_media_items(result):
+            media_sequence = self._build_tool_result_media_message_sequence(tool_call, item_index, item)
+            visible_text = self._build_tool_result_media_visible_text(tool_call, item_index, item, media_sequence)
+            media_index = self._build_tool_result_media_index(tool_call, item_index)
+            self._runtime._chat_history.append(
+                SessionBackedMessage(
+                    raw_message=media_sequence,
+                    visible_text=visible_text,
+                    timestamp=datetime.now(),
+                    message_id=media_index,
+                    source_kind=TOOL_RESULT_MEDIA_SOURCE_KIND,
+                )
+            )
 
     def _remove_tool_call_from_history(self, tool_call: ToolCall) -> None:
         """从历史里的 assistant 消息中移除控制类工具调用。"""

@@ -219,6 +219,21 @@ class VisualConfig(ConfigBase):
     )
     """回复器模式，auto根据模型信息自动选择，text为纯文本模式，multimodal为多模态模式"""
 
+    wait_image_recognize_max_time: float = Field(
+        default=10,
+        ge=0,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "timer",
+            "label": {
+                "zh_CN": "识图最长等待时间",
+                "en_US": "Max image recognition wait time",
+                "ja_JP": "画像認識の最長待機時間",
+            },
+        },
+    )
+    """非视觉 planner 请求前等待图片识别完成的最长秒数；为 0 时不等待，保持占位请求。"""
+
 
 class TalkRulesItem(ConfigBase):
     platform: str = Field(
