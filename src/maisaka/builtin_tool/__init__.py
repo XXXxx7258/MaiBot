@@ -20,8 +20,6 @@ from .query_jargon import get_tool_spec as get_query_jargon_tool_spec
 from .query_jargon import handle_tool as handle_query_jargon_tool
 from .query_memory import get_tool_spec as get_query_memory_tool_spec
 from .query_memory import handle_tool as handle_query_memory_tool
-from .query_person_info import get_tool_spec as get_query_person_info_tool_spec
-from .query_person_info import handle_tool as handle_query_person_info_tool
 from .query_person_profile import get_tool_spec as get_query_person_profile_tool_spec
 from .query_person_profile import handle_tool as handle_query_person_profile_tool
 from .reply import get_tool_spec as get_reply_tool_spec
@@ -98,13 +96,6 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
         _get_query_person_profile_tool_spec,
         handle_query_person_profile_tool,
         stage="action",
-    ),
-    BuiltinToolEntry(
-        "query_person_info",
-        get_query_person_info_tool_spec,
-        handle_query_person_info_tool,
-        stage="action",
-        visibility="hidden",
     ),
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),

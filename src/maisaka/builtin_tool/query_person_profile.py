@@ -17,19 +17,13 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
 
     return ToolSpec(
         name="query_person_profile",
-        brief_description="查询 A_memorix 人物画像，用于了解某个人的稳定背景、倾向和已知特征。",
-        detailed_description=(
-            "参数说明：\n"
-            "- person_id：string，可选。A_memorix 人物 ID，提供后优先按 ID 查询。\n"
-            "- person_name：string，可选。人物名称、昵称或关键词；未提供 person_id 时使用。\n"
-            "- limit：integer，可选。画像检索使用的证据上限，默认 8。"
-        ),
+        description="查询人物画像，用于了解某个人的稳定背景、倾向和已知特征。",
         parameters_schema={
             "type": "object",
             "properties": {
                 "person_id": {
                     "type": "string",
-                    "description": "A_memorix 人物 ID。提供后优先使用。",
+                    "description": "人物 ID。提供后优先使用。",
                 },
                 "person_name": {
                     "type": "string",

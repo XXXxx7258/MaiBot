@@ -15,8 +15,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="query_jargon",
-        brief_description="查询当前聊天上下文中的黑话或词条含义。",
-        detailed_description="参数说明：\n- words：array，必填。要查询的词条列表。",
+        description="查询当前聊天上下文中的黑话或词条含义。用法：当你认为某些词的含义不明确，或用户询问某些词的含义，需要进行查询",
         parameters_schema={
             "type": "object",
             "properties": {

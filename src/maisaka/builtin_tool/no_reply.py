@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="no_reply",
-        brief_description="本轮不进行回复，等待其他用户的新消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景。",
+        description="本轮不进行回复，等待其他用户的新消息；也用于用户可能还没说完、需要先把发言权交还给用户的场景。",
         provider_name="maisaka_builtin",
         provider_type="builtin",
     )

@@ -12,8 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="wait",
-        brief_description="暂停当前私聊对话并固定等待一段时间，期间不因新消息提前恢复。",
-        detailed_description="参数说明：\n- seconds：integer，必填。等待的秒数。等待期间收到的新消息只会暂存，直到超时后再继续处理。",
+        description="暂停当前私聊对话并固定等待一段时间，期间不因新消息提前恢复。",
         parameters_schema={
             "type": "object",
             "properties": {

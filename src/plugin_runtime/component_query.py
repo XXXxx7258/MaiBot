@@ -16,7 +16,6 @@ from src.core.tooling import (
     ToolExecutionResult,
     ToolInvocation,
     ToolSpec,
-    build_tool_detailed_description,
 )
 from src.core.types import ActionActivationType, ActionInfo, CommandInfo, ComponentInfo, ComponentType, ToolInfo
 from src.llm_models.payload_content.tool_option import normalize_tool_option
@@ -258,7 +257,7 @@ class ComponentQueryService:
 
         return ToolInfo(
             name=entry.name,
-            description=entry.brief_description or entry.description,
+            description=entry.description,
             enabled=bool(entry.enabled),
             plugin_name=entry.plugin_id,
             parameters_schema=ComponentQueryService._build_tool_parameters_schema(entry),
@@ -278,8 +277,7 @@ class ComponentQueryService:
         parameters_schema = ComponentQueryService._build_tool_parameters_schema(entry)
         return ToolSpec(
             name=entry.name,
-            brief_description=entry.brief_description or entry.description or f"工具 {entry.name}",
-            detailed_description=entry.detailed_description or build_tool_detailed_description(parameters_schema),
+            description=entry.description or f"工具 {entry.name}",
             parameters_schema=parameters_schema,
             provider_name=entry.plugin_id,
             provider_type="plugin",

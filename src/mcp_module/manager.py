@@ -12,7 +12,6 @@ from src.core.tooling import (
     ToolExecutionResult,
     ToolInvocation,
     ToolSpec,
-    build_tool_detailed_description,
 )
 
 from .config import (
@@ -292,16 +291,12 @@ class MCPManager:
 
                 parameters_schema = self._build_tool_parameters_schema(tool)
                 output_schema = self._build_tool_output_schema(tool)
-                brief_description = str(tool.description or f"来自 {server_name} 的 MCP 工具").strip()
+                description = str(tool.description or f"来自 {server_name} 的 MCP 工具").strip()
                 tool_specs.append(
                     ToolSpec(
                         name=str(tool.name),
                         title=str(getattr(tool, "title", "") or ""),
-                        brief_description=brief_description,
-                        detailed_description=build_tool_detailed_description(
-                            parameters_schema,
-                            fallback_description=f"工具来源：MCP 服务 {server_name}。",
-                        ),
+                        description=description,
                         parameters_schema=parameters_schema,
                         output_schema=output_schema,
                         provider_name="mcp",

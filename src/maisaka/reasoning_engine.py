@@ -1180,8 +1180,7 @@ class MaisakaReasoningEngine:
         if tool_spec is not None:
             payload["provider_name"] = tool_spec.provider_name
             payload["provider_type"] = tool_spec.provider_type
-            payload["brief_description"] = tool_spec.brief_description
-            payload["detailed_description"] = tool_spec.detailed_description
+            payload["description"] = tool_spec.description
             payload["title"] = tool_spec.title
         return payload
 
@@ -1251,12 +1250,6 @@ class MaisakaReasoningEngine:
                 return f"你查询了这些黑话或词条：{words_text}"
             return "你查询了一次黑话或词条信息。"
 
-        if invocation.tool_name == "query_person_info":
-            person_name = str(invocation.arguments.get("person_name") or "").strip()
-            if person_name:
-                return f"你查询了人物信息：{person_name}"
-            return "你查询了一次人物信息。"
-
         if invocation.tool_name == "query_memory":
             query_text = str(invocation.arguments.get("query") or "").strip()
             mode = str(invocation.arguments.get("mode") or "search").strip() or "search"
@@ -1272,9 +1265,9 @@ class MaisakaReasoningEngine:
                 return f"你查看了复杂消息 {target_message_id} 的完整内容。"
             return "你查看了一条复杂消息的完整内容。"
 
-        brief_description = ""
+        description = ""
         if tool_spec is not None:
-            brief_description = tool_spec.brief_description.strip()
+            description = tool_spec.description.strip()
 
         if normalized_args:
             arguments_text = self._truncate_tool_record_text(
@@ -1285,8 +1278,8 @@ class MaisakaReasoningEngine:
             arguments_text = "{}"
 
         if result.success:
-            if brief_description:
-                return f"{brief_description} 参数={arguments_text}；结果：{history_content or '执行成功'}"
+            if description:
+                return f"{description} 参数={arguments_text}；结果：{history_content or '执行成功'}"
             return f"你调用了工具 {invocation.tool_name}，参数={arguments_text}；结果：{history_content or '执行成功'}"
 
         error_text = self._truncate_tool_record_text(result.error_message or history_content, max_length=160)

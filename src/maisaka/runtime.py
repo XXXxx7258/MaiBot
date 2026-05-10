@@ -915,7 +915,7 @@ class MaisakaHeartFlowChatting:
         tool_lines: list[str] = []
         for index, tool_spec in enumerate(undiscovered_tool_specs, start=1):
             tool_name = tool_spec.name.strip()
-            tool_description = tool_spec.brief_description.strip()
+            tool_description = tool_spec.description.strip()
             if tool_description:
                 tool_lines.append(f"{index}. {tool_name}: {tool_description}")
             else:
@@ -947,7 +947,7 @@ class MaisakaHeartFlowChatting:
         query_terms = [term for term in normalized_query.replace("_", " ").replace("-", " ").split() if term]
         for tool_name, tool_spec in self.deferred_tool_specs_by_name.items():
             lower_name = tool_name.lower()
-            lower_description = tool_spec.brief_description.lower()
+            lower_description = tool_spec.description.lower()
             score = 0
 
             if normalized_query == lower_name:

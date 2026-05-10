@@ -52,8 +52,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="send_emoji",
-        brief_description="发送一个合适的表情包来辅助表达情绪。",
-        detailed_description="无需参数，直接发送一个合适的表情包。",
+        description="发送一个合适的表情包来辅助表达情绪。",
         parameters_schema={
             "type": "object",
             "properties": {},
