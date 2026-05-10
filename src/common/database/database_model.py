@@ -304,3 +304,5 @@ class ChatSession(SQLModel, table=True):
     user_id: Optional[str] = Field(index=True, max_length=255, nullable=True)  # 用户ID
     group_id: Optional[str] = Field(index=True, default=None, max_length=255, nullable=True)  # 群组id
     platform: str = Field(index=True, max_length=100)  # 会话所在平台
+    account_id: Optional[str] = Field(default=None, index=True, max_length=255, nullable=True)  # 平台账号 ID
+    scope: Optional[str] = Field(default=None, index=True, max_length=255, nullable=True)  # 路由作用域

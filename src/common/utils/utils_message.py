@@ -1,6 +1,8 @@
-from maim_message import MessageBase, Seg
-from typing import List, Tuple, Optional, Dict, TYPE_CHECKING, Callable
 from datetime import datetime
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+
+from maim_message import MessageBase, Seg
+from sqlmodel import col, select
 
 import base64
 import hashlib
@@ -8,20 +10,18 @@ import msgpack
 import random
 import re
 
-from sqlmodel import select, col
-
 from src.common.data_models.message_component_data_model import (
+    AtComponent,
+    DictComponent,
+    EmojiComponent,
+    ForwardNodeComponent,
+    ImageComponent,
     MessageSequence,
+    ReplyComponent,
     StandardMessageComponents,
     TextComponent,
-    ImageComponent,
-    EmojiComponent,
-    VoiceComponent,
-    AtComponent,
-    ReplyComponent,
-    DictComponent,
     UnknownUser,
-    ForwardNodeComponent,
+    VoiceComponent,
 )
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -95,13 +95,53 @@ class MessageUtils:
             binary_hash = hashlib.md5(voice_bytes).hexdigest()
             return VoiceComponent(binary_hash=binary_hash, binary_data=voice_bytes)
         elif seg.type == "at":
-            assert isinstance(seg.data, str), "at类型的seg数据应该是字符串"
-            return AtComponent(target_user_id=seg.data)
+            return MessageUtils._parse_at_segment_data(seg.data)
         elif seg.type == "reply":
             assert isinstance(seg.data, str), "reply类型的seg数据应该是字符串"
             return ReplyComponent(target_message_id=seg.data)
         else:
             raise NotImplementedError(f"暂时不支持的消息片段类型: {seg.type}")
+
+    @staticmethod
+    def _parse_at_segment_data(data: Any) -> AtComponent:
+        """解析 @ 消息片段，兼容旧字符串格式和 OneBot 字典格式。"""
+
+        if isinstance(data, dict):
+            target_user_id = MessageUtils._first_non_empty_string(
+                data.get("target_user_id"),
+                data.get("qq"),
+                data.get("user_id"),
+                data.get("id"),
+            )
+            target_user_nickname = MessageUtils._first_non_empty_string(
+                data.get("target_user_nickname"),
+                data.get("nickname"),
+                data.get("name"),
+            )
+            target_user_cardname = MessageUtils._first_non_empty_string(
+                data.get("target_user_cardname"),
+                data.get("card"),
+            )
+            return AtComponent(
+                target_user_id=target_user_id,
+                target_user_nickname=target_user_nickname or None,
+                target_user_cardname=target_user_cardname or None,
+            )
+
+        assert isinstance(data, str), "at类型的seg数据应该是字符串或字典"
+        return AtComponent(target_user_id=data)
+
+    @staticmethod
+    def _first_non_empty_string(*values: Any) -> str:
+        """返回第一个非空字符串表示。"""
+
+        for value in values:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
 
     @staticmethod
     def check_ban_words(text: str) -> Tuple[bool, Optional[str]]:

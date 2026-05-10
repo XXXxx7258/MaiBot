@@ -6,6 +6,8 @@ from .builtin import (
     LATEST_SCHEMA_VERSION,
     LEGACY_V1_SCHEMA_VERSION,
     V2_SCHEMA_VERSION,
+    V4_SCHEMA_VERSION,
+    V5_SCHEMA_VERSION,
     build_default_migration_registry,
     build_default_schema_version_resolver,
 )
@@ -63,6 +65,8 @@ __all__ = [
     "LATEST_SCHEMA_VERSION",
     "LEGACY_V1_SCHEMA_VERSION",
     "V2_SCHEMA_VERSION",
+    "V4_SCHEMA_VERSION",
+    "V5_SCHEMA_VERSION",
     "MigrationExecutionContext",
     "MigrationPlan",
     "MigrationPlanner",

@@ -4,11 +4,13 @@ from typing import TYPE_CHECKING
 
 from src.common.data_models.message_component_data_model import MessageSequence, ReplyComponent, TextComponent
 
-from .context_messages import AssistantMessage, LLMContextMessage, ToolResultMessage
+from .context_messages import AssistantMessage, LLMContextMessage, SessionBackedMessage, ToolResultMessage
 from .message_adapter import build_visible_text_from_sequence, clone_message_sequence, format_speaker_content
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
+
+TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 
 
 def build_prefixed_message_sequence(
@@ -106,9 +108,32 @@ def drop_orphan_tool_results(
         if isinstance(message, ToolResultMessage) and message.tool_call_id not in available_tool_call_ids:
             removed_count += 1
             continue
+        if _is_orphan_tool_result_media_message(message, available_tool_call_ids):
+            removed_count += 1
+            continue
         filtered_history.append(message)
 
     return filtered_history, removed_count
+
+
+def _is_orphan_tool_result_media_message(
+    message: LLMContextMessage,
+    available_tool_call_ids: set[str],
+) -> bool:
+    """判断 tool result 拆分出的媒体消息是否已经失去对应 tool_call。"""
+
+    if not isinstance(message, SessionBackedMessage):
+        return False
+    if message.source_kind != TOOL_RESULT_MEDIA_SOURCE_KIND:
+        return False
+
+    message_id = str(message.message_id or "").strip()
+    if not message_id.startswith("tool_result:"):
+        return False
+
+    _, _, remaining = message_id.partition("tool_result:")
+    tool_call_id, _, _ = remaining.rpartition(":")
+    return bool(tool_call_id) and tool_call_id not in available_tool_call_ids
 
 
 def normalize_tool_result_order(

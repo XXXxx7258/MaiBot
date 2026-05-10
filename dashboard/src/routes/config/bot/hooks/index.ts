@@ -18,6 +18,8 @@ export {
   ChatTalkValueRulesHook,
   ExpressionGroupsHook,
   ExpressionLearningListHook,
+  JargonGroupsHook,
+  JargonLearningListHook,
   KeywordRulesHook,
   HiddenFieldHook,
   MCPRootItemsHook,

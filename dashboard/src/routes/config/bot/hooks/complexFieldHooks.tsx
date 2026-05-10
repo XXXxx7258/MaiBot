@@ -22,11 +22,11 @@ type ExpressionRuleType = 'group' | 'private'
 interface ExpressionGroupTarget {
   platform: string
   item_id: string
-  rule_type: ExpressionRuleType
+  type: ExpressionRuleType
 }
 
 interface ExpressionGroupValue {
-  expression_groups: ExpressionGroupTarget[]
+  targets: ExpressionGroupTarget[]
 }
 
 interface PlatformAccountRow {
@@ -75,7 +75,7 @@ const normalizeExpressionTarget = (value: unknown): ExpressionGroupTarget => {
       typeof source.platform === 'string' ? source.platform.trim() : 'qq',
     item_id:
       typeof source.item_id === 'string' ? source.item_id.trim() : '',
-    rule_type: normalizeExpressionRuleType(source.rule_type),
+    type: normalizeExpressionRuleType(source.type ?? source.rule_type),
   }
 }
 
@@ -86,23 +86,29 @@ const normalizeExpressionGroups = (value: unknown): ExpressionGroupValue[] => {
       item && typeof item === 'object'
         ? (item as Record<string, unknown>)
         : {}
-    const members = Array.isArray(source.expression_groups)
-      ? source.expression_groups.map(normalizeExpressionTarget)
-      : []
-    return { expression_groups: members }
+    let rawMembers: unknown[] = []
+    if (Array.isArray(source.targets)) {
+      rawMembers = source.targets
+    } else if (Array.isArray(source.expression_groups)) {
+      rawMembers = source.expression_groups
+    } else if (Array.isArray(source.jargon_groups)) {
+      rawMembers = source.jargon_groups
+    }
+    const members = rawMembers.map(normalizeExpressionTarget)
+    return { targets: members }
   })
 }
 
 const createExpressionTarget = (): ExpressionGroupTarget => ({
   platform: 'qq',
   item_id: '',
-  rule_type: 'group',
+  type: 'group',
 })
 
 const formatExpressionTarget = (target: ExpressionGroupTarget): string => {
   const platform = target.platform.trim()
   const itemId = target.item_id.trim()
-  const rule = ruleTypeLabel(target.rule_type)
+  const rule = ruleTypeLabel(target.type)
   if (!platform && !itemId) return `全局 · ${rule}`
   if (!itemId) return `${platform} · ${rule}`
   return `${platform}:${itemId} · ${rule}`
@@ -281,22 +287,23 @@ export const ChatPromptsHook = createListItemEditorHook({
 })
 
 export const ExpressionLearningListHook = createListItemEditorHook({
-  addLabel: '添加表达学习规则',
-  helperText: '为不同聊天流单独配置是否启用表达/jargon 学习。',
+  addLabel: '添加学习规则',
+  helperText: '为不同聊天流单独配置是否使用和学习。platform 或 item_id 可以填 * 作为通配符。',
   emptyText: '尚未配置任何学习规则。',
   fieldRows: [
-    ['platform', 'item_id', 'rule_type'],
-    ['use_expression', 'enable_learning', 'enable_jargon_learning'],
+    ['platform', 'item_id', 'type'],
+    ['use', 'learn'],
   ],
   itemTitle: (item) => {
     const flags: string[] = []
-    if (item.use_expression) flags.push('表达')
-    if (item.enable_learning) flags.push('优化学习')
-    if (item.enable_jargon_learning) flags.push('jargon')
-    const flagText = flags.length ? flags.join(' / ') : '全部关闭'
-    return `${platformLabel(item)} · ${ruleTypeLabel(item.rule_type)} · ${flagText}`
+    if (item.use) flags.push('使用')
+    if (item.learn) flags.push('学习')
+    const flagText = flags.length ? flags.join(' / ') : '使用和学习均关闭'
+    return `${platformLabel(item)} · ${ruleTypeLabel(item.type)} · ${flagText}`
   },
 })
+
+export const JargonLearningListHook = ExpressionLearningListHook
 
 export const BotPlatformsHook: FieldHookComponent = ({ onChange, value }) => {
   const platforms = normalizePlatformAccounts(value)
@@ -537,15 +544,18 @@ export const RegexRulesHook = createListItemEditorHook({
   },
 })
 
-export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) => {
+export const ExpressionGroupsHook: FieldHookComponent = ({ fieldPath, onChange, value }) => {
   const groups = normalizeExpressionGroups(value)
+  const isJargonGroup = fieldPath?.includes('jargon') ?? false
+  const groupLabel = isJargonGroup ? '黑话互通组' : '表达互通组'
+  const learnedContentLabel = isJargonGroup ? '黑话' : '表达方式'
 
   const updateGroups = (nextGroups: ExpressionGroupValue[]) => {
     onChange?.(nextGroups)
   }
 
   const addGroup = () => {
-    updateGroups([...groups, { expression_groups: [] }])
+    updateGroups([...groups, { targets: [] }])
   }
 
   const removeGroup = (groupIndex: number) => {
@@ -557,8 +567,8 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
       groups.map((group, index) =>
         index === groupIndex
           ? {
-              expression_groups: [
-                ...group.expression_groups,
+              targets: [
+                ...group.targets,
                 createExpressionTarget(),
               ],
             }
@@ -572,7 +582,7 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
       groups.map((group, index) =>
         index === groupIndex
           ? {
-              expression_groups: group.expression_groups.filter(
+              targets: group.targets.filter(
                 (_, currentMemberIndex) => currentMemberIndex !== memberIndex
               ),
             }
@@ -590,7 +600,7 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
       groups.map((group, index) =>
         index === groupIndex
           ? {
-              expression_groups: group.expression_groups.map(
+              targets: group.targets.map(
                 (member, currentMemberIndex) =>
                   currentMemberIndex === memberIndex
                     ? { ...member, ...patch }
@@ -606,21 +616,21 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
     <div className="space-y-3 rounded-lg border bg-card p-4 sm:p-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h3 className="text-base font-semibold">表达互通组</h3>
+          <h3 className="text-base font-semibold">{groupLabel}</h3>
           <p className="text-sm text-muted-foreground">
-            每个互通组内的聊天流会共享已学习的表达方式。成员会保存为
-            expression_groups 数组结构。
+            每个互通组内的聊天流会共享已学习的{learnedContentLabel}。成员会保存为
+            targets 数组结构。
           </p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={addGroup}>
           <Plus className="mr-2 h-4 w-4" />
-          添加互通组
+          添加{groupLabel}
         </Button>
       </div>
 
       {groups.length === 0 ? (
         <div className="rounded-md border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
-          暂无互通组，点击“添加互通组”开始配置。
+          暂无{groupLabel}，点击上方按钮开始配置。
         </div>
       ) : (
         <div className="space-y-2">
@@ -632,10 +642,10 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">
-                    互通组 {groupIndex + 1}
+                    {groupLabel} {groupIndex + 1}
                   </span>
                   <Badge variant="secondary">
-                    {group.expression_groups.length} 个成员
+                    {group.targets.length} 个成员
                   </Badge>
                 </div>
                 <div className="flex gap-2">
@@ -660,13 +670,13 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
                 </div>
               </div>
 
-              {group.expression_groups.length === 0 ? (
+              {group.targets.length === 0 ? (
                 <div className="rounded-md bg-background/70 px-3 py-4 text-sm text-muted-foreground">
                   这个互通组还没有成员。
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  {group.expression_groups.map((member, memberIndex) => (
+                  {group.targets.map((member, memberIndex) => (
                     <div
                       key={`${groupIndex}-${memberIndex}`}
                       className="grid items-end gap-2 rounded-md bg-background/80 px-2.5 py-2 md:grid-cols-[minmax(6rem,0.65fr)_minmax(9rem,1fr)_minmax(7rem,0.75fr)_2.25rem]"
@@ -700,10 +710,10 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
                       <div className="space-y-0.5">
                         <Label className="text-[11px] leading-none text-muted-foreground">类型</Label>
                         <Select
-                          value={member.rule_type}
+                          value={member.type}
                           onValueChange={(nextRuleType) =>
                             updateMember(groupIndex, memberIndex, {
-                              rule_type: normalizeExpressionRuleType(nextRuleType),
+                              type: normalizeExpressionRuleType(nextRuleType),
                             })
                           }
                         >
@@ -742,6 +752,8 @@ export const ExpressionGroupsHook: FieldHookComponent = ({ onChange, value }) =>
     </div>
   )
 }
+
+export const JargonGroupsHook = ExpressionGroupsHook
 
 export const MCPRootItemsHook = createJsonFieldHook({
   emptyValue: [],

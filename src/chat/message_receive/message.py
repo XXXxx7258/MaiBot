@@ -295,6 +295,16 @@ class SessionMessage(MaiMessage):
             return f"@{component.target_user_cardname}"
         elif component.target_user_nickname:
             return f"@{component.target_user_nickname}"
+        from src.common.utils.system_utils import is_bot_self
+        from src.config.config import global_config
+
+        if is_bot_self(self.platform, component.target_user_id):
+            bot_nickname = global_config.bot.nickname.strip()
+            if bot_nickname:
+                component.target_user_nickname = bot_nickname
+                component.target_user_cardname = bot_nickname
+                return f"@{bot_nickname}"
+
         from src.common.utils.utils_person import PersonUtils
 
         # 查询用户信息

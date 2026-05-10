@@ -28,7 +28,7 @@ import {
   updatePlugin,
   type InstalledPlugin,
 } from '@/lib/plugin-api'
-import { getPluginStats, recordPluginDownload, type PluginStatsData } from '@/lib/plugin-stats'
+import { getPluginStatsByIds, recordPluginDownload, type PluginStatsData } from '@/lib/plugin-stats'
 
 import { InstallDialog } from './InstallDialog'
 import { InstalledTab } from './InstalledTab'
@@ -79,20 +79,27 @@ function PluginsPageContent() {
   const loadPluginStats = async (pluginList: PluginInfo[]) => {
     const statsPromises = pluginList.map(async (plugin) => {
       try {
-        const stats = await getPluginStats(plugin.id)
-        return { id: plugin.id, stats }
+        const statsIds = plugin.stats_ids?.length
+          ? plugin.stats_ids
+          : ([plugin.marketplace_id, plugin.id].filter(Boolean) as string[])
+        const stats = await getPluginStatsByIds(statsIds)
+        return { id: plugin.id, stats, statsIds }
       } catch (error) {
         console.warn(`Failed to load stats for ${plugin.id}:`, error)
-        return { id: plugin.id, stats: null }
+        return { id: plugin.id, stats: null, statsIds: [plugin.id] }
       }
     })
 
     const results = await Promise.all(statsPromises)
     const statsMap: Record<string, PluginStatsData> = {}
     
-    results.forEach(({ id, stats }) => {
+    results.forEach(({ id, stats, statsIds }) => {
       if (stats) {
         statsMap[id] = stats
+        statsMap[stats.plugin_id] = stats
+        statsIds.forEach(statsId => {
+          statsMap[statsId] = stats
+        })
       }
     })
 
@@ -249,6 +256,7 @@ function PluginsPageContent() {
                   installed: true,
                   installed_version: installedPlugin.manifest.version,
                   source: 'local',
+                  stats_ids: [installedPlugin.manifest.id || installedPlugin.id, installedPlugin.id].filter(Boolean) as string[],
                   published_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
                 })
@@ -456,7 +464,7 @@ function PluginsPageContent() {
       }
       
       // 记录下载统计
-      recordPluginDownload(installingPlugin.id).catch(err => {
+      recordPluginDownload(installingPlugin.stats_ids?.[0] ?? installingPlugin.marketplace_id ?? installingPlugin.id).catch(err => {
         console.warn('Failed to record download:', err)
       })
       

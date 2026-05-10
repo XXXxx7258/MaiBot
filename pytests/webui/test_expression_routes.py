@@ -11,6 +11,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from src.common.database.database_model import Expression, ModifiedBy
 from src.webui.dependencies import require_auth
+from src.webui.routers.expression import parse_modified_by
 
 
 def create_test_app() -> FastAPI:
@@ -26,6 +27,23 @@ def create_test_app() -> FastAPI:
 
 
 app = create_test_app()
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("AI", ModifiedBy.AI),
+        ("ai", ModifiedBy.AI),
+        ('"AI"', ModifiedBy.AI),
+        ("USER", ModifiedBy.USER),
+        ("user", ModifiedBy.USER),
+        ('"user"', ModifiedBy.USER),
+        ("unknown", None),
+    ],
+)
+def test_parse_modified_by_normalizes_legacy_values(raw_value: str, expected: ModifiedBy | None):
+    """Test modified_by import parser normalizes legacy AI/USER values."""
+    assert parse_modified_by(raw_value) == expected
 
 
 # Test database setup

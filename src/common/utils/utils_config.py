@@ -16,19 +16,25 @@ class ExpressionConfigUtils:
 
         if session_id:
             for config_item in global_config.expression.learning_list:
-                if not config_item.platform and not config_item.item_id:
+                if not ChatConfigUtils.is_wildcard_target(config_item):
+                    continue
+                if ChatConfigUtils.target_matches_session_with_wildcards(config_item, session_id):
+                    return config_item
+
+            for config_item in global_config.expression.learning_list:
+                if ChatConfigUtils.is_default_target(config_item) or ChatConfigUtils.is_wildcard_target(config_item):
                     continue
                 if ChatConfigUtils.target_matches_session(config_item, session_id):
                     return config_item
 
         for config_item in global_config.expression.learning_list:
-            if not config_item.platform and not config_item.item_id:
+            if ChatConfigUtils.is_default_target(config_item):
                 return config_item
 
         return None
 
     @staticmethod
-    def get_expression_config_for_chat(session_id: Optional[str] = None) -> tuple[bool, bool, bool]:
+    def get_expression_config_for_chat(session_id: Optional[str] = None) -> tuple[bool, bool]:
         # sourcery skip: use-next
         """
         根据聊天会话 ID 获取表达配置。
@@ -37,42 +43,160 @@ class ExpressionConfigUtils:
             session_id: 聊天会话 ID，格式为哈希值
 
         Returns:
-            tuple: (是否使用表达, 是否学习表达, 是否启用 jargon 学习)
+            tuple: (是否使用表达, 是否学习表达)
         """
         config_item = ExpressionConfigUtils._find_expression_config_item(session_id)
         if config_item is None:
-            return True, True, True
+            return True, True
 
         return (
-            config_item.use_expression,
-            config_item.enable_learning,
-            config_item.enable_jargon_learning,
+            config_item.use,
+            config_item.learn,
         )
 
     @staticmethod
     def _get_stream_id(platform: str, id_str: str, is_group: bool = False) -> Optional[str]:
-        # sourcery skip: remove-unnecessary-cast
         """
-        根据平台、ID 字符串和是否为群聊生成聊天流 ID。
+        根据平台、ID 字符串和是否为群聊解析已存在的聊天流 ID。
 
-        Args:
-            platform: 平台名称
-            id_str: 用户或群组的原始 ID 字符串
-            is_group: 是否为群聊
-
-        Returns:
-            str: 生成的聊天流 ID（哈希值）
+        注意：业务模块不应自行计算 session_id，这里只返回已存在的真实聊天流。
         """
+        chat_type = "group" if is_group else "private"
+        session_ids = ChatConfigUtils.resolve_existing_session_ids(platform, id_str, chat_type)
+        return next(iter(session_ids), None)
+
+
+class JargonConfigUtils:
+    @staticmethod
+    def _is_global_default_item(config_item) -> bool:
+        return ChatConfigUtils.is_default_target(config_item)
+
+    @staticmethod
+    def _is_wildcard_item(config_item) -> bool:
+        return ChatConfigUtils.is_wildcard_target(config_item)
+
+    @staticmethod
+    def get_target_session_ids_with_wildcards(target_item) -> set[str]:
+        """获取黑话配置目标对应的已知真实聊天流 ID，允许 platform/item_id 使用 * 通配。"""
+        platform, item_id, rule_type = ChatConfigUtils._target_values(target_item)
+        if not platform or not item_id:
+            return set()
+
+        if not JargonConfigUtils._is_wildcard_item(target_item):
+            return ChatConfigUtils.get_target_session_ids(target_item)
+
+        if rule_type == "group":
+            target_attr = "group_id"
+        elif rule_type == "private":
+            target_attr = "user_id"
+        else:
+            return set()
+
+        matched_session_ids: set[str] = set()
         try:
-            from src.common.utils.utils_session import SessionUtils
+            from src.chat.message_receive.chat_manager import chat_manager
 
-            if is_group:
-                return SessionUtils.calculate_session_id(platform, group_id=str(id_str))
-            else:
-                return SessionUtils.calculate_session_id(platform, user_id=str(id_str))
+            for chat_stream in chat_manager.sessions.values():
+                chat_stream_platform = str(chat_stream.platform or "").strip()
+                chat_stream_target_id = str(getattr(chat_stream, target_attr) or "").strip()
+                if not chat_stream_target_id:
+                    continue
+                if (platform == "*" or chat_stream_platform == platform) and (
+                    item_id == "*" or chat_stream_target_id == item_id
+                ):
+                    matched_session_ids.add(chat_stream.session_id)
         except Exception as e:
-            logger.error(f"生成聊天流 ID 失败: {e}")
+            logger.debug(f"解析黑话通配配置内存聊天流失败: platform={platform} item_id={item_id} error={e}")
+
+        try:
+            from sqlmodel import select
+
+            from src.common.database.database import get_db_session
+            from src.common.database.database_model import ChatSession
+
+            with get_db_session() as session:
+                statement = select(ChatSession)
+                if platform != "*":
+                    statement = statement.where(ChatSession.platform == platform)
+                if item_id != "*":
+                    statement = statement.where(getattr(ChatSession, target_attr) == item_id)
+                for chat_session in session.exec(statement).all():
+                    target_id = str(getattr(chat_session, target_attr) or "").strip()
+                    if not target_id:
+                        continue
+                    matched_session_ids.add(chat_session.session_id)
+        except Exception as e:
+            logger.debug(f"解析黑话通配配置数据库聊天流失败: platform={platform} item_id={item_id} error={e}")
+
+        return matched_session_ids
+
+    @staticmethod
+    def _find_jargon_config_item(session_id: Optional[str] = None):
+        if not global_config.jargon.learning_list:
             return None
+
+        is_group_chat = ChatConfigUtils._resolve_is_group_chat(session_id)
+        if session_id:
+            for config_item in global_config.jargon.learning_list:
+                if JargonConfigUtils._is_global_default_item(config_item):
+                    continue
+                if JargonConfigUtils._is_wildcard_item(config_item):
+                    if ChatConfigUtils.target_matches_session_with_wildcards(config_item, session_id, is_group_chat):
+                        return config_item
+                    continue
+
+            for config_item in global_config.jargon.learning_list:
+                if JargonConfigUtils._is_global_default_item(config_item):
+                    continue
+                if JargonConfigUtils._is_wildcard_item(config_item):
+                    continue
+                if ChatConfigUtils.target_matches_session(config_item, session_id):
+                    return config_item
+
+        for config_item in global_config.jargon.learning_list:
+            if JargonConfigUtils._is_global_default_item(config_item):
+                return config_item
+
+        return None
+
+    @staticmethod
+    def get_jargon_config_for_chat(session_id: Optional[str] = None) -> tuple[bool, bool]:
+        """根据聊天会话 ID 获取黑话使用与学习开关。"""
+        config_item = JargonConfigUtils._find_jargon_config_item(session_id)
+        if config_item is None:
+            return True, True
+        return config_item.use, config_item.learn
+
+    @staticmethod
+    def resolve_jargon_group_scope(session_id: Optional[str]) -> tuple[set[str], bool]:
+        """解析当前会话可共享黑话的会话范围，以及是否命中全平台全目标通配。"""
+        related_session_ids = {session_id} if session_id else set()
+        has_global_share = False
+        if not session_id:
+            return related_session_ids, has_global_share
+
+        for jargon_group in global_config.jargon.jargon_groups:
+            target_items = jargon_group.targets
+            group_session_ids: set[str] = set()
+            contains_current_session = False
+
+            for target_item in target_items:
+                platform = str(target_item.platform or "").strip()
+                item_id = str(target_item.item_id or "").strip()
+                if not platform or not item_id:
+                    continue
+
+                target_session_ids = JargonConfigUtils.get_target_session_ids_with_wildcards(target_item)
+                group_session_ids.update(target_session_ids)
+                if ChatConfigUtils.target_matches_session_with_wildcards(target_item, session_id):
+                    contains_current_session = True
+                    if platform == "*" and item_id == "*":
+                        has_global_share = True
+
+            if contains_current_session:
+                related_session_ids.update(group_session_ids)
+
+        return related_session_ids, has_global_share
 
 
 class ChatConfigUtils:
@@ -80,14 +204,11 @@ class ChatConfigUtils:
     def _iter_matching_chat_prompts(session_id: str, is_group_chat: Optional[bool]) -> Iterator[str]:
         try:
             from src.chat.message_receive.chat_manager import chat_manager
-            from src.common.utils.utils_session import SessionUtils
 
             chat_stream = chat_manager.get_session_by_session_id(session_id)
-            session_utils = SessionUtils
         except Exception as e:
             logger.debug(f"解析额外 Prompt 聊天流失败: session_id={session_id} error={e}")
             chat_stream = None
-            session_utils = None
 
         for chat_prompt_item in global_config.chat.chat_prompts:
             if hasattr(chat_prompt_item, "platform"):
@@ -130,19 +251,7 @@ class ChatConfigUtils:
                     yield prompt_content
                     continue
 
-            if session_utils is None:
-                continue
-
-            try:
-                if rule_type == "group":
-                    config_chat_id = session_utils.calculate_session_id(platform, group_id=item_id)
-                else:
-                    config_chat_id = session_utils.calculate_session_id(platform, user_id=item_id)
-            except Exception as e:
-                logger.debug(f"生成额外 Prompt 聊天流 ID 失败: platform={platform} item_id={item_id} error={e}")
-                continue
-
-            if config_chat_id == session_id:
+            if session_id in ChatConfigUtils.resolve_existing_session_ids(platform, item_id, rule_type):
                 yield prompt_content
 
     @staticmethod
@@ -160,10 +269,28 @@ class ChatConfigUtils:
 
     @staticmethod
     def _target_values(target_item) -> tuple[str, str, str]:
+        if isinstance(target_item, dict):
+            platform = str(target_item.get("platform") or "").strip()
+            item_id = str(target_item.get("item_id") or "").strip()
+            rule_type = str(target_item.get("type") or target_item.get("rule_type") or "").strip()
+            return platform, item_id, rule_type
+
         platform = str(target_item.platform or "").strip()
         item_id = str(target_item.item_id or "").strip()
-        rule_type = str(target_item.rule_type or "").strip()
+        rule_type = str(getattr(target_item, "type", "") or getattr(target_item, "rule_type", "") or "").strip()
         return platform, item_id, rule_type
+
+    @staticmethod
+    def is_default_target(target_item) -> bool:
+        """判断配置目标是否是 learning_list 的默认兜底项。"""
+        platform, item_id, _ = ChatConfigUtils._target_values(target_item)
+        return not platform and not item_id
+
+    @staticmethod
+    def is_wildcard_target(target_item) -> bool:
+        """判断配置目标是否包含 platform/item_id 通配符。"""
+        platform, item_id, _ = ChatConfigUtils._target_values(target_item)
+        return platform == "*" or item_id == "*"
 
     @staticmethod
     def _get_chat_stream(session_id: str):
@@ -177,15 +304,32 @@ class ChatConfigUtils:
 
     @staticmethod
     def _get_stream_id(platform: str, id_str: str, is_group: bool = False) -> Optional[str]:
-        try:
-            from src.common.utils.utils_session import SessionUtils
+        """解析已存在的真实聊天流 ID。
 
-            if is_group:
-                return SessionUtils.calculate_session_id(platform, group_id=str(id_str))
-            return SessionUtils.calculate_session_id(platform, user_id=str(id_str))
+        保留该方法仅为旧调用兼容；不要在新代码中用它生成资源归属 ID。
+        """
+
+        chat_type = "group" if is_group else "private"
+        session_ids = ChatConfigUtils.resolve_existing_session_ids(platform, id_str, chat_type)
+        return next(iter(session_ids), None)
+
+    @staticmethod
+    def resolve_existing_session_ids(platform: str, item_id: str, rule_type: str) -> set[str]:
+        """按配置目标解析系统已知的真实聊天流 ID。"""
+
+        try:
+            from src.chat.message_receive.chat_manager import chat_manager
+
+            return chat_manager.resolve_session_ids_by_target(
+                platform=str(platform or "").strip(),
+                target_id=str(item_id or "").strip(),
+                chat_type=str(rule_type or "").strip(),
+            )
         except Exception as e:
-            logger.error(f"生成聊天流 ID 失败: {e}")
-            return None
+            logger.debug(
+                f"解析配置目标真实聊天流失败: platform={platform} item_id={item_id} rule_type={rule_type} error={e}"
+            )
+            return set()
 
     @staticmethod
     def target_matches_session(target_item, session_id: str, is_group_chat: Optional[bool] = None) -> bool:
@@ -215,40 +359,57 @@ class ChatConfigUtils:
             chat_stream_target_id = str(getattr(chat_stream, target_attr) or "").strip()
             return chat_stream_platform == platform and chat_stream_target_id == item_id
 
-        return ChatConfigUtils._get_stream_id(platform, item_id, config_is_group) == session_id
+        return session_id in ChatConfigUtils.resolve_existing_session_ids(platform, item_id, rule_type)
+
+    @staticmethod
+    def target_matches_session_with_wildcards(
+        target_item,
+        session_id: str,
+        is_group_chat: Optional[bool] = None,
+    ) -> bool:
+        """判断配置目标是否命中当前聊天流，允许 platform/item_id 使用 * 通配。"""
+        if not session_id:
+            return False
+
+        platform, item_id, rule_type = ChatConfigUtils._target_values(target_item)
+        if not platform or not item_id:
+            return False
+
+        if rule_type == "group":
+            config_is_group = True
+            target_attr = "group_id"
+        elif rule_type == "private":
+            config_is_group = False
+            target_attr = "user_id"
+        else:
+            return False
+
+        if is_group_chat is not None and config_is_group != is_group_chat:
+            return False
+
+        chat_stream = ChatConfigUtils._get_chat_stream(session_id)
+        if chat_stream is None:
+            if ChatConfigUtils.is_wildcard_target(target_item):
+                return False
+            return ChatConfigUtils.target_matches_session(target_item, session_id, is_group_chat)
+
+        chat_stream_platform = str(chat_stream.platform or "").strip()
+        chat_stream_target_id = str(getattr(chat_stream, target_attr) or "").strip()
+        if not chat_stream_target_id:
+            return False
+
+        platform_matches = platform == "*" or chat_stream_platform == platform
+        item_matches = item_id == "*" or chat_stream_target_id == item_id
+        return platform_matches and item_matches
 
     @staticmethod
     def get_target_session_ids(target_item) -> set[str]:
-        """获取配置目标对应的已知聊天流 ID，并保留无路由 ID 作为兼容回退。"""
+        """获取配置目标对应的已知真实聊天流 ID。"""
         platform, item_id, rule_type = ChatConfigUtils._target_values(target_item)
         if not platform or not item_id:
             return set()
 
-        if rule_type == "group":
-            is_group = True
-            target_attr = "group_id"
-        elif rule_type == "private":
-            is_group = False
-            target_attr = "user_id"
-        else:
-            return set()
-
-        session_ids: set[str] = set()
-        if fallback_session_id := ChatConfigUtils._get_stream_id(platform, item_id, is_group):
-            session_ids.add(fallback_session_id)
-
-        try:
-            from src.chat.message_receive.chat_manager import chat_manager
-
-            for session_id, chat_stream in chat_manager.sessions.items():
-                chat_stream_platform = str(chat_stream.platform or "").strip()
-                chat_stream_target_id = str(getattr(chat_stream, target_attr) or "").strip()
-                if chat_stream_platform == platform and chat_stream_target_id == item_id:
-                    session_ids.add(session_id)
-        except Exception as e:
-            logger.debug(f"解析配置目标已知聊天流失败: platform={platform} item_id={item_id} error={e}")
-
-        return session_ids
+        return ChatConfigUtils.resolve_existing_session_ids(platform, item_id, rule_type)
 
     @staticmethod
     def _resolve_is_group_chat(session_id: Optional[str]) -> Optional[bool]:

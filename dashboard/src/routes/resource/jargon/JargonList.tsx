@@ -23,6 +23,7 @@ interface JargonListProps {
   page: number
   pageSize: number
   selectedIds: Set<number>
+  hideChatColumn?: boolean
   onEdit: (jargon: Jargon) => void
   onViewDetail: (jargon: Jargon) => void
   onDelete: (jargon: Jargon) => void
@@ -55,6 +56,7 @@ export function JargonList({
   page,
   pageSize,
   selectedIds,
+  hideChatColumn = false,
   onEdit,
   onViewDetail,
   onDelete,
@@ -64,6 +66,7 @@ export function JargonList({
   onJumpToPage,
 }: JargonListProps) {
   const [jumpToPage, setJumpToPage] = React.useState('')
+  const tableColSpan = hideChatColumn ? 6 : 7
 
   const handleJumpToPage = () => {
     onJumpToPage(jumpToPage)
@@ -85,7 +88,7 @@ export function JargonList({
               </TableHead>
               <TableHead>内容</TableHead>
               <TableHead>含义</TableHead>
-              <TableHead>聊天</TableHead>
+              {!hideChatColumn && <TableHead>聊天</TableHead>}
               <TableHead>状态</TableHead>
               <TableHead className="text-center">次数</TableHead>
               <TableHead className="text-right">操作</TableHead>
@@ -94,13 +97,13 @@ export function JargonList({
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
                   加载中...
                 </TableCell>
               </TableRow>
             ) : jargons.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -122,9 +125,11 @@ export function JargonList({
                   <TableCell className="max-w-[200px] truncate" title={jargon.meaning || ''}>
                     {jargon.meaning || <span className="text-muted-foreground">-</span>}
                   </TableCell>
-                  <TableCell className="max-w-[150px] truncate" title={jargon.chat_name || jargon.chat_id}>
-                    {jargon.chat_name || jargon.chat_id}
-                  </TableCell>
+                  {!hideChatColumn && (
+                    <TableCell className="max-w-[150px] truncate" title={jargon.chat_name || jargon.chat_id}>
+                      {jargon.chat_name || jargon.chat_id}
+                    </TableCell>
+                  )}
                   <TableCell>{renderJargonStatus(jargon.is_jargon)}</TableCell>
                   <TableCell className="text-center">{jargon.count}</TableCell>
                   <TableCell className="text-right">
@@ -190,9 +195,11 @@ export function JargonList({
                     {renderJargonStatus(jargon.is_jargon)}
                     <span className="text-muted-foreground">次数: {jargon.count}</span>
                   </div>
-                  <div className="text-xs text-muted-foreground truncate">
-                    聊天: {jargon.chat_name || jargon.chat_id}
-                  </div>
+                  {!hideChatColumn && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      聊天: {jargon.chat_name || jargon.chat_id}
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-wrap gap-1 pt-2 border-t">

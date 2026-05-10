@@ -8,7 +8,6 @@ import json
 
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions, LLMResponseResult
 from src.common.logger import get_logger
-from src.core.tooling import build_tool_detailed_description
 from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
 from src.llm_models.payload_content.tool_option import ToolCall, ToolDefinitionInput
 from src.services.llm_service import LLMServiceClient
@@ -512,16 +511,12 @@ class MCPHostLLMBridge:
 
             title = str(getattr(raw_tool, "title", "") or "").strip()
             description = str(getattr(raw_tool, "description", "") or "").strip()
-            brief_description = description or title or f"工具 {tool_name}"
-            detailed_description = build_tool_detailed_description(
-                parameters_schema,
-                fallback_description=f"工具名称：{tool_name}",
-            )
+            tool_description = description or title or f"工具 {tool_name}"
 
             tool_definitions.append(
                 {
                     "name": tool_name,
-                    "description": brief_description,
+                    "description": tool_description,
                     "parameters_schema": parameters_schema or {"type": "object", "properties": {}},
                 }
             )

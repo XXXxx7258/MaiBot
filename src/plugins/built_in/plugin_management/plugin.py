@@ -8,6 +8,26 @@ from maibot_sdk import Command, MaiBotPlugin
 
 _VALID_COMPONENT_TYPES = ("tool", "command", "event_handler")
 
+
+def _build_scoped_user_id(platform: str, user_id: str) -> str:
+    """构造跨平台用户 ID。"""
+
+    normalized_platform = str(platform or "").strip().lower()
+    normalized_user_id = str(user_id or "").strip()
+    if not normalized_platform or not normalized_user_id:
+        return ""
+    return f"{normalized_platform}:{normalized_user_id}"
+
+
+def _normalize_permission_list(permission_list: list[object]) -> set[str]:
+    """规范化插件管理权限列表。"""
+
+    return {
+        str(permission or "").strip().lower()
+        for permission in permission_list
+        if str(permission or "").strip()
+    }
+
 HELP_ALL = (
     "管理命令帮助\n"
     "/pm help 管理命令提示\n"
@@ -53,16 +73,17 @@ class PluginManagementPlugin(MaiBotPlugin):
     @Command(
         "management",
         description="管理插件和组件的生命周期",
-        pattern=r"(?P<manage_command>^/pm(\s[a-zA-Z0-9_]+)*\s*$)",
+        pattern=r"(?P<manage_command>^/pm(?:\s+\S+)*\s*$)",
     )
     async def handle_management(
-        self, stream_id: str = "", user_id: str = "", matched_groups: dict | None = None, **kwargs
+        self, stream_id: str = "", platform: str = "", user_id: str = "", matched_groups: dict | None = None, **kwargs
     ):
         """处理 /pm 命令"""
         # 权限检查
         permission_result = await self.ctx.config.get("plugin.permission")
         permission_list = permission_result if isinstance(permission_result, list) else []
-        if str(user_id) not in permission_list:
+        scoped_user_id = _build_scoped_user_id(platform, user_id)
+        if not scoped_user_id or scoped_user_id not in _normalize_permission_list(permission_list):
             await self.ctx.send.text("你没有权限使用插件管理命令", stream_id)
             return False, "没有权限", True
 
@@ -70,7 +91,7 @@ class PluginManagementPlugin(MaiBotPlugin):
             return False, "无法获取聊天流信息", True
 
         raw_command = (matched_groups or {}).get("manage_command", "").strip()
-        parts = raw_command.split(" ") if raw_command else ["/pm"]
+        parts = raw_command.split() if raw_command else ["/pm"]
         n = len(parts)
 
         # /pm

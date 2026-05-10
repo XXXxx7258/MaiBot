@@ -2,14 +2,15 @@
 
 from typing import Annotated, Any, Dict, List, Optional, Set
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlmodel import Session, col, delete, select
 
-import json
-
+from src.chat.message_receive.chat_manager import chat_manager as _chat_manager
 from src.common.database.database import get_db_session
-from src.common.database.database_model import ChatSession, Jargon
+from src.common.database.database_model import ChatSession, Jargon, Messages
 from src.common.logger import get_logger
 from src.webui.dependencies import require_auth
 
@@ -63,11 +64,25 @@ def get_display_name_for_chat_id(chat_id_str: str, session: Session) -> str:
         return chat_id_str[:20]
 
     stream_id = stream_ids[0]
+    message = session.exec(
+        select(Messages).where(col(Messages.session_id) == stream_id).order_by(col(Messages.timestamp).desc()).limit(1)
+    ).first()
+    if message:
+        if message.group_id:
+            return message.group_name or f"群聊{message.group_id}"
+        private_name = message.user_cardname or message.user_nickname or (
+            f"用户{message.user_id}" if message.user_id else None
+        )
+        if private_name:
+            return f"{private_name}的私聊"
+
     if not (chat_session := session.exec(select(ChatSession).where(col(ChatSession.session_id) == stream_id)).first()):
         return stream_id[:20]
 
     if chat_session.group_id:
-        return str(chat_session.group_id)
+        return f"群聊{chat_session.group_id}"
+    if chat_session.user_id:
+        return f"用户{chat_session.user_id}的私聊"
 
     return chat_session.session_id[:20]
 
@@ -271,6 +286,17 @@ def build_session_id_dict_for_chat(chat_id: str, count: int = 1) -> str:
     return dump_session_id_dict({chat_id: count})
 
 
+def require_existing_chat_id(chat_id: Optional[str]) -> str:
+    """校验资源归属的聊天流 ID 必须是真实存在的会话。"""
+
+    normalized_chat_id = str(chat_id or "").strip()
+    if not normalized_chat_id:
+        raise HTTPException(status_code=400, detail="缺少聊天流 ID")
+    if _chat_manager.get_existing_session_by_session_id(normalized_chat_id) is None:
+        raise HTTPException(status_code=400, detail=f"聊天流不存在: {normalized_chat_id}")
+    return normalized_chat_id
+
+
 def jargon_to_dict(jargon: Jargon, session: Session) -> Dict[str, Any]:
     """将黑话模型转换为字典。
 
@@ -310,6 +336,7 @@ async def get_jargon_list(
     search: Optional[str] = Query(None, description="搜索关键词"),
     chat_id: Optional[str] = Query(None, description="按聊天ID筛选"),
     is_jargon: Optional[bool] = Query(None, description="按是否是黑话筛选"),
+    is_global: Optional[bool] = Query(None, description="按是否全局筛选"),
 ) -> JargonListResponse:
     """获取黑话列表。
 
@@ -319,6 +346,7 @@ async def get_jargon_list(
         search: 搜索关键词。
         chat_id: 聊天 ID 筛选条件。
         is_jargon: 是否为黑话的筛选条件。
+        is_global: 是否为全局黑话的筛选条件。
 
     Returns:
         JargonListResponse: 分页后的黑话列表。
@@ -336,6 +364,9 @@ async def get_jargon_list(
 
         if is_jargon is not None:
             statement = statement.where(col(Jargon.is_jargon) == is_jargon)
+
+        if is_global is not None:
+            statement = statement.where(col(Jargon.is_global) == is_global)
 
         statement = statement.order_by(col(Jargon.count).desc(), col(Jargon.id).desc())
 
@@ -389,7 +420,7 @@ async def get_chat_list() -> ChatListResponse:
                 if chat_session := session.exec(
                     select(ChatSession).where(col(ChatSession.session_id) == stream_id)
                 ).first():
-                    chat_name = str(chat_session.group_id) if chat_session.group_id else stream_id[:20]
+                    chat_name = get_display_name_for_chat_id(stream_id, session)
                     result.append(
                         ChatInfoResponse(
                             chat_id=stream_id,
@@ -402,7 +433,7 @@ async def get_chat_list() -> ChatListResponse:
                     result.append(
                         ChatInfoResponse(
                             chat_id=stream_id,
-                            chat_name=stream_id[:20],
+                            chat_name=get_display_name_for_chat_id(stream_id, session),
                             platform=None,
                             is_group=False,
                         )
@@ -430,6 +461,7 @@ async def get_jargon_stats() -> JargonStatsResponse:
             confirmed_jargon = sum(jargon.is_jargon is True for jargon in jargons)
             confirmed_not_jargon = sum(jargon.is_jargon is False for jargon in jargons)
             pending = sum(jargon.is_jargon is None for jargon in jargons)
+            global_count = sum(jargon.is_global for jargon in jargons)
             complete_count = sum(jargon.is_complete for jargon in jargons)
 
             top_chats_counter: Dict[str, int] = {}
@@ -447,6 +479,7 @@ async def get_jargon_stats() -> JargonStatsResponse:
                 "confirmed_jargon": confirmed_jargon,
                 "confirmed_not_jargon": confirmed_not_jargon,
                 "pending": pending,
+                "global_count": global_count,
                 "complete_count": complete_count,
                 "chat_count": chat_count,
                 "top_chats": top_chats_dict,
@@ -494,10 +527,11 @@ async def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
         JargonCreateResponse: 创建结果和新黑话数据。
     """
     try:
+        chat_id = require_existing_chat_id(request.chat_id)
         with get_db_session() as session:
             same_content_jargons = session.exec(select(Jargon).where(col(Jargon.content) == request.content)).all()
             existing = next(
-                (jargon for jargon in same_content_jargons if has_chat_id(jargon.session_id_dict, request.chat_id)),
+                (jargon for jargon in same_content_jargons if has_chat_id(jargon.session_id_dict, chat_id)),
                 None,
             )
             if existing is not None:
@@ -507,7 +541,7 @@ async def create_jargon(request: JargonCreateRequest) -> JargonCreateResponse:
                 content=request.content,
                 raw_content=request.raw_content,
                 meaning=request.meaning or "",
-                session_id_dict=build_session_id_dict_for_chat(request.chat_id),
+                session_id_dict=build_session_id_dict_for_chat(chat_id),
                 count=0,
                 is_jargon=None,
                 is_complete=False,
@@ -546,7 +580,8 @@ async def update_jargon(jargon_id: int, request: JargonUpdateRequest) -> JargonU
 
             if update_data := request.model_dump(exclude_unset=True):
                 if "chat_id" in update_data and update_data["chat_id"] is not None:
-                    jargon.session_id_dict = build_session_id_dict_for_chat(update_data["chat_id"], max(jargon.count, 1))
+                    chat_id = require_existing_chat_id(update_data["chat_id"])
+                    jargon.session_id_dict = build_session_id_dict_for_chat(chat_id, max(jargon.count, 1))
                 if "content" in update_data and update_data["content"] is not None:
                     jargon.content = update_data["content"]
                 if "raw_content" in update_data:

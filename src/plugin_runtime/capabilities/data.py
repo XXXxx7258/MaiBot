@@ -225,6 +225,8 @@ class RuntimeDataCapabilityMixin:
             "platform": stream.platform,
             "user_id": stream.user_id,
             "group_id": stream.group_id,
+            "account_id": stream.account_id,
+            "scope": stream.scope,
             "is_group_session": stream.is_group_session,
         }
 

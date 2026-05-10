@@ -26,6 +26,8 @@ export interface ChatInfo {
   chat_name: string
   platform: string | null
   is_group: boolean
+  use_expression: boolean
+  enable_learning: boolean
 }
 
 /**
@@ -34,6 +36,90 @@ export interface ChatInfo {
 export interface ChatListResponse {
   success: boolean
   data: ChatInfo[]
+}
+
+export interface ExpressionGroupInfo {
+  index: number
+  name: string
+  chat_ids: string[]
+  members: ChatInfo[]
+  is_global: boolean
+}
+
+export interface ExpressionGroupListResponse {
+  success: boolean
+  data: ExpressionGroupInfo[]
+}
+
+export interface ExpressionExportItem {
+  situation: string
+  style: string
+  content_list: string
+  count: number
+  last_active_time: string | null
+  create_time: string | null
+  checked: boolean
+  rejected: boolean
+  modified_by: 'ai' | 'user' | null
+}
+
+export interface ExpressionExportResponse {
+  success: boolean
+  version: number
+  type: 'maibot.expression.export'
+  exported_at: string
+  source_chat_name: string
+  count: number
+  expressions: ExpressionExportItem[]
+}
+
+export interface ExpressionImportResponse {
+  success: boolean
+  message: string
+  imported_count: number
+  skipped_count: number
+  failed_count: number
+}
+
+export interface ExpressionClearResponse {
+  success: boolean
+  message: string
+  deleted_count: number
+}
+
+export interface LegacyExpressionGroupPreview {
+  old_chat_id: string
+  expression_count: number
+  platform: string | null
+  target_id: string | null
+  chat_type: 'group' | 'private' | null
+  matched_session_id: string | null
+  matched_chat_name: string | null
+  matched: boolean
+  matched_sessions: LegacyExpressionMatchOption[]
+}
+
+export interface LegacyExpressionMatchOption {
+  session_id: string
+  chat_name: string
+}
+
+export interface LegacyExpressionImportPreviewResponse {
+  success: boolean
+  db_path: string
+  total_count: number
+  matched_count: number
+  unmatched_count: number
+  groups: LegacyExpressionGroupPreview[]
+}
+
+export interface LegacyExpressionImportResponse {
+  success: boolean
+  message: string
+  imported_count: number
+  skipped_count: number
+  failed_count: number
+  ignored_group_count: number
 }
 
 /**

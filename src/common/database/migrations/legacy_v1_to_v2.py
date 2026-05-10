@@ -64,7 +64,6 @@ def migrate_legacy_v1_to_v2(context: MigrationExecutionContext) -> None:
     create_frozen_v2_schema(context.connection)
 
     table_migration_jobs: List[Tuple[str, Callable[[MigrationExecutionContext], int]]] = [
-        ("chat_sessions", _migrate_chat_sessions),
         ("llm_usage", _migrate_model_usage),
         ("images", _migrate_images),
         ("mai_messages", _migrate_messages),
@@ -567,8 +566,7 @@ def _estimate_total_record_count(connection: Connection) -> int:
         int: 本次迁移预计处理的总记录数。
     """
     return (
-        _count_legacy_table_rows(connection, "chat_streams")
-        + _count_legacy_table_rows(connection, "llm_usage")
+        _count_legacy_table_rows(connection, "llm_usage")
         + _count_legacy_table_rows(connection, "emoji")
         + _count_legacy_table_rows(connection, "images")
         + _count_legacy_table_rows(connection, "messages")
@@ -576,8 +574,6 @@ def _estimate_total_record_count(connection: Connection) -> int:
         + _count_legacy_table_rows(connection, "action_records")
         + _count_legacy_table_rows(connection, "online_time")
         + _count_legacy_table_rows(connection, "person_info")
-        + _count_legacy_table_rows(connection, "expression")
-        + _count_legacy_table_rows(connection, "jargon")
         + _count_legacy_table_rows(connection, "chat_history")
         + _count_legacy_table_rows(connection, "thinking_back")
     )
@@ -591,61 +587,6 @@ def _complete_table_progress(context: MigrationExecutionContext, table_name: str
         table_name: 已完成迁移的表名。
     """
     context.advance_progress(completed_tables=1, item_name=table_name)
-
-
-def _migrate_chat_sessions(context: MigrationExecutionContext) -> int:
-    """迁移旧版 ``chat_streams`` 到新版 ``chat_sessions``。
-
-    Args:
-        context: 当前迁移步骤执行上下文。
-
-    Returns:
-        int: 迁移成功的记录数。
-    """
-    connection = context.connection
-    legacy_table = _load_legacy_table_data(connection, "chat_streams")
-    if legacy_table is None:
-        _complete_table_progress(context, "chat_sessions")
-        return 0
-
-    migrated_count = 0
-    insert_sql = text(
-        """
-        INSERT OR IGNORE INTO chat_sessions (
-            session_id,
-            created_timestamp,
-            last_active_timestamp,
-            user_id,
-            group_id,
-            platform
-        ) VALUES (
-            :session_id,
-            :created_timestamp,
-            :last_active_timestamp,
-            :user_id,
-            :group_id,
-            :platform
-        )
-        """
-    )
-    for row in legacy_table.rows:
-        session_id = _normalize_required_text(row.get("stream_id"))
-        if session_id:
-            connection.execute(
-                insert_sql,
-                {
-                    "session_id": session_id,
-                    "created_timestamp": _coerce_datetime(row.get("create_time"), fallback_now=True),
-                    "last_active_timestamp": _coerce_datetime(row.get("last_active_time"), fallback_now=True),
-                    "user_id": _normalize_optional_text(row.get("user_id")),
-                    "group_id": _normalize_optional_text(row.get("group_id")),
-                    "platform": _normalize_required_text(row.get("platform"), default="unknown"),
-                },
-            )
-            migrated_count += 1
-        context.advance_progress(records=1)
-    _complete_table_progress(context, "chat_sessions")
-    return migrated_count
 
 
 def _migrate_model_usage(context: MigrationExecutionContext) -> int:
@@ -1213,147 +1154,29 @@ def _migrate_person_info(context: MigrationExecutionContext) -> int:
 
 
 def _migrate_expressions(context: MigrationExecutionContext) -> int:
-    """迁移旧版 ``expression`` 到新版 ``expressions``。
+    """跳过旧版 ``expression`` 到新版 ``expressions`` 的迁移。
 
     Args:
         context: 当前迁移步骤执行上下文。
 
     Returns:
-        int: 迁移成功的记录数。
+        int: 迁移成功的记录数，旧版表达方式不迁移时固定为 0。
     """
-    connection = context.connection
-    legacy_table = _load_legacy_table_data(connection, "expression")
-    if legacy_table is None:
-        _complete_table_progress(context, "expressions")
-        return 0
-
-    migrated_count = 0
-    insert_sql = text(
-        """
-        INSERT OR IGNORE INTO expressions (
-            id,
-            situation,
-            style,
-            content_list,
-            count,
-            last_active_time,
-            create_time,
-            session_id,
-            checked,
-            rejected,
-            modified_by
-        ) VALUES (
-            :id,
-            :situation,
-            :style,
-            :content_list,
-            :count,
-            :last_active_time,
-            :create_time,
-            :session_id,
-            :checked,
-            :rejected,
-            :modified_by
-        )
-        """
-    )
-    for row in legacy_table.rows:
-        connection.execute(
-            insert_sql,
-            {
-                "id": row.get("id"),
-                "situation": _normalize_required_text(row.get("situation"), default=""),
-                "style": _normalize_required_text(row.get("style"), default=""),
-                "content_list": json.dumps(_normalize_string_list(row.get("content_list")), ensure_ascii=False),
-                "count": _normalize_int(row.get("count"), default=1),
-                "last_active_time": _coerce_datetime(row.get("last_active_time"), fallback_now=True),
-                "create_time": _coerce_datetime(row.get("create_date"), fallback_now=True),
-                "session_id": _normalize_optional_text(row.get("chat_id")),
-                "checked": _normalize_bool(row.get("checked"), default=False),
-                "rejected": _normalize_bool(row.get("rejected"), default=False),
-                "modified_by": _normalize_modified_by(row.get("modified_by")),
-            },
-        )
-        migrated_count += 1
-        context.advance_progress(records=1)
     _complete_table_progress(context, "expressions")
-    return migrated_count
+    return 0
 
 
 def _migrate_jargons(context: MigrationExecutionContext) -> int:
-    """迁移旧版 ``jargon`` 到新版 ``jargons``。
+    """跳过旧版 ``jargon`` 到新版 ``jargons`` 的迁移。
 
     Args:
         context: 当前迁移步骤执行上下文。
 
     Returns:
-        int: 迁移成功的记录数。
+        int: 迁移成功的记录数，旧版黑话不迁移时固定为 0。
     """
-    connection = context.connection
-    legacy_table = _load_legacy_table_data(connection, "jargon")
-    if legacy_table is None:
-        _complete_table_progress(context, "jargons")
-        return 0
-
-    migrated_count = 0
-    insert_sql = text(
-        """
-        INSERT OR IGNORE INTO jargons (
-            id,
-            content,
-            raw_content,
-            meaning,
-            session_id_dict,
-            count,
-            is_jargon,
-            is_complete,
-            is_global,
-            last_inference_count,
-            inference_with_context,
-            inference_with_content_only
-        ) VALUES (
-            :id,
-            :content,
-            :raw_content,
-            :meaning,
-            :session_id_dict,
-            :count,
-            :is_jargon,
-            :is_complete,
-            :is_global,
-            :last_inference_count,
-            :inference_with_context,
-            :inference_with_content_only
-        )
-        """
-    )
-    for row in legacy_table.rows:
-        count = _normalize_int(row.get("count"), default=0)
-        connection.execute(
-            insert_sql,
-            {
-                "id": row.get("id"),
-                "content": _normalize_required_text(row.get("content"), default=""),
-                "raw_content": json.dumps(_normalize_string_list(row.get("raw_content")), ensure_ascii=False)
-                if row.get("raw_content") is not None
-                else None,
-                "meaning": _normalize_required_text(row.get("meaning")),
-                "session_id_dict": _build_session_id_dict(row.get("chat_id"), fallback_count=max(count, 1)),
-                "count": count,
-                "is_jargon": _normalize_optional_bool(row.get("is_jargon")),
-                "is_complete": _normalize_bool(row.get("is_complete"), default=False),
-                "is_global": _normalize_bool(row.get("is_global"), default=False),
-                "last_inference_count": _normalize_int(row.get("last_inference_count"), default=0),
-                "inference_with_context": _normalize_optional_text(row.get("inference_with_context")),
-                "inference_with_content_only": _normalize_optional_text(
-                    row.get("inference_content_only") or row.get("inference_with_content_only")
-                ),
-            },
-        )
-        migrated_count += 1
-        context.advance_progress(records=1)
     _complete_table_progress(context, "jargons")
-    return migrated_count
+    return 0
 
 
 def _migrate_chat_history(context: MigrationExecutionContext) -> int:

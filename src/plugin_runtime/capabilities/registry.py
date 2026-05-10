@@ -56,6 +56,8 @@ def register_capability_impls(manager: "PluginRuntimeManager", supervisor: Plugi
     _register("message.count_new", manager._cap_message_count_new)
     _register("message.build_readable", manager._cap_message_build_readable)
 
+    _register("maisaka.context.append", manager._cap_maisaka_context_append)
+
     _register("person.get_id", manager._cap_person_get_id)
     _register("person.get_value", manager._cap_person_get_value)
     _register("person.get_id_by_name", manager._cap_person_get_id_by_name)

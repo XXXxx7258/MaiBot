@@ -22,17 +22,7 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
 
     return ToolSpec(
         name="query_memory",
-        brief_description="检索 A_memorix 长期记忆并返回可读结果。",
-        detailed_description=(
-            "参数说明：\n"
-            "- query：string，可选。要检索的关键词或问题。\n"
-            "- limit：integer，可选。返回条数，默认使用系统配置值。\n"
-            "- mode：string，可选。search/time/hybrid/episode/aggregate。\n"
-            "- person_name：string，可选。人物名，优先用于解析并过滤 person_id。\n"
-            "- time_start：string，可选。起始时间，可填写时间戳或可解析时间文本。\n"
-            "- time_end：string，可选。结束时间，可填写时间戳或可解析时间文本。\n"
-            "- respect_filter：boolean，可选。是否应用聊天过滤配置，默认 true。"
-        ),
+        description="检索长期记忆并返回可读结果。",
         parameters_schema={
             "type": "object",
             "properties": {
@@ -46,7 +36,7 @@ def get_tool_spec(*, enabled: bool = True) -> ToolSpec:
                 },
                 "mode": {
                     "type": "string",
-                    "description": "检索模式：search/time/hybrid/episode/aggregate。",
+                    "description": "检索模式：search/time/hybrid/episode/aggregate。`search` 查事实或偏好，`time` 查某段时间，`episode` 查某次经历，`aggregate` 查整体情况；拿不准时用 `hybrid`。",
                     "enum": sorted(_ALLOWED_QUERY_MODES),
                     "default": "search",
                 },

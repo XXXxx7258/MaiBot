@@ -17,88 +17,6 @@ from src.llm_models.payload_content.tool_option import ToolDefinitionInput
 logger = get_logger("core.tooling")
 
 
-def _normalize_schema_type(raw_type: Any) -> str:
-    """将原始 Schema 类型值规范化为可读字符串。
-
-    Args:
-        raw_type: 原始类型值。
-
-    Returns:
-        str: 规范化后的类型名称。
-    """
-
-    normalized_type = str(raw_type or "").strip().lower()
-    if not normalized_type:
-        return "string"
-    if normalized_type == "number":
-        return "number"
-    if normalized_type == "integer":
-        return "integer"
-    if normalized_type == "boolean":
-        return "boolean"
-    if normalized_type == "array":
-        return "array"
-    if normalized_type == "object":
-        return "object"
-    return normalized_type
-
-
-def build_tool_detailed_description(
-    parameters_schema: Optional[Dict[str, Any]],
-    fallback_description: str = "",
-) -> str:
-    """根据参数 Schema 构建工具详细描述。
-
-    Args:
-        parameters_schema: 工具参数对象级 Schema。
-        fallback_description: 无法从 Schema 解析时使用的兜底说明。
-
-    Returns:
-        str: 生成后的详细描述文本。
-    """
-
-    if not parameters_schema:
-        return fallback_description.strip()
-
-    properties = parameters_schema.get("properties")
-    if not isinstance(properties, dict) or not properties:
-        return fallback_description.strip()
-
-    required_names = {
-        str(name).strip()
-        for name in parameters_schema.get("required", [])
-        if str(name).strip()
-    }
-
-    lines = ["参数说明："]
-    for parameter_name, parameter_schema in properties.items():
-        if not isinstance(parameter_schema, dict):
-            continue
-
-        normalized_name = str(parameter_name).strip()
-        parameter_type = _normalize_schema_type(parameter_schema.get("type"))
-        required_text = "必填" if normalized_name in required_names else "可选"
-        parameter_description = str(parameter_schema.get("description", "") or "").strip() or "无额外说明"
-        line = f"- {normalized_name}：{parameter_type}，{required_text}。{parameter_description}"
-
-        if isinstance(parameter_schema.get("enum"), list) and parameter_schema["enum"]:
-            enum_values = "、".join(str(item) for item in parameter_schema["enum"])
-            line += f" 可选值：{enum_values}。"
-
-        if "default" in parameter_schema:
-            line += f" 默认值：{parameter_schema['default']}。"
-
-        lines.append(line)
-
-    if len(lines) == 1:
-        return fallback_description.strip()
-
-    if fallback_description.strip():
-        lines.append("")
-        lines.append(fallback_description.strip())
-    return "\n".join(lines).strip()
-
-
 @dataclass(slots=True)
 class ToolIcon:
     """统一工具图标信息。"""
@@ -157,13 +75,12 @@ class ToolContentItem:
         return f"[{self.content_type} 内容]"
 
 
-@dataclass(slots=True)
+@dataclass(init=False, slots=True)
 class ToolSpec:
     """统一工具声明。"""
 
     name: str
-    brief_description: str
-    detailed_description: str = ""
+    description: str
     title: str = ""
     parameters_schema: Dict[str, Any] | None = None
     output_schema: Dict[str, Any] | None = None
@@ -174,6 +91,42 @@ class ToolSpec:
     annotation: ToolAnnotation | None = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    def __init__(
+        self,
+        *,
+        name: str,
+        description: str = "",
+        title: str = "",
+        parameters_schema: Dict[str, Any] | None = None,
+        output_schema: Dict[str, Any] | None = None,
+        provider_name: str = "",
+        provider_type: str = "",
+        enabled: bool = True,
+        icons: list[ToolIcon] | None = None,
+        annotation: ToolAnnotation | None = None,
+        metadata: Dict[str, Any] | None = None,
+        brief_description: str = "",
+        detailed_description: str = "",
+    ) -> None:
+        """初始化工具声明。
+
+        brief_description/detailed_description 为旧字段兼容入口：
+        - description 为空时使用 brief_description。
+        - detailed_description 被弃用，不参与描述构建。
+        """
+
+        self.name = name
+        self.description = str(description or brief_description or "").strip()
+        self.title = title
+        self.parameters_schema = parameters_schema
+        self.output_schema = output_schema
+        self.provider_name = provider_name
+        self.provider_type = provider_type
+        self.enabled = enabled
+        self.icons = list(icons or [])
+        self.annotation = annotation
+        self.metadata = dict(metadata or {})
+
     def build_llm_description(self) -> str:
         """构建供 LLM 使用的描述文本。
 
@@ -181,7 +134,7 @@ class ToolSpec:
             str: 合并后的单段工具描述。
         """
 
-        return self.brief_description.strip()
+        return self.description.strip()
 
     def to_llm_definition(self) -> ToolDefinitionInput:
         """转换为统一的 LLM 工具定义。

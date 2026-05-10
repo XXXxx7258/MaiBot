@@ -21,7 +21,7 @@ from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_mentioned_bot_in_message
 from src.common.data_models.mai_message_data_model import GroupInfo, UserInfo
 from src.common.logger import get_logger
-from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
+from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config
 from src.core.tooling import ToolRegistry, ToolSpec
 from src.learners.expression_learner import ExpressionLearner
@@ -126,10 +126,10 @@ class MaisakaHeartFlowChatting:
             int(global_config.chat.planner_interrupt_max_consecutive_count),
         )
 
-        expr_use, expr_learn, jargon_learn = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
+        expr_use, expr_learn = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
         self._enable_expression_use = expr_use
         self._enable_expression_learning = expr_learn
-        self._enable_jargon_learning = jargon_learn
+        self._enable_jargon_use, self._enable_jargon_learning = JargonConfigUtils.get_jargon_config_for_chat(session_id)
         self._min_extraction_interval = 30
         self._last_expression_extraction_time = 0.0
         self._expression_learner = ExpressionLearner(session_id)
@@ -512,7 +512,7 @@ class MaisakaHeartFlowChatting:
         return None
 
     def _prune_processed_message_cache(self) -> None:
-        """裁剪 runtime 与表达学习器都已经消费过的旧消息。"""
+        """裁剪 runtime 已经消费过的旧消息。"""
         excess_count = len(self.message_cache) - MAX_RETAINED_MESSAGE_CACHE_SIZE
         if excess_count <= 0:
             return
@@ -520,14 +520,12 @@ class MaisakaHeartFlowChatting:
         removable_count = min(
             excess_count,
             self._last_processed_index,
-            self._expression_learner.last_processed_index,
         )
         if removable_count <= 0:
             return
 
         del self.message_cache[:removable_count]
         self._last_processed_index = max(0, self._last_processed_index - removable_count)
-        self._expression_learner.discard_processed_prefix(removable_count)
         logger.debug(
             f"{self.log_prefix} 已清理 Maisaka 旧消息缓存: "
             f"清理数量={removable_count} 保留数量={len(self.message_cache)}"
@@ -646,7 +644,7 @@ class MaisakaHeartFlowChatting:
         return self._force_next_timing_continue
 
     async def _wait_for_timing_gate_non_continue_cooldown(self, elapsed_seconds: float) -> None:
-        """仅对 Timing Gate 的 no_reply 动作应用冷却窗口。"""
+        """仅对 Timing Gate 的 no_action 动作应用冷却窗口。"""
 
         cooldown_seconds = self._timing_gate_non_continue_cooldown_seconds
         if cooldown_seconds <= 0:
@@ -915,7 +913,7 @@ class MaisakaHeartFlowChatting:
         tool_lines: list[str] = []
         for index, tool_spec in enumerate(undiscovered_tool_specs, start=1):
             tool_name = tool_spec.name.strip()
-            tool_description = tool_spec.brief_description.strip()
+            tool_description = tool_spec.description.strip()
             if tool_description:
                 tool_lines.append(f"{index}. {tool_name}: {tool_description}")
             else:
@@ -947,7 +945,7 @@ class MaisakaHeartFlowChatting:
         query_terms = [term for term in normalized_query.replace("_", " ").replace("-", " ").split() if term]
         for tool_name, tool_spec in self.deferred_tool_specs_by_name.items():
             lower_name = tool_name.lower()
-            lower_description = tool_spec.brief_description.lower()
+            lower_description = tool_spec.description.lower()
             score = 0
 
             if normalized_query == lower_name:
@@ -1137,6 +1135,45 @@ class MaisakaHeartFlowChatting:
         finally:
             self._prune_processed_message_cache()
 
+    async def _trigger_trimmed_history_learning(self, context_messages: Sequence[LLMContextMessage]) -> None:
+        """对 Maisaka 裁切掉的真实聊天历史触发表达学习。"""
+
+        if not context_messages:
+            return
+        if not self._enable_expression_learning:
+            logger.debug(f"{self.log_prefix} 表达学习未启用，跳过裁切历史学习")
+            return
+
+        pending_context_count = len(context_messages)
+        if not self._should_trigger_learning(
+            enabled=self._enable_expression_learning,
+            feature_name="表达学习",
+            last_extraction_time=self._last_expression_extraction_time,
+            pending_count=pending_context_count,
+            min_messages_for_extraction=self._expression_learner.min_messages_for_extraction,
+        ):
+            return
+
+        self._last_expression_extraction_time = time.time()
+        logger.info(
+            f"{self.log_prefix} 触发裁切历史表达学习: "
+            f"裁切上下文消息数量={pending_context_count} "
+            f"是否启用黑话学习={self._enable_jargon_learning}"
+        )
+
+        try:
+            jargon_miner = self._jargon_miner if self._enable_jargon_learning else None
+            learnt_style = await self._expression_learner.learn_from_context_messages(
+                context_messages,
+                jargon_miner,
+            )
+            if learnt_style:
+                logger.info(f"{self.log_prefix} 裁切历史表达学习成功")
+            else:
+                logger.debug(f"{self.log_prefix} 裁切历史表达学习未产生结果")
+        except Exception:
+            logger.exception(f"{self.log_prefix} 裁切历史表达学习异常")
+
     def _should_trigger_learning(
         self,
         *,
@@ -1256,6 +1293,7 @@ class MaisakaHeartFlowChatting:
         time_records: Optional[dict[str, float]] = None,
         timing_selected_history_count: Optional[int] = None,
         timing_prompt_tokens: Optional[int] = None,
+        timing_model_name: Optional[str] = None,
         timing_action: str = "",
         timing_response: str = "",
         timing_tool_calls: Optional[list[Any]] = None,
@@ -1264,6 +1302,7 @@ class MaisakaHeartFlowChatting:
         timing_prompt_section: Optional[RenderableType] = None,
         planner_selected_history_count: Optional[int] = None,
         planner_prompt_tokens: Optional[int] = None,
+        planner_model_name: Optional[str] = None,
         planner_response: str = "",
         planner_tool_calls: Optional[list[Any]] = None,
         planner_tool_results: Optional[list[str]] = None,
@@ -1290,6 +1329,7 @@ class MaisakaHeartFlowChatting:
             border_style="bright_magenta",
             selected_history_count=timing_selected_history_count,
             prompt_tokens=timing_prompt_tokens,
+            model_name=timing_model_name,
             response_text=timing_response,
             prompt_section=timing_prompt_section,
             extra_lines=None,
@@ -1312,6 +1352,7 @@ class MaisakaHeartFlowChatting:
             border_style="green",
             selected_history_count=planner_selected_history_count,
             prompt_tokens=planner_prompt_tokens,
+            model_name=planner_model_name,
             response_text=planner_response,
             prompt_section=planner_prompt_section,
             extra_lines=planner_extra_lines,
@@ -1346,6 +1387,7 @@ class MaisakaHeartFlowChatting:
         border_style: str,
         selected_history_count: Optional[int],
         prompt_tokens: Optional[int],
+        model_name: Optional[str] = None,
         response_text: str = "",
         prompt_section: Optional[RenderableType] = None,
         extra_lines: Optional[list[str]] = None,
@@ -1355,6 +1397,7 @@ class MaisakaHeartFlowChatting:
         has_content = any([
             selected_history_count is not None,
             prompt_tokens is not None,
+            bool((model_name or "").strip()),
             bool(response_text.strip()),
             prompt_section is not None,
             bool(extra_lines),
@@ -1363,6 +1406,9 @@ class MaisakaHeartFlowChatting:
             return None
 
         body_lines: list[str] = []
+        normalized_model_name = (model_name or "").strip()
+        if normalized_model_name:
+            body_lines.append(f"请求模型：{normalized_model_name}")
         if prompt_tokens is not None:
             body_lines.append(f"本次请求token消耗：{format_token_count(prompt_tokens)}")
         if extra_lines:
@@ -1555,6 +1601,7 @@ class MaisakaHeartFlowChatting:
         request_messages: Optional[list[Any]] = None,
         tool_call_id: str,
         border_style: str = "bright_yellow",
+        output_content: str = "",
     ) -> Panel:
         """将工具 prompt 渲染为可点击查看的预览入口。"""
 
@@ -1576,6 +1623,7 @@ class MaisakaHeartFlowChatting:
                         chat_id=self.session_id,
                         request_kind=labels["request_kind"],
                         selection_reason=subtitle,
+                        output_content=output_content,
                     ),
                     title=labels["prompt_title"],
                     border_style=border_style,
@@ -1589,6 +1637,7 @@ class MaisakaHeartFlowChatting:
                 chat_id=self.session_id,
                 request_kind=labels["request_kind"],
                 subtitle=subtitle,
+                output_content=output_content,
             ),
             title=labels["prompt_title"],
             border_style=border_style,
@@ -1695,6 +1744,7 @@ class MaisakaHeartFlowChatting:
                     )
                 )
 
+        output_text = str(detail.get("output_text") or "").strip()
         prompt_text = str(detail.get("prompt_text") or "").strip()
         if prompt_text:
             parts.append(
@@ -1704,6 +1754,7 @@ class MaisakaHeartFlowChatting:
                     request_messages=detail.get("request_messages") if isinstance(detail.get("request_messages"), list) else None,
                     tool_call_id=tool_call_id,
                     border_style=prompt_border_style,
+                    output_content=output_text,
                 )
             )
 
@@ -1718,7 +1769,6 @@ class MaisakaHeartFlowChatting:
                 )
             )
 
-        output_text = str(detail.get("output_text") or "").strip()
         if output_text:
             parts.append(
                 Panel(

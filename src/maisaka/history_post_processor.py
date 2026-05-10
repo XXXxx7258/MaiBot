@@ -15,6 +15,7 @@ class HistoryPostProcessResult:
     """历史后处理结果。"""
 
     history: list[LLMContextMessage]
+    removed_messages: list[LLMContextMessage]
     removed_count: int
     changed_count: int
     remaining_context_count: int
@@ -34,17 +35,18 @@ def process_chat_history_after_cycle(
     remaining_context_count = sum(1 for message in processed_history if message.count_in_context)
 
     compact_removed_count = 0
+    removed_messages: list[LLMContextMessage] = []
     trim_threshold = ceil(max_context_size * TRIM_THRESHOLD_RATIO)
     if remaining_context_count > trim_threshold:
         target_context_count = max(1, int(max_context_size * TRIM_TARGET_RATIO))
-        removed_early_message_count = _trim_history_to_context_target(
+        removed_messages = _trim_history_to_context_target(
             processed_history,
             target_context_count=target_context_count,
         )
         processed_history, removed_after_trim_count, moved_after_trim_count = _normalize_history_structure(
             processed_history
         )
-        compact_removed_count = removed_early_message_count + removed_after_trim_count
+        compact_removed_count = len(removed_messages) + removed_after_trim_count
         moved_tool_result_count += moved_after_trim_count
 
     remaining_context_count = sum(1 for message in processed_history if message.count_in_context)
@@ -52,6 +54,7 @@ def process_chat_history_after_cycle(
     changed_count = removed_count + moved_tool_result_count
     return HistoryPostProcessResult(
         history=processed_history,
+        removed_messages=removed_messages,
         removed_count=removed_count,
         changed_count=changed_count,
         remaining_context_count=remaining_context_count,
@@ -77,12 +80,12 @@ def _trim_history_to_context_target(
     chat_history: list[LLMContextMessage],
     *,
     target_context_count: int,
-) -> int:
+) -> list[LLMContextMessage]:
     """移除最早的一段历史，直到普通上下文消息数量降到目标值以内。"""
 
     remaining_context_count = sum(1 for message in chat_history if message.count_in_context)
     if remaining_context_count <= target_context_count:
-        return 0
+        return []
 
     remove_count = 0
     for message in chat_history:
@@ -93,7 +96,8 @@ def _trim_history_to_context_target(
                 break
 
     if remove_count <= 0:
-        return 0
+        return []
 
+    removed_messages = list(chat_history[:remove_count])
     del chat_history[:remove_count]
-    return remove_count
+    return removed_messages

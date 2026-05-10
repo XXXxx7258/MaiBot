@@ -16,12 +16,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="view_complex_message",
-        brief_description="根据 msg_id 查看复杂消息的完整内容，适用于 Prompt 中标记为 [消息类型]复杂消息 的消息。",
-        detailed_description=(
-            "参数说明：\n"
-            "- msg_id：string，必填。要查看完整内容的目标消息编号。\n\n"
-            "当你在上下文中看到 [消息类型]复杂消息 时，可调用本工具查看对应转发消息的完整展开内容。"
-        ),
+        description="根据 msg_id 查看复杂消息的完整内容，适用于 Prompt 中标记为 [消息类型]复杂消息 的消息。",
         parameters_schema={
             "type": "object",
             "properties": {

@@ -38,7 +38,12 @@ def test_runtime_maps_expression_config_flags_to_correct_fields(monkeypatch: pyt
     monkeypatch.setattr(
         runtime_module.ExpressionConfigUtils,
         "get_expression_config_for_chat",
-        staticmethod(lambda session_id: (True, False, True)),
+        staticmethod(lambda session_id: (True, False)),
+    )
+    monkeypatch.setattr(
+        runtime_module.JargonConfigUtils,
+        "get_jargon_config_for_chat",
+        staticmethod(lambda session_id: (True, True)),
     )
     monkeypatch.setattr(runtime_module, "ExpressionLearner", lambda session_id: SimpleNamespace())
     monkeypatch.setattr(runtime_module, "JargonMiner", lambda session_id, session_name: SimpleNamespace())
@@ -52,6 +57,7 @@ def test_runtime_maps_expression_config_flags_to_correct_fields(monkeypatch: pyt
 
     assert runtime._enable_expression_use is True
     assert runtime._enable_expression_learning is False
+    assert runtime._enable_jargon_use is True
     assert runtime._enable_jargon_learning is True
 
 
