@@ -2882,6 +2882,15 @@ class DebugConfig(ConfigBase):
     )
     """是否记录 Replyer 请求体，默认关闭"""
 
+    record_planner_request: bool = Field(
+        default=False,
+        json_schema_extra={
+            "x-widget": "switch",
+            "x-icon": "file-json",
+        },
+    )
+    """是否记录 Planner 完整请求体和完整回复体，默认关闭"""
+
     enable_llm_cache_stats: bool = Field(
         default=False,
         json_schema_extra={

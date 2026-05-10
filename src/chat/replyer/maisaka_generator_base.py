@@ -402,6 +402,7 @@ class BaseMaisakaReplyGenerator:
         stream_id: str,
         model_name: str,
         messages: List[Message],
+        response_body: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not global_config.debug.record_reply_request:
             return
@@ -414,6 +415,7 @@ class BaseMaisakaReplyGenerator:
                 "stream_id": stream_id,
                 "created_at": datetime.now().isoformat(timespec="seconds"),
                 "messages": serialize_prompt_messages(messages),
+                "response_body": response_body or {},
             }
             file_path = DEBUG_REPLY_CACHE_DIR / self._build_debug_request_filename(stream_id, model_name)
             with file_path.open("w", encoding="utf-8") as file:
@@ -599,6 +601,25 @@ class BaseMaisakaReplyGenerator:
             stream_id=preview_chat_id,
             model_name=generation_result.model_name or "",
             messages=request_messages,
+            response_body={
+                "response": generation_result.response,
+                "reasoning": generation_result.reasoning,
+                "model_name": generation_result.model_name,
+                "tool_calls": [
+                    {
+                        "id": tool_call.call_id,
+                        "name": tool_call.func_name,
+                        "arguments": tool_call.args,
+                        "extra_content": tool_call.extra_content,
+                    }
+                    for tool_call in (generation_result.tool_calls or [])
+                ],
+                "prompt_tokens": generation_result.prompt_tokens,
+                "completion_tokens": generation_result.completion_tokens,
+                "total_tokens": generation_result.total_tokens,
+                "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
+                "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
+            },
         )
         llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
         response_text = (generation_result.response or "").strip()
