@@ -40,8 +40,13 @@ try:
     except ImportError:
         from mcp import StdioServerParameters  # type: ignore[attr-defined]
 
-    from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
+    from mcp.shared.exceptions import McpError
+
+    try:
+        from .stdio_filter import tolerant_stdio_client
+    except ImportError:
+        tolerant_stdio_client = None  # type: ignore[assignment]
 
     try:
         from mcp.client.sse import sse_client
@@ -60,9 +65,10 @@ except ImportError:
     ClientSession = None  # type: ignore[assignment,misc]
     StdioServerParameters = None  # type: ignore[assignment,misc]
     mcp_types = None  # type: ignore[assignment]
-    stdio_client = None  # type: ignore[assignment]
     streamable_http_client = None  # type: ignore[assignment]
     sse_client = None  # type: ignore[assignment]
+    tolerant_stdio_client = None  # type: ignore[assignment]
+    McpError = Exception  # type: ignore[assignment,misc]
 
 
 class MCPConnection:
@@ -161,7 +167,7 @@ class MCPConnection:
             tuple[Any, Any]: 读写流对象。
         """
 
-        if StdioServerParameters is None or stdio_client is None:
+        if StdioServerParameters is None or tolerant_stdio_client is None:
             raise RuntimeError("当前环境未安装可用的 MCP stdio 客户端")
         if not self.config.command:
             raise ValueError(f"MCP 服务器 '{self.config.name}' 缺少 stdio command 配置")
@@ -171,7 +177,8 @@ class MCPConnection:
             args=self.config.args,
             env=self.config.env,
         )
-        return await self._exit_stack.enter_async_context(stdio_client(params))
+        # 容错包装：丢弃违规 server 写到 stdout 的非 JSON 噪声以防 initialize 失败；详见 stdio_filter.py。
+        return await self._exit_stack.enter_async_context(tolerant_stdio_client(params))
 
     async def _connect_streamable_http(self) -> tuple[Any, Any]:
         """建立 Streamable HTTP 传输连接。
@@ -383,9 +390,19 @@ class MCPConnection:
         self.tools = await self._list_tools() if self.supports_tools() else []
         self.prompts = await self._list_prompts() if self.supports_prompts() else []
         self.resources = await self._list_resources() if self.supports_resources() else []
-        self.resource_templates = (
-            await self._list_resource_templates() if self.supports_resources() else []
-        )
+        self.resource_templates = []
+        if self.supports_resources():
+            # list_resource_templates 在 MCP spec 中是 OPTIONAL，部分 server（如 moegirl-wiki-mcp）
+            # 仅实现 list_resources，遇到 METHOD_NOT_FOUND 时按空集合处理避免毁掉整个连接。
+            try:
+                self.resource_templates = await self._list_resource_templates()
+            except McpError as exc:
+                if exc.error.code != mcp_types.METHOD_NOT_FOUND:
+                    raise
+                console.print(
+                    f"[warning]⚠️ MCP 服务器 '{self.config.name}' 未实现 "
+                    f"list_resource_templates，按空集合处理[/warning]"
+                )
 
     def supports_tools(self) -> bool:
         """判断服务端是否声明支持 Tools。
