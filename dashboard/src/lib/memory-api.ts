@@ -259,6 +259,9 @@ export interface MemoryRuntimeConfigPayload {
   config: Record<string, unknown>
   data_dir: string
   embedding_dimension: number
+  stored_vector_dimension?: number
+  vector_rebuild_required?: boolean
+  vector_rebuild_message?: string
   auto_save: boolean
   relation_vectors_enabled: boolean
   runtime_ready: boolean
@@ -275,6 +278,25 @@ export interface MemoryRuntimeConfigPayload {
 export interface MemoryRuntimeSelfCheckPayload {
   success: boolean
   report?: Record<string, unknown>
+  error?: string
+}
+
+export interface MemoryVectorRebuildPayload {
+  success: boolean
+  dry_run?: boolean
+  counts?: Record<string, number>
+  stats?: Record<string, { done: number; failed: number }>
+  total?: number
+  done?: number
+  failed?: number
+  errors?: string[]
+  elapsed_ms?: number
+  embedding_degraded?: boolean
+  stored_vector_dimension?: number
+  embedding_dimension?: number
+  vector_rebuild_required?: boolean
+  vector_rebuild_message?: string
+  self_check?: Record<string, unknown>
   error?: string
 }
 
@@ -1072,6 +1094,18 @@ export async function getMemoryRuntimeConfig(): Promise<MemoryRuntimeConfigPaylo
 export async function refreshMemoryRuntimeSelfCheck(): Promise<MemoryRuntimeSelfCheckPayload> {
   return requestJson<MemoryRuntimeSelfCheckPayload>('/runtime/self-check/refresh', {
     method: 'POST',
+  })
+}
+
+export async function rebuildMemoryRuntimeVectors(payload: {
+  dry_run?: boolean
+  batch_size?: number
+  include_relations?: boolean | null
+} = {}): Promise<MemoryVectorRebuildPayload> {
+  return requestJson<MemoryVectorRebuildPayload>('/runtime/vectors/rebuild', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   })
 }
 

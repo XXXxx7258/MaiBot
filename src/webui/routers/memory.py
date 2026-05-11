@@ -88,6 +88,12 @@ class AutoSaveRequest(BaseModel):
     enabled: bool
 
 
+class VectorRebuildRequest(BaseModel):
+    dry_run: bool = False
+    batch_size: int = Field(32, ge=1, le=512)
+    include_relations: Optional[bool] = None
+
+
 class MemoryConfigUpdateRequest(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -562,6 +568,16 @@ async def _runtime_auto_save(enabled: bool | None = None) -> dict:
         config = await memory_service.runtime_admin(action="get_config")
         return {"success": bool(config.get("success", False)), "auto_save": bool(config.get("auto_save", False))}
     return await memory_service.runtime_admin(action="set_auto_save", enabled=enabled)
+
+
+async def _runtime_rebuild_vectors(payload: VectorRebuildRequest) -> dict:
+    return await memory_service.runtime_admin(
+        action="rebuild_all_vectors",
+        timeout_ms=600000,
+        dry_run=payload.dry_run,
+        batch_size=payload.batch_size,
+        include_relations=payload.include_relations,
+    )
 
 
 async def _memory_config_schema() -> dict:
@@ -1116,6 +1132,11 @@ async def set_memory_runtime_auto_save(payload: AutoSaveRequest):
     return await _runtime_auto_save(payload.enabled)
 
 
+@router.post("/runtime/vectors/rebuild")
+async def rebuild_memory_runtime_vectors(payload: VectorRebuildRequest):
+    return await _runtime_rebuild_vectors(payload)
+
+
 @router.get("/maintenance/recycle-bin")
 async def get_memory_recycle_bin(limit: int = Query(50, ge=1, le=200)):
     return await _maintenance_recycle_bin(limit)
@@ -1566,6 +1587,11 @@ async def compat_runtime_auto_save():
 @compat_router.post("/config/auto_save")
 async def compat_set_runtime_auto_save(payload: AutoSaveRequest):
     return await _runtime_auto_save(payload.enabled)
+
+
+@compat_router.post("/runtime/vectors/rebuild")
+async def compat_rebuild_runtime_vectors(payload: VectorRebuildRequest):
+    return await _runtime_rebuild_vectors(payload)
 
 
 @compat_router.get("/memory/recycle_bin")
