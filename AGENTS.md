@@ -40,6 +40,11 @@
 # 配置文件修改
 如果你需要改动配置文件，不需要修改实际的bot_config.toml或者model_config.toml，只需要修改配置文件模版，并新增一个版本号即可，也不必要为配置改动创建测试文件。
 
+# Webui规范
+涉及显示聊天流信息的，优先显示聊天流实际名称（群名称或 xxx的私聊），而不是session_id
+
+# 会话 ID 规范
+除聊天流创建/注册链路外，业务模块不应自行调用 `SessionUtils.calculate_session_id` 计算资源归属 ID。表达学习、黑话、记忆、WebUI、配置匹配等模块应通过 `chat_manager` 的内部接口，基于 platform、目标 ID 和聊天类型解析已存在的真实聊天流；如果解析不到真实 `ChatSession.session_id`，不要把自行计算的 fallback hash 写入数据库。
 
 # 关于 A_memorix 修改
 如果修改涉及 `src/A_memorix`，请先阅读 `src/A_memorix/MODIFICATION_POLICY.md`。
@@ -54,6 +59,9 @@
 
 # maibot插件开发文档
 https://github.com/Mai-with-u/maibot-plugin-sdk/blob/main/docs/guide.md
+
+如果你要编写插件，不要改动根目录的.gitignore，而是给插件所属的文件夹单独管理。
+如果你要编写插件有需求需要改动主程序代码，请你先请求许可。
 
 # 如何提交maibot插件
 https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md

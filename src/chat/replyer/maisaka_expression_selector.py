@@ -34,7 +34,7 @@ class MaisakaExpressionSelector:
 
     def _can_use_expressions(self, session_id: str) -> bool:
         try:
-            use_expression, _, _ = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
+            use_expression, _ = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
             return use_expression
         except Exception as exc:
             logger.error(f"检查表达方式使用开关失败: {exc}")
@@ -50,7 +50,7 @@ class MaisakaExpressionSelector:
         expression_groups = global_config.expression.expression_groups
 
         for expression_group in expression_groups:
-            target_items = expression_group.expression_groups
+            target_items = expression_group.targets
             group_session_ids: set[str] = set()
             contains_current_session = False
             contains_global_share_marker = False

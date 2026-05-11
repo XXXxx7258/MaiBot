@@ -62,6 +62,10 @@ export interface PluginManifest {
 export interface PluginInfo {
   /** 插件唯一标识 */
   id: string
+  /** 插件仓库索引中的 ID，用于兼容旧统计数据 */
+  marketplace_id?: string
+  /** 统计服务可能使用的 ID 别名 */
+  stats_ids?: string[]
   /** 插件清单 */
   manifest: PluginManifest
   /** 下载量 */

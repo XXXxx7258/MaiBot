@@ -265,7 +265,7 @@ function TimingGateCard({ data }: { data: TimingGateResultEvent }) {
   const actionConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive'; icon: typeof ArrowRight }> = {
     continue: { label: '继续执行', variant: 'default', icon: ArrowRight },
     wait: { label: '等待', variant: 'secondary', icon: PauseCircle },
-    no_reply: { label: '不回复', variant: 'destructive', icon: XCircle },
+    no_action: { label: '不回复', variant: 'destructive', icon: XCircle },
   }
   const config = actionConfig[data.action] ?? actionConfig.continue
   const Icon = config.icon
@@ -543,7 +543,7 @@ function getCycleEndReasonText(data: CycleEndEvent) {
   }
 
   if (reason === 'finish') return 'Planner 调用 finish，结束本轮思考并等待新消息。'
-  if (reason === 'timing_no_reply') return 'Timing Gate 选择 no_reply，本轮不会进入 Planner。'
+  if (reason === 'timing_no_action') return 'Timing Gate 选择 no_action，本轮不会进入 Planner。'
   if (reason === 'max_rounds') return '已达到内部思考轮次上限，本轮处理结束。'
   if (reason === 'planner_interrupted') return 'Planner 被新消息打断，当前轮结束。'
   if (reason.startsWith('tool_pause:')) return `工具 ${reason.slice('tool_pause:'.length)} 要求暂停当前思考循环。`
@@ -557,7 +557,7 @@ function getCycleEndReasonLabel(data: CycleEndEvent) {
   const reason = data.end_reason ?? ''
 
   if (reason === 'finish') return 'finish 结束'
-  if (reason === 'timing_no_reply') return 'no_reply 结束'
+  if (reason === 'timing_no_action') return 'no_action 结束'
   if (reason === 'max_rounds') return '轮次上限'
   if (reason === 'planner_interrupted') return 'Planner 打断'
   if (reason.startsWith('tool_pause:')) return '工具暂停'
@@ -720,7 +720,7 @@ function TimelineEventRenderer({
       if (isPlannerInterrupted(entry.data as PlannerFinalizedEvent)) {
         return <PlannerInterruptedCard data={entry.data as PlannerFinalizedEvent} />
       }
-      if ((entry.data as PlannerFinalizedEvent).timing_gate?.result?.action === 'no_reply') {
+      if ((entry.data as PlannerFinalizedEvent).timing_gate?.result?.action === 'no_action') {
         return null
       }
       return (
@@ -933,7 +933,7 @@ export function MaisakaMonitor() {
                   return timeline.map((entry) => {
                     if (entry.type === 'timing_gate.result') {
                       const data = entry.data as TimingGateResultEvent
-                      if (data.action === 'no_reply') {
+                      if (data.action === 'no_action') {
                         noReplyTimingGateCycles.add(buildCycleKey(data.session_id, data.cycle_id))
                       }
                     }

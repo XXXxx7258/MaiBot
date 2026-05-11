@@ -2,9 +2,11 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
 import asyncio
+import json
 
 from rich.console import RenderableType
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
@@ -41,7 +43,7 @@ from .history_utils import drop_orphan_tool_results, normalize_tool_result_order
 from .display.prompt_cli_renderer import PromptCLIVisualizer
 from .visual_mode_utils import resolve_enable_visual_planner
 
-TIMING_GATE_TOOL_NAMES = {"continue", "no_reply", "wait"}
+TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
 REQUEST_TYPE_BY_REQUEST_KIND = {
     "planner": "maisaka_planner",
     "timing_gate": "maisaka_timing_gate",
@@ -55,6 +57,7 @@ PROMPT_PREVIEW_CATEGORY_BY_REQUEST_KIND = {
     "sub_agent": "sub_agent",
 }
 CONTEXT_SELECTION_CACHE_STABILITY_RATIO = 2.0
+DEBUG_PLANNER_CACHE_DIR = Path("logs/debug_planner_cache")
 
 
 @dataclass(slots=True)
@@ -71,6 +74,7 @@ class ChatResponse:
     built_message_count: int
     completion_tokens: int
     total_tokens: int
+    model_name: str = ""
     prompt_section: Optional[RenderableType] = None
     prompt_html_uri: Optional[str] = None
 
@@ -263,6 +267,81 @@ class MaisakaChatLoopService:
         return llm_client
 
     @staticmethod
+    def _build_debug_request_filename(session_id: str, model_name: str, request_kind: str) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        raw_name = f"{timestamp}_{request_kind or 'planner'}_{session_id or 'unknown'}_{model_name or 'unknown'}.json"
+        return "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in raw_name)
+
+    @staticmethod
+    def _serialize_llm_response_body(
+        *,
+        response: str,
+        reasoning: str,
+        model_name: str,
+        tool_calls: Sequence[ToolCall],
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int,
+        prompt_cache_hit_tokens: int,
+        prompt_cache_miss_tokens: int,
+    ) -> dict[str, Any]:
+        return {
+            "response": response,
+            "reasoning": reasoning,
+            "model_name": model_name,
+            "tool_calls": serialize_tool_calls(list(tool_calls)),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "prompt_cache_hit_tokens": prompt_cache_hit_tokens,
+            "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
+        }
+
+    def _save_debug_planner_request_body(
+        self,
+        *,
+        request_kind: str,
+        model_name: str,
+        messages: Sequence[Message],
+        tool_definitions: Sequence[ToolDefinitionInput],
+        response_format: RespFormat | None,
+        selection_reason: str,
+        selected_history_count: int,
+        response_body: dict[str, Any],
+        final_response_body: dict[str, Any],
+    ) -> None:
+        if request_kind != "planner" or not bool(getattr(global_config.debug, "record_planner_request", False)):
+            return
+
+        try:
+            DEBUG_PLANNER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            request_body = {
+                "model": model_name,
+                "request_type": self._resolve_request_type(request_kind),
+                "request_kind": request_kind,
+                "session_id": self._session_id,
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+                "selected_history_count": selected_history_count,
+                "built_message_count": len(messages),
+                "selection_reason": selection_reason,
+                "messages": serialize_prompt_messages(list(messages)),
+                "tool_definitions": serialize_tool_definitions(list(tool_definitions)),
+                "response_format": response_format,
+                "response_body": response_body,
+                "final_response_body": final_response_body,
+            }
+            file_path = DEBUG_PLANNER_CACHE_DIR / self._build_debug_request_filename(
+                self._session_id,
+                model_name,
+                request_kind,
+            )
+            with file_path.open("w", encoding="utf-8") as file:
+                json.dump(request_body, file, ensure_ascii=False, indent=2, default=str)
+            logger.info(f"Planner 请求与回复体已保存: {file_path.resolve()}")
+        except Exception as exc:
+            logger.warning(f"保存 Planner 请求与回复体失败: {exc}")
+
+    @staticmethod
     def _get_runtime_manager() -> Any:
         """获取插件运行时管理器。
 
@@ -362,14 +441,9 @@ class MaisakaChatLoopService:
             "group_chat_attention_block": self._build_group_chat_attention_block(),
             "identity": self.personality_prompt,
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
-            "time_block": self._build_time_block(),
         }
 
-    @staticmethod
-    def _build_time_block() -> str:
-        """构建静态时间提示块。"""
 
-        return "当前时间会在每次请求末尾以用户消息形式提供。"
 
     @staticmethod
     def _build_current_time_user_message() -> str:
@@ -585,19 +659,6 @@ class MaisakaChatLoopService:
 
         prompt_section: RenderableType | None = None
         prompt_html_uri: str | None = None
-        if global_config.debug.show_maisaka_thinking:
-            prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
-                built_messages,
-                category=self._resolve_prompt_preview_category(request_kind),
-                chat_id=self._session_id,
-                request_kind=request_kind,
-                selection_reason=selection_reason,
-                folded=global_config.debug.fold_maisaka_thinking,
-                tool_definitions=list(all_tools),
-            )
-            prompt_section = prompt_section_result.panel
-            if prompt_section_result.preview_access is not None:
-                prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
 
         llm_chat = self._get_llm_chat_client(request_kind)
         generation_result = await llm_chat.generate_response_with_messages(
@@ -644,6 +705,70 @@ class MaisakaChatLoopService:
             generation_result.completion_tokens,
         )
         total_tokens = self._coerce_int(after_response_kwargs.get("total_tokens"), generation_result.total_tokens)
+        self._save_debug_planner_request_body(
+            request_kind=request_kind,
+            model_name=generation_result.model_name or "",
+            messages=built_messages,
+            tool_definitions=all_tools,
+            response_format=response_format,
+            selection_reason=selection_reason,
+            selected_history_count=len(selected_history),
+            response_body=self._serialize_llm_response_body(
+                response=generation_result.response or "",
+                reasoning=generation_result.reasoning or "",
+                model_name=generation_result.model_name or "",
+                tool_calls=generation_result.tool_calls or [],
+                prompt_tokens=generation_result.prompt_tokens,
+                completion_tokens=generation_result.completion_tokens,
+                total_tokens=generation_result.total_tokens,
+                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
+                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
+            ),
+            final_response_body=self._serialize_llm_response_body(
+                response=final_response,
+                reasoning=generation_result.reasoning or "",
+                model_name=generation_result.model_name or "",
+                tool_calls=final_tool_calls,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                prompt_cache_hit_tokens=getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
+                prompt_cache_miss_tokens=getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
+            ),
+        )
+
+        display_model_name = (generation_result.model_name or "").strip()
+        prompt_selection_reason = selection_reason
+        if display_model_name:
+            prompt_selection_reason = f"{selection_reason}\n请求模型：{display_model_name}"
+
+        if global_config.debug.show_maisaka_thinking:
+            output_parts = []
+            if final_response.strip():
+                output_parts.append(final_response.strip())
+            if final_tool_calls:
+                output_parts.append(
+                    "工具调用:\n"
+                    + json.dumps(
+                        [self._format_tool_call_for_preview(tool_call) for tool_call in final_tool_calls],
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+                )
+            prompt_section_result = PromptCLIVisualizer.build_prompt_section_result(
+                built_messages,
+                category=self._resolve_prompt_preview_category(request_kind),
+                chat_id=self._session_id,
+                request_kind=request_kind,
+                selection_reason=prompt_selection_reason,
+                folded=global_config.debug.fold_maisaka_thinking,
+                tool_definitions=list(all_tools),
+                output_content="\n\n".join(output_parts).strip(),
+            )
+            prompt_section = prompt_section_result.panel
+            if prompt_section_result.preview_access is not None:
+                prompt_html_uri = prompt_section_result.preview_access.viewer_web_uri
 
         raw_message = AssistantMessage(
             content=final_response,
@@ -661,9 +786,20 @@ class MaisakaChatLoopService:
             built_message_count=len(built_messages),
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            model_name=display_model_name,
             prompt_section=prompt_section,
             prompt_html_uri=prompt_html_uri,
         )
+
+    @staticmethod
+    def _format_tool_call_for_preview(tool_call: ToolCall) -> dict[str, Any]:
+        """构造 HTML 顶部输出区里的工具调用摘要。"""
+
+        return {
+            "id": tool_call.call_id,
+            "name": tool_call.func_name,
+            "arguments": tool_call.args,
+        }
 
     @staticmethod
     def select_llm_context_messages(

@@ -12,7 +12,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="finish",
-        brief_description="结束本轮思考，等待后续新的外部消息再继续。",
+        description="结束本轮思考，等待后续新的外部消息再继续。",
         provider_name="maisaka_builtin",
         provider_type="builtin",
     )

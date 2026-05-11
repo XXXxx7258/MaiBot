@@ -33,13 +33,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="reply",
-        brief_description="根据当前思考生成并发送一条可见回复。",
-        detailed_description=(
-            "参数说明：\n"
-            "- msg_id：string，必填。要回复的目标用户消息编号。\n"
-            "- set_quote：boolean，可选。以引用回复的方式发送，默认 true。\n"
-            "- reference_info：string，可选。上文中有助于回复的所有参考信息，使用平文本格式。"
-        ),
+        description="根据当前思考生成并发送一条可见回复。",
         parameters_schema={
             "type": "object",
             "properties": {

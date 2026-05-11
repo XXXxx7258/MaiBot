@@ -13,13 +13,17 @@ class MaiChatSession(BaseDatabaseDataModel[ChatSession]):
         platform: str,
         user_id: Optional[str] = None,
         group_id: Optional[str] = None,
+        account_id: Optional[str] = None,
+        scope: Optional[str] = None,
         created_timestamp: Optional[datetime] = None,
         last_active_timestamp: Optional[datetime] = None,
     ):
         self.session_id: str = session_id
         self.platform: str = platform
-        self.user_id: Optional[str] = user_id
         self.group_id: Optional[str] = group_id
+        self.user_id: Optional[str] = None if self.group_id else user_id
+        self.account_id: Optional[str] = account_id
+        self.scope: Optional[str] = scope
         self.created_timestamp: datetime = created_timestamp or datetime.now()
         """会话创建时间，默认为当前时间"""
         self.last_active_timestamp: Optional[datetime] = last_active_timestamp
@@ -38,6 +42,8 @@ class MaiChatSession(BaseDatabaseDataModel[ChatSession]):
             platform=db_record.platform,
             user_id=db_record.user_id,
             group_id=db_record.group_id,
+            account_id=getattr(db_record, "account_id", None),
+            scope=getattr(db_record, "scope", None),
             created_timestamp=db_record.created_timestamp,
             last_active_timestamp=db_record.last_active_timestamp,
         )
@@ -48,6 +54,8 @@ class MaiChatSession(BaseDatabaseDataModel[ChatSession]):
             platform=self.platform,
             user_id=self.user_id,
             group_id=self.group_id,
+            account_id=self.account_id,
+            scope=self.scope,
             created_timestamp=self.created_timestamp,
             last_active_timestamp=self.last_active_timestamp,
         )

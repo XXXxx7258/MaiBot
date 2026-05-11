@@ -14,12 +14,7 @@ def get_tool_spec() -> ToolSpec:
 
     return ToolSpec(
         name="tool_search",
-        brief_description="在 deferred tools 列表中按名称或关键词搜索工具，并将命中的工具加入后续轮次的可用工具列表。",
-        detailed_description=(
-            "参数说明：\n"
-            "- query：String，必填。工具名、前缀或关键词。\n"
-            "- limit：Integer，可选。最多返回多少个匹配工具，默认为 5。"
-        ),
+        description="在 deferred tools 列表中按名称或关键词搜索工具，并将命中的工具加入后续轮次的可用工具列表。",
         parameters_schema={
             "type": "object",
             "properties": {

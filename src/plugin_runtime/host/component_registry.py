@@ -16,8 +16,6 @@ import contextlib
 import re
 
 from src.common.logger import get_logger
-from src.core.tooling import build_tool_detailed_description
-
 from .hook_spec_registry import HookSpecRegistry
 
 logger = get_logger("plugin_runtime.host.component_registry")
@@ -171,21 +169,14 @@ class ToolEntry(ComponentEntry):
         chat_scope: str = "all",
         allowed_session: Optional[List[str]] = None,
     ) -> None:
-        self.description: str = str(metadata.get("description", "") or "").strip()
-        self.brief_description: str = str(
-            metadata.get("brief_description", self.description) or self.description or f"工具 {name}"
+        self.description: str = str(
+            metadata.get("description", "") or metadata.get("brief_description", "") or f"工具 {name}"
         ).strip()
         self.parameters: List[Dict[str, Any]] = metadata.get("parameters", [])
         self.parameters_raw: Dict[str, Any] | List[Dict[str, Any]] = metadata.get("parameters_raw", {})
-        detailed_description = str(metadata.get("detailed_description", "") or "").strip()
-        self.detailed_description: str = detailed_description
         self.invoke_method: str = str(metadata.get("invoke_method", "plugin.invoke_tool") or "plugin.invoke_tool").strip()
         self.legacy_component_type: str = str(metadata.get("legacy_component_type", "") or "").strip()
         super().__init__(name, component_type, plugin_id, metadata, chat_scope, allowed_session)
-
-        if not self.detailed_description:
-            parameters_schema = self._get_parameters_schema()
-            self.detailed_description = build_tool_detailed_description(parameters_schema)
 
     def _get_parameters_schema(self) -> Dict[str, Any] | None:
         """获取当前工具条目的对象级参数 Schema。
@@ -517,47 +508,10 @@ class ComponentRegistry:
                     "properties": properties,
                 }
 
-        detailed_parts: List[str] = []
-        if parameters_schema is not None:
-            parameter_description = build_tool_detailed_description(parameters_schema)
-            if parameter_description:
-                detailed_parts.append(parameter_description)
-
-        action_require = [
-            str(item).strip()
-            for item in (metadata.get("action_require") or [])
-            if str(item).strip()
-        ]
-        if action_require:
-            detailed_parts.append("使用建议：\n" + "\n".join(f"- {item}" for item in action_require))
-
-        associated_types = [
-            str(item).strip()
-            for item in (metadata.get("associated_types") or [])
-            if str(item).strip()
-        ]
-        if associated_types:
-            detailed_parts.append(f"适用消息类型：{'、'.join(associated_types)}。")
-
-        activation_type = str(metadata.get("activation_type", "always") or "always").strip()
-        activation_keywords = [
-            str(item).strip()
-            for item in (metadata.get("activation_keywords") or [])
-            if str(item).strip()
-        ]
-        activation_lines = [f"兼容旧 Action 激活方式：{activation_type}。"]
-        if activation_keywords:
-            activation_lines.append(f"激活关键词：{'、'.join(activation_keywords)}。")
-        if str(metadata.get("action_prompt", "") or "").strip():
-            activation_lines.append(f"原始 Action 提示语：{str(metadata['action_prompt']).strip()}。")
-        detailed_parts.append("\n".join(activation_lines))
-
-        brief_description = str(metadata.get("brief_description", metadata.get("description", "") or f"工具 {name}")).strip()
+        description = str(metadata.get("description", "") or metadata.get("brief_description", "") or f"工具 {name}").strip()
         return {
             **metadata,
-            "description": brief_description,
-            "brief_description": brief_description,
-            "detailed_description": "\n\n".join(part for part in detailed_parts if part).strip(),
+            "description": description,
             "parameters_raw": parameters_schema or {},
             "invoke_method": "plugin.invoke_action",
             "legacy_action": True,

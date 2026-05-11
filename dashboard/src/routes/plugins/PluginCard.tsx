@@ -38,6 +38,9 @@ export function PluginCard({
   getIncompatibleReason,
 }: PluginCardProps) {
   const navigate = useNavigate()
+  const stats = [plugin.id, plugin.marketplace_id, ...(plugin.stats_ids ?? [])]
+    .map(id => id ? pluginStats[id] : undefined)
+    .find(Boolean)
 
   return (
     <Card
@@ -64,11 +67,11 @@ export function PluginCard({
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <div className="flex items-center gap-1">
               <Download className="h-3.5 w-3.5" />
-              <span>{(pluginStats[plugin.id]?.downloads ?? plugin.downloads ?? 0).toLocaleString()}</span>
+              <span>{(stats?.downloads ?? plugin.downloads ?? 0).toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-1">
               <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-              <span>{(pluginStats[plugin.id]?.rating ?? plugin.rating ?? 0).toFixed(1)}</span>
+              <span>{(stats?.rating ?? plugin.rating ?? 0).toFixed(1)}</span>
             </div>
           </div>
           {/* 标签 */}

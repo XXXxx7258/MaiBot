@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Tuple
 
 import asyncio
 import difflib
@@ -16,6 +16,8 @@ from src.common.database.database_model import Expression
 from src.common.logger import get_logger
 from src.common.utils.utils_message import MessageUtils
 from src.config.config import global_config
+from src.llm_models.payload_content.message import Message, MessageBuilder, RoleType
+from src.maisaka.display.prompt_cli_renderer import PromptCLIVisualizer
 from src.plugin_runtime.hook_schema_utils import build_object_schema
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
 from src.prompt.prompt_manager import prompt_manager
@@ -26,6 +28,7 @@ from .expression_utils import check_expression_suitability, parse_expression_res
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
     from .jargon_miner import JargonMiner, JargonEntry
+    from src.maisaka.context_messages import LLMContextMessage
 
 
 logger = get_logger("expressor")
@@ -299,14 +302,110 @@ class ExpressionLearner:
         if len(pending_messages) < self.min_messages_for_extraction:
             return False
 
-        readable_message, _, _ = await MessageUtils.build_readable_message(
+        learnt = await self._learn_from_session_messages(
             pending_messages,
-            anonymize=True,
-            show_lineno=True,
-            extract_pictures=True,
-            replace_bot_name=True,
-            target_bot_name="SELF",
+            jargon_miner=jargon_miner,
+            use_multi_messages=False,
         )
+        self._last_processed_index = processed_end_index
+        return learnt
+
+    async def learn_from_context_messages(
+        self,
+        context_messages: Sequence["LLMContextMessage"],
+        jargon_miner: Optional["JargonMiner"] = None,
+    ) -> bool:
+        """从 Maisaka 被裁切的上下文消息中学习表达方式。
+
+        只保留真实聊天消息：用户发言和 SELF 发言。工具结果、参考消息、记忆注入、
+        规划器思考等上下文消息不会进入表达学习。
+        """
+
+        source_messages = self._extract_session_messages_from_context(context_messages)
+        if not source_messages:
+            logger.debug("裁切历史中没有可用于表达学习的真实聊天消息")
+            return False
+        if len(source_messages) < self.min_messages_for_extraction:
+            logger.debug(
+                f"裁切历史可学习消息不足: 可学习={len(source_messages)} 阈值={self.min_messages_for_extraction}"
+            )
+            return False
+
+        return await self._learn_from_session_messages(
+            source_messages,
+            jargon_miner=jargon_miner,
+            use_multi_messages=True,
+        )
+
+    @staticmethod
+    def _extract_session_messages_from_context(
+        context_messages: Sequence["LLMContextMessage"],
+    ) -> List["SessionMessage"]:
+        """从上下文消息中过滤出真实聊天消息。"""
+
+        from src.maisaka.context_messages import SessionBackedMessage
+
+        source_messages: List["SessionMessage"] = []
+        seen_message_ids: set[str] = set()
+        seen_object_ids: set[int] = set()
+
+        for context_message in context_messages:
+            if not isinstance(context_message, SessionBackedMessage):
+                continue
+            if context_message.source_kind not in {"user", "guided_reply", "outbound_send"}:
+                continue
+
+            original_message = context_message.original_message
+            if original_message is None:
+                continue
+
+            message_id = str(original_message.message_id or "").strip()
+            if message_id:
+                if message_id in seen_message_ids:
+                    continue
+                seen_message_ids.add(message_id)
+            else:
+                object_id = id(original_message)
+                if object_id in seen_object_ids:
+                    continue
+                seen_object_ids.add(object_id)
+
+            source_messages.append(original_message)
+
+        return source_messages
+
+    async def _learn_from_session_messages(
+        self,
+        pending_messages: List["SessionMessage"],
+        *,
+        jargon_miner: Optional["JargonMiner"] = None,
+        use_multi_messages: bool,
+    ) -> bool:
+        """对一批真实会话消息执行表达学习。"""
+
+        learning_session_id = self._resolve_learning_session_id(pending_messages)
+        if learning_session_id is None:
+            logger.warning(
+                f"表达学习已跳过：无法解析到有效聊天流，learner_session_id={self.session_id}"
+            )
+            return False
+        if learning_session_id != self.session_id:
+            logger.info(
+                f"表达学习会话 ID 已按真实消息修正: learner_session_id={self.session_id} "
+                f"learning_session_id={learning_session_id}"
+            )
+
+        if use_multi_messages:
+            readable_message = "聊天记录将在后续多条 user message 中给出；请以每条消息中的 source_id 作为来源行编号。"
+        else:
+            readable_message, _, _ = await MessageUtils.build_readable_message(
+                pending_messages,
+                anonymize=True,
+                show_lineno=True,
+                extract_pictures=True,
+                replace_bot_name=True,
+                target_bot_name="SELF",
+            )
 
         prompt_template = prompt_manager.get_prompt("learn_style")
         prompt_template.add_context("bot_name", global_config.bot.nickname)
@@ -314,14 +413,27 @@ class ExpressionLearner:
         prompt = await prompt_manager.render_prompt(prompt_template)
 
         try:
-            generation_result = await express_learn_model.generate_response(
-                prompt,
-                options=LLMGenerationOptions(temperature=0.3),
-            )
+            if use_multi_messages:
+                learning_messages = await self._build_multi_learning_messages(pending_messages, prompt)
+                generation_result = await express_learn_model.generate_response_with_messages(
+                    lambda _client: learning_messages,
+                    options=LLMGenerationOptions(temperature=0.3),
+                )
+                self._log_learning_context_preview(
+                    learning_messages,
+                    session_id=learning_session_id,
+                    source_message_count=len(pending_messages),
+                    source_type="trimmed_history",
+                    output_content=generation_result.response or "",
+                )
+            else:
+                generation_result = await express_learn_model.generate_response(
+                    prompt,
+                    options=LLMGenerationOptions(temperature=0.3),
+                )
             response = generation_result.response
         except Exception as e:
             logger.error(f"学习表达方式失败: {e}")
-            self._last_processed_index = processed_end_index
             return False
 
         expressions: List[Tuple[str, str, str]]
@@ -348,14 +460,13 @@ class ExpressionLearner:
 
         after_extract_result = await self._get_runtime_manager().invoke_hook(
             "expression.learn.after_extract",
-            session_id=self.session_id,
+            session_id=learning_session_id,
             message_count=len(pending_messages),
             expressions=self._serialize_expressions(expressions),
             jargon_entries=self._serialize_jargon_entries(jargon_entries),
         )
         if after_extract_result.aborted:
             logger.info(f"{self.session_id} 表达方式选择 Hook 中止")
-            self._last_processed_index = processed_end_index
             return False
 
         after_extract_kwargs = after_extract_result.kwargs
@@ -367,11 +478,23 @@ class ExpressionLearner:
             jargon_entries = self._deserialize_jargon_entries(raw_jargon_entries)
 
         if jargon_entries:
-            await self._process_jargon_entries(jargon_entries, pending_messages, jargon_miner)
+            original_jargon_session_id = getattr(jargon_miner, "session_id", None) if jargon_miner is not None else None
+            original_jargon_session_name = getattr(jargon_miner, "session_name", None) if jargon_miner is not None else None
+            if jargon_miner is not None and learning_session_id != original_jargon_session_id:
+                from src.chat.message_receive.chat_manager import chat_manager
+
+                chat_name = chat_manager.get_session_name(learning_session_id) or learning_session_id
+                jargon_miner.session_id = learning_session_id
+                jargon_miner.session_name = chat_name
+            try:
+                await self._process_jargon_entries(jargon_entries, pending_messages, jargon_miner)
+            finally:
+                if jargon_miner is not None and original_jargon_session_id is not None:
+                    jargon_miner.session_id = original_jargon_session_id
+                    jargon_miner.session_name = original_jargon_session_name or original_jargon_session_id
 
         if not expressions:
             logger.info("没有可学习的表达方式")
-            self._last_processed_index = processed_end_index
             return False
 
         logger.info(f"可学习的表达方式: {expressions}")
@@ -380,7 +503,6 @@ class ExpressionLearner:
         learnt_expressions = self._filter_expressions(expressions, pending_messages)
         if not learnt_expressions:
             logger.info("没有可学习的表达方式通过过滤")
-            self._last_processed_index = processed_end_index
             return False
 
         learnt_expressions_str = "\n".join(f"{situation}->{style}" for situation, style in learnt_expressions)
@@ -389,7 +511,7 @@ class ExpressionLearner:
         for situation, style in learnt_expressions:
             before_upsert_result = await self._get_runtime_manager().invoke_hook(
                 "expression.learn.before_upsert",
-                session_id=self.session_id,
+                session_id=learning_session_id,
                 situation=situation,
                 style=style,
             )
@@ -403,10 +525,131 @@ class ExpressionLearner:
             if not situation or not style:
                 logger.info(f"{self.session_id} 表达方式写入 Hook 中止: situation={situation!r}")
                 continue
-            await self._upsert_expression_to_db(situation, style)
+            await self._upsert_expression_to_db(situation, style, session_id=learning_session_id)
 
-        self._last_processed_index = processed_end_index
         return True
+
+    def _resolve_learning_session_id(self, messages: List["SessionMessage"]) -> Optional[str]:
+        """根据真实消息解析本轮表达学习应该归属的会话 ID。"""
+
+        from collections import Counter
+
+        from src.chat.message_receive.chat_manager import chat_manager
+
+        candidates = [
+            str(getattr(message, "session_id", "") or "").strip()
+            for message in messages
+            if str(getattr(message, "session_id", "") or "").strip()
+        ]
+
+        def session_exists(session_id: str) -> bool:
+            if not session_id:
+                return False
+            return chat_manager.get_existing_session_by_session_id(session_id) is not None
+
+        for session_id, _ in Counter(candidates).most_common():
+            if session_exists(session_id):
+                return session_id
+
+        if session_exists(self.session_id):
+            return self.session_id
+
+        logger.warning(
+            f"表达学习无法从真实消息中找到已注册聊天流，也无法确认 learner_session_id; "
+            f"learner_session_id={self.session_id} "
+            f"候选 session_id={dict(Counter(candidates))}"
+        )
+        return None
+
+    async def _build_multi_learning_messages(
+        self,
+        messages: List["SessionMessage"],
+        system_prompt: str,
+    ) -> List[Message]:
+        """构造表达学习使用的多 message 请求。"""
+
+        learning_messages = [
+            MessageBuilder()
+            .set_role(RoleType.System)
+            .add_text_content(
+                f"{system_prompt}\n\n"
+                "注意：聊天记录会在后续多条 user message 中给出。每条消息内的 source_id "
+                "是本轮学习的来源编号；speaker=SELF 的消息只作为上下文，不要从 SELF 的发言中学习。"
+            )
+            .build()
+        ]
+
+        for index, message in enumerate(messages, start=1):
+            await message.process()
+            user_info = message.message_info.user_info
+            speaker_name = user_info.user_cardname or user_info.user_nickname or "未知用户"
+            speaker_kind = "SELF" if is_bot_self(message.platform, user_info.user_id) else "USER"
+            content = (message.processed_plain_text or "").strip()
+            if not content:
+                content = "[空消息]"
+            learning_messages.append(
+                MessageBuilder()
+                .set_role(RoleType.User)
+                .add_text_content(
+                    "\n".join(
+                        [
+                            f"[{index}]",
+                            f"[source_id:{index}]",
+                            f"[speaker:{speaker_kind}]",
+                            f"[name:{speaker_name}]",
+                            f"[time:{message.timestamp.strftime('%H:%M:%S')}]",
+                            "[content]",
+                            content,
+                        ]
+                    )
+                )
+                .build()
+            )
+
+        learning_messages.append(
+            MessageBuilder()
+            .set_role(RoleType.User)
+            .add_text_content("请根据以上聊天消息输出 JSON。")
+            .build()
+        )
+        return learning_messages
+
+    def _log_learning_context_preview(
+        self,
+        messages: List[Message],
+        *,
+        session_id: str,
+        source_message_count: int,
+        source_type: str,
+        output_content: str,
+    ) -> None:
+        """保存表达学习上下文预览，并在日志中输出查看入口。"""
+
+        try:
+            preview_access = PromptCLIVisualizer.build_prompt_preview_access(
+                messages,
+                category="expression_learner",
+                chat_id=session_id,
+                request_kind="expression_learner",
+                selection_reason=(
+                    f"会话ID: {session_id}\n"
+                    f"Learner会话ID: {self.session_id}\n"
+                    f"来源: {source_type}\n"
+                    f"真实聊天消息数: {source_message_count}\n"
+                    f"构建消息数: {len(messages)}"
+                ),
+                output_content=output_content,
+            )
+        except Exception as exc:
+            logger.warning(f"{self.session_id} 表达学习上下文预览保存失败: {exc}")
+            return
+
+        logger.info(
+            f"{self.session_id} 表达学习上下文预览已生成: "
+            f"WebUI={preview_access.viewer_web_uri} "
+            f"HTML={preview_access.viewer_path} "
+            f"TXT={preview_access.dump_path}"
+        )
 
     def _check_cached_jargons_in_messages(
         self,
@@ -615,14 +858,15 @@ class ExpressionLearner:
         return filtered_expressions
 
     # ====== DB 操作相关 ======
-    async def _upsert_expression_to_db(self, situation: str, style: str) -> None:
+    async def _upsert_expression_to_db(self, situation: str, style: str, *, session_id: str) -> None:
         """将表达方式写入数据库，存在时更新，不存在时新增。
 
         Args:
             situation: 表达方式对应的使用情景。
             style: 表达方式风格。
+            session_id: 表达方式归属的真实会话 ID。
         """
-        expr, similarity = self._find_similar_expression(situation) or (None, 0)
+        expr, similarity = self._find_similar_expression(situation, session_id=session_id) or (None, 0)
         if expr:
             # 根据相似度决定是否使用 LLM 总结
             # 完全匹配（相似度 == 1.0）时不总结，相似匹配时总结
@@ -630,14 +874,15 @@ class ExpressionLearner:
             await self._update_existing_expression(expr, situation, use_llm_summary=use_llm_summary)
             return
         # 没有找到匹配的记录，创建新记录
-        self._create_expression(situation, style)
+        self._create_expression(situation, style, session_id=session_id)
 
-    def _create_expression(self, situation: str, style: str) -> None:
+    def _create_expression(self, situation: str, style: str, *, session_id: str) -> None:
         """创建新的表达方式记录。
 
         Args:
             situation: 表达方式对应的使用情景。
             style: 表达方式风格。
+            session_id: 表达方式归属的真实会话 ID。
         """
         content_list = [situation]
         try:
@@ -647,7 +892,7 @@ class ExpressionLearner:
                     style=style,
                     content_list=json.dumps(content_list),
                     count=1,
-                    session_id=self.session_id,
+                    session_id=session_id,
                     last_active_time=datetime.now(),
                 )
                 db.add(new_expr)
@@ -748,12 +993,13 @@ class ExpressionLearner:
         )
 
     def _find_similar_expression(
-        self, situation: str, similarity_threshold: float = 0.75
+        self, situation: str, *, session_id: str, similarity_threshold: float = 0.75
     ) -> Optional[Tuple[MaiExpression, float]]:
         """在数据库中查找相似的表达方式。
 
         Args:
             situation: 当前待匹配的情景描述。
+            session_id: 表达方式归属的真实会话 ID。
             similarity_threshold: 认定为相似表达方式的最低相似度阈值。
 
         Returns:
@@ -762,7 +1008,7 @@ class ExpressionLearner:
         """
         try:
             with get_db_session(auto_commit=False) as session:
-                statement = select(Expression).filter_by(session_id=self.session_id)
+                statement = select(Expression).filter_by(session_id=session_id)
                 expressions = session.exec(statement).all()
 
                 best_match: Optional[MaiExpression] = None

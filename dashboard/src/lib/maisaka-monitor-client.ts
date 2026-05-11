@@ -85,7 +85,7 @@ export interface CycleStartEvent {
 export interface TimingGateResultEvent {
   session_id: string
   cycle_id: number
-  action: 'continue' | 'wait' | 'no_reply'
+  action: 'continue' | 'wait' | 'no_action'
   content: string | null
   tool_calls: MaisakaToolCall[]
   messages: MaisakaMessage[]
@@ -146,7 +146,7 @@ export interface MaisakaPlannerBlock {
 export interface MaisakaTimingGateBlock {
   request: MaisakaRequestBlock | null
   result: {
-    action: 'continue' | 'wait' | 'no_reply' | null
+    action: 'continue' | 'wait' | 'no_action' | null
     content: string | null
     tool_calls: MaisakaToolCall[]
     tool_results: unknown[]
