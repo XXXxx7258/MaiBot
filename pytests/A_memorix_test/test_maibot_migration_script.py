@@ -11,13 +11,23 @@ def _load_migration_module():
     script_dir = Path(__file__).resolve().parents[2] / "src" / "A_memorix" / "scripts"
     script_path = script_dir / "migrate_maibot_memory.py"
     script_dir_text = str(script_dir)
+    module_name = "maibot_migration_script_test_module"
+    original_sys_path = list(sys.path)
+    previous_module = sys.modules.get(module_name)
     if script_dir_text not in sys.path:
         sys.path.insert(0, script_dir_text)
-    spec = importlib.util.spec_from_file_location("maibot_migration_script_test_module", script_path)
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    try:
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    finally:
+        sys.path[:] = original_sys_path
+        if previous_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = previous_module
     module.compute_hash = lambda text: f"hash:{text}"
     module.normalize_text = lambda text: " ".join(str(text).split())
     return module
@@ -125,6 +135,17 @@ def test_max_errors_defaults_to_no_abort() -> None:
     args = module.build_parser().parse_args([])
 
     assert args.max_errors == 0
+
+
+def test_max_errors_rejects_negative_value() -> None:
+    module = _load_migration_module()
+
+    try:
+        module.build_parser().parse_args(["--max-errors", "-1"])
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError("--max-errors must reject negative values")
 
 
 def test_same_content_from_different_streams_keeps_same_hash_for_idempotency(tmp_path: Path) -> None:

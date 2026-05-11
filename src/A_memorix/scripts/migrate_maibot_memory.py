@@ -309,6 +309,16 @@ def _sqlite_timestamp_expr(column_expr: str) -> str:
     )
 
 
+def _non_negative_int_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("必须为整数") from None
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必须 >= 0")
+    return parsed
+
+
 def _normalize_name(value: Any) -> str:
     return str(value or "").strip()
 
@@ -1905,7 +1915,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="实体 embedding 批次大小（默认 512）",
     )
     parser.add_argument("--embed-workers", type=int, default=None, help="embedding 并发数（默认读取配置）")
-    parser.add_argument("--max-errors", type=int, default=0, help="坏行上限，0 表示不中止（默认 0）")
+    parser.add_argument("--max-errors", type=_non_negative_int_arg, default=0, help="坏行上限，0 表示不中止（默认 0）")
     parser.add_argument("--log-every", type=int, default=5000, help="日志输出步长（默认 5000）")
 
     parser.add_argument("--dry-run", action="store_true", help="仅预览不写入")
