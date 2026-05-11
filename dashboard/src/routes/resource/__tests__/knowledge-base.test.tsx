@@ -76,6 +76,7 @@ vi.mock('@/lib/memory-api', () => ({
   retryMemoryImportTask: vi.fn(),
   resolveMemoryImportPath: vi.fn(),
   refreshMemoryRuntimeSelfCheck: vi.fn(),
+  rebuildMemoryRuntimeVectors: vi.fn(),
   updateMemoryConfig: vi.fn(),
   updateMemoryConfigRaw: vi.fn(),
   getMemoryTuningProfile: vi.fn(),
@@ -201,6 +202,7 @@ describe('KnowledgeBasePage import workflow', () => {
     vi.mocked(memoryApi.createMemoryLpmmConvertImport).mockReset()
     vi.mocked(memoryApi.createMemoryTemporalBackfillImport).mockReset()
     vi.mocked(memoryApi.createMemoryMaibotMigrationImport).mockReset()
+    vi.mocked(memoryApi.rebuildMemoryRuntimeVectors).mockReset()
 
     vi.mocked(memoryApi.getMemoryConfigSchema).mockResolvedValue({
       success: true,
@@ -537,6 +539,14 @@ describe('KnowledgeBasePage import workflow', () => {
       success: true,
       report: { ok: true },
     })
+    vi.mocked(memoryApi.rebuildMemoryRuntimeVectors).mockImplementation(async (payload = {}) => ({
+      success: true,
+      dry_run: Boolean(payload.dry_run),
+      counts: { paragraphs: 2, entities: 1, relations: 0 },
+      total: 3,
+      done: payload.dry_run ? 0 : 3,
+      failed: 0,
+    }))
     vi.mocked(memoryApi.updateMemoryConfig).mockResolvedValue({ success: true } as never)
     vi.mocked(memoryApi.updateMemoryConfigRaw).mockResolvedValue({ success: true } as never)
   })
@@ -553,6 +563,25 @@ describe('KnowledgeBasePage import workflow', () => {
     expect(memoryApi.getMemoryImportSettings).toHaveBeenCalled()
     expect(memoryApi.getMemoryImportPathAliases).toHaveBeenCalled()
     expect(memoryApi.getMemoryImportTasks).toHaveBeenCalled()
+  })
+
+  it('rebuilds all vectors from overview controls', async () => {
+    const user = userEvent.setup()
+    render(<KnowledgeBasePage />)
+
+    expect(await screen.findByText('长期记忆控制台', undefined, { timeout: 10_000 })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重建向量' }))
+    await waitFor(() =>
+      expect(memoryApi.rebuildMemoryRuntimeVectors).toHaveBeenCalledWith({ dry_run: true }),
+    )
+    expect(await screen.findByText('重建全部向量')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认重建' }))
+    await waitFor(() =>
+      expect(memoryApi.rebuildMemoryRuntimeVectors).toHaveBeenCalledWith({ dry_run: false }),
+    )
+    await waitFor(() =>
+      expect(toastMock).toHaveBeenLastCalledWith(expect.objectContaining({ title: '向量重建完成' })),
+    )
   })
 
   it('creates import tasks for all 7 modes and calls correct endpoints', async () => {

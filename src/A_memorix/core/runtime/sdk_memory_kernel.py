@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-import json
-import pickle
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, Iterable, List, Optional, Sequence
 
 from json_repair import repair_json
+import asyncio
+import json
+import numpy as np
+import pickle
+import time
 
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -325,6 +326,22 @@ class SDKMemoryKernel:
             "或执行重嵌入/重建向量。"
         )
 
+    def _vector_rebuild_status(self) -> Dict[str, Any]:
+        stored_dimension = self._stored_vector_dimension()
+        current_dimension = int(self.embedding_dimension)
+        rebuild_required = stored_dimension is not None and stored_dimension != current_dimension
+        return {
+            "stored_vector_dimension": int(stored_dimension or 0),
+            "embedding_dimension": current_dimension,
+            "vector_rebuild_required": bool(rebuild_required),
+            "message": self._vector_mismatch_error(
+                stored_dimension=int(stored_dimension or 0),
+                detected_dimension=current_dimension,
+            )
+            if rebuild_required
+            else "",
+        }
+
     def _embedding_fallback_enabled(self) -> bool:
         return bool(self._cfg("embedding.fallback.enabled", True))
 
@@ -583,6 +600,282 @@ class SDKMemoryKernel:
             "trigger": trigger,
         }
 
+    def _count_vector_rebuild_targets(self) -> Dict[str, int]:
+        if self.metadata_store is None:
+            return {"paragraphs": 0, "entities": 0, "relations": 0}
+        paragraph_where = self._active_row_filter_sql("paragraphs")
+        entity_where = self._active_row_filter_sql("entities")
+        relation_where = self._active_row_filter_sql("relations")
+        rows = self.metadata_store.query(
+            f"""
+            SELECT
+                (SELECT COUNT(*) FROM paragraphs WHERE {paragraph_where}) AS paragraphs,
+                (SELECT COUNT(*) FROM entities WHERE {entity_where}) AS entities,
+                (SELECT COUNT(*) FROM relations WHERE {relation_where}) AS relations
+            """
+        )
+        row = rows[0] if rows else {}
+        return {
+            "paragraphs": int(row.get("paragraphs", 0) or 0),
+            "entities": int(row.get("entities", 0) or 0),
+            "relations": int(row.get("relations", 0) or 0),
+        }
+
+    def _table_has_column(self, table: str, column: str) -> bool:
+        if self.metadata_store is None:
+            return False
+        token = str(table or "").strip()
+        col = str(column or "").strip()
+        if token not in {"paragraphs", "entities", "relations"} or not col:
+            return False
+        rows = self.metadata_store.query(f"PRAGMA table_info({token})")
+        return any(str(row.get("name", "") or "") == col for row in rows)
+
+    def _active_row_filter_sql(self, table: str) -> str:
+        return "is_deleted IS NULL OR is_deleted = 0" if self._table_has_column(table, "is_deleted") else "1 = 1"
+
+    async def _encode_and_add_rebuild_vectors(
+        self,
+        *,
+        items: Sequence[tuple[str, str]],
+        batch_size: int,
+    ) -> tuple[int, int, str, List[str], List[str]]:
+        if self.vector_store is None or self.embedding_manager is None:
+            failed_ids = [item_id for item_id, _ in items]
+            return 0, len(items), "vector_runtime_components_missing", [], failed_ids
+
+        done = 0
+        failed = 0
+        last_error = ""
+        done_ids: List[str] = []
+        failed_ids: List[str] = []
+        safe_batch_size = max(1, int(batch_size))
+        for start in range(0, len(items), safe_batch_size):
+            batch = list(items[start : start + safe_batch_size])
+            ids = [item_id for item_id, _ in batch]
+            texts = [text for _, text in batch]
+            try:
+                encoder = getattr(self.embedding_manager, "encode_batch", None)
+                if callable(encoder):
+                    embeddings = await encoder(texts, batch_size=safe_batch_size)
+                else:
+                    embeddings = await self.embedding_manager.encode(texts)
+                embedding_array = np.asarray(embeddings, dtype=np.float32)
+                if embedding_array.ndim == 1:
+                    embedding_array = embedding_array.reshape(1, -1)
+                if embedding_array.shape[0] != len(ids):
+                    raise ValueError(f"embedding 返回数量异常: expected={len(ids)}, got={embedding_array.shape[0]}")
+                self.vector_store.add(vectors=embedding_array, ids=ids)
+                done += len(ids)
+                done_ids.extend(ids)
+            except Exception as exc:
+                last_error = str(exc)[:500]
+                failed += len(ids)
+                failed_ids.extend(ids)
+                logger.warning(f"重建向量批次失败: start={start}, count={len(ids)}, error={last_error}")
+        return done, failed, last_error, done_ids, failed_ids
+
+    async def _rebuild_all_vectors(
+        self,
+        *,
+        batch_size: Optional[int] = None,
+        include_relations: Optional[bool] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        if self.metadata_store is None or self.vector_store is None or self.embedding_manager is None:
+            return {"success": False, "error": "runtime_components_missing"}
+
+        target_counts = self._count_vector_rebuild_targets()
+        relation_enabled = bool(self.relation_vectors_enabled if include_relations is None else include_relations)
+        if not relation_enabled:
+            target_counts["relations"] = 0
+        total = target_counts["paragraphs"] + target_counts["entities"] + target_counts["relations"]
+        if dry_run:
+            return {
+                "success": True,
+                "dry_run": True,
+                "counts": target_counts,
+                "total": int(total),
+                **self._vector_rebuild_status(),
+            }
+
+        started = time.time()
+        safe_batch_size = max(1, int(batch_size or self._cfg("embedding.batch_size", 32) or 32))
+        self._set_embedding_degraded(
+            active=True,
+            reason="正在重建全部向量，检索临时降级",
+            checked_at=started,
+        )
+
+        self.vector_store = VectorStore(
+            dimension=max(1, int(self.embedding_dimension)),
+            quantization_type=QuantizationType.INT8,
+            data_dir=self.data_dir / "vectors",
+        )
+        self.vector_store.clear()
+        self.relation_write_service = RelationWriteService(
+            metadata_store=self.metadata_store,
+            graph_store=self.graph_store,
+            vector_store=self.vector_store,
+            embedding_manager=self.embedding_manager,
+        )
+
+        stats = {
+            "paragraphs": {"done": 0, "failed": 0},
+            "entities": {"done": 0, "failed": 0},
+            "relations": {"done": 0, "failed": 0},
+        }
+        errors: List[str] = []
+        paragraph_where = self._active_row_filter_sql("paragraphs")
+        entity_where = self._active_row_filter_sql("entities")
+        relation_where = self._active_row_filter_sql("relations")
+
+        paragraph_rows = self.metadata_store.query(
+            f"""
+            SELECT hash, content
+            FROM paragraphs
+            WHERE {paragraph_where}
+            ORDER BY created_at ASC
+            """
+        )
+        paragraph_items = [
+            (str(row.get("hash", "") or ""), str(row.get("content", "") or "").strip())
+            for row in paragraph_rows
+            if str(row.get("hash", "") or "").strip() and str(row.get("content", "") or "").strip()
+        ]
+        done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
+            items=paragraph_items,
+            batch_size=safe_batch_size,
+        )
+        stats["paragraphs"] = {"done": done, "failed": failed}
+        if error:
+            errors.append(error)
+
+        entity_rows = self.metadata_store.query(
+            f"""
+            SELECT hash, name
+            FROM entities
+            WHERE {entity_where}
+            ORDER BY created_at ASC
+            """
+        )
+        entity_items = [
+            (str(row.get("hash", "") or ""), str(row.get("name", "") or "").strip())
+            for row in entity_rows
+            if str(row.get("hash", "") or "").strip() and str(row.get("name", "") or "").strip()
+        ]
+        done, failed, error, _done_ids, _failed_ids = await self._encode_and_add_rebuild_vectors(
+            items=entity_items,
+            batch_size=safe_batch_size,
+        )
+        stats["entities"] = {"done": done, "failed": failed}
+        if error:
+            errors.append(error)
+
+        if relation_enabled:
+            relation_rows = self.metadata_store.query(
+                f"""
+                SELECT hash, subject, predicate, object
+                FROM relations
+                WHERE {relation_where}
+                ORDER BY created_at ASC
+                """
+            )
+            relation_items = [
+                (
+                    str(row.get("hash", "") or ""),
+                    RelationWriteService.build_relation_vector_text(
+                        str(row.get("subject", "") or ""),
+                        str(row.get("predicate", "") or ""),
+                        str(row.get("object", "") or ""),
+                    ),
+                )
+                for row in relation_rows
+                if str(row.get("hash", "") or "").strip()
+            ]
+            done, failed, error, done_ids, failed_ids = await self._encode_and_add_rebuild_vectors(
+                items=relation_items,
+                batch_size=safe_batch_size,
+            )
+            stats["relations"] = {"done": done, "failed": failed}
+            if error:
+                errors.append(error)
+
+            conn = self.metadata_store.get_connection()
+            cursor = conn.cursor()
+            now_ts = time.time()
+            for start in range(0, len(done_ids), 500):
+                batch_ids = done_ids[start : start + 500]
+                if not batch_ids:
+                    continue
+                placeholders = ",".join("?" for _ in batch_ids)
+                cursor.execute(
+                    f"""
+                    UPDATE relations
+                    SET vector_state = 'ready',
+                        vector_updated_at = ?,
+                        vector_error = NULL
+                    WHERE hash IN ({placeholders})
+                    """,
+                    (now_ts, *batch_ids),
+                )
+            for start in range(0, len(failed_ids), 500):
+                batch_ids = failed_ids[start : start + 500]
+                if not batch_ids:
+                    continue
+                placeholders = ",".join("?" for _ in batch_ids)
+                cursor.execute(
+                    f"""
+                    UPDATE relations
+                    SET vector_state = 'failed',
+                        vector_updated_at = ?,
+                        vector_error = ?
+                    WHERE hash IN ({placeholders})
+                    """,
+                    (now_ts, error[:500], *batch_ids),
+                )
+            conn.commit()
+
+        self.vector_store.warmup_index(force_train=True)
+        self._persist()
+        self._runtime_bundle = build_search_runtime(
+            plugin_config=self._build_runtime_config(),
+            logger_obj=logger,
+            owner_tag="sdk_kernel",
+            log_prefix="[sdk]",
+        )
+        if self._runtime_bundle.ready:
+            self.retriever = self._runtime_bundle.retriever
+            self.threshold_filter = self._runtime_bundle.threshold_filter
+            self.sparse_index = self._runtime_bundle.sparse_index or self.sparse_index
+
+        report = await self._refresh_runtime_self_check(sample_text="A_Memorix vector rebuild self check")
+        if bool(report.get("ok", False)) and not errors:
+            self._set_embedding_degraded(active=False, checked_at=float(report.get("checked_at") or time.time()))
+        else:
+            self._set_embedding_degraded(
+                active=True,
+                reason=str(report.get("message") or "; ".join(errors) or "vector_rebuild_incomplete")[:500],
+                checked_at=float(report.get("checked_at") or time.time()),
+            )
+
+        elapsed_ms = (time.time() - started) * 1000.0
+        done_total = sum(int(item["done"]) for item in stats.values())
+        failed_total = sum(int(item["failed"]) for item in stats.values())
+        return {
+            "success": failed_total == 0 and bool(report.get("ok", False)),
+            "dry_run": False,
+            "counts": target_counts,
+            "stats": stats,
+            "total": int(total),
+            "done": int(done_total),
+            "failed": int(failed_total),
+            "errors": errors[:5],
+            "elapsed_ms": elapsed_ms,
+            "self_check": report,
+            **self._vector_rebuild_status(),
+        }
+
     async def _recover_embedding_once(self, *, sample_text: str = "A_Memorix runtime self check") -> Dict[str, Any]:
         report = await self._refresh_runtime_self_check(sample_text=sample_text)
         checked_at = float(report.get("checked_at") or time.time())
@@ -680,14 +973,23 @@ class SDKMemoryKernel:
         self.embedding_dimension = detected_dimension
 
         if stored_dimension is not None and stored_dimension != detected_dimension:
-            raise RuntimeError(
-                self._vector_mismatch_error(
-                    stored_dimension=stored_dimension,
-                    detected_dimension=detected_dimension,
-                )
+            message = self._vector_mismatch_error(
+                stored_dimension=stored_dimension,
+                detected_dimension=detected_dimension,
             )
-
-        if self.vector_store.dimension != detected_dimension:
+            logger.warning(f"{message} 将以空向量库启动，等待手动重建。")
+            self.vector_store = VectorStore(
+                dimension=detected_dimension,
+                quantization_type=QuantizationType.INT8,
+                data_dir=self.data_dir / "vectors",
+            )
+            vector_store_loaded = False
+            self._set_embedding_degraded(
+                active=True,
+                reason=message,
+                checked_at=time.time(),
+            )
+        elif self.vector_store.dimension != detected_dimension:
             self.vector_store = VectorStore(
                 dimension=detected_dimension,
                 quantization_type=QuantizationType.INT8,
@@ -759,7 +1061,7 @@ class SDKMemoryKernel:
                 self._set_embedding_degraded(active=True, reason=message, checked_at=checked_at)
             else:
                 raise RuntimeError(f"{message}；请改回原 embedding 配置，或执行重嵌入/重建向量。")
-        else:
+        elif not self._is_embedding_degraded():
             self._set_embedding_degraded(active=False, checked_at=float(report.get("checked_at") or time.time()))
 
         self._initialized = True
@@ -1800,11 +2102,15 @@ class SDKMemoryKernel:
         if act == "get_config":
             degraded = self._embedding_degraded_snapshot()
             backfill_counts = self._paragraph_vector_backfill_counts()
+            rebuild_status = self._vector_rebuild_status()
             return {
                 "success": True,
                 "config": self.config,
                 "data_dir": str(self.data_dir),
                 "embedding_dimension": int(self.embedding_dimension),
+                "stored_vector_dimension": int(rebuild_status["stored_vector_dimension"]),
+                "vector_rebuild_required": bool(rebuild_status["vector_rebuild_required"]),
+                "vector_rebuild_message": str(rebuild_status["message"]),
                 "auto_save": bool(self._cfg("advanced.enable_auto_save", True)),
                 "relation_vectors_enabled": bool(self.relation_vectors_enabled),
                 "runtime_ready": self.is_runtime_ready(),
@@ -1844,6 +2150,17 @@ class SDKMemoryKernel:
             )
             result["embedding_degraded"] = self._is_embedding_degraded()
             result["embedding_state"] = self._embedding_degraded_snapshot()
+            result["backfill_counts"] = self._paragraph_vector_backfill_counts()
+            return result
+
+        if act == "rebuild_all_vectors":
+            include_relations = kwargs.get("include_relations")
+            result = await self._rebuild_all_vectors(
+                batch_size=self._optional_int(kwargs.get("batch_size")),
+                include_relations=include_relations if isinstance(include_relations, bool) else None,
+                dry_run=bool(kwargs.get("dry_run", False)),
+            )
+            result["embedding_degraded"] = self._is_embedding_degraded()
             result["backfill_counts"] = self._paragraph_vector_backfill_counts()
             return result
 

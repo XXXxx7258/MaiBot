@@ -63,6 +63,7 @@ import {
   getMemorySources,
   getMemoryTuningProfile,
   getMemoryTuningTasks,
+  rebuildMemoryRuntimeVectors,
   type MemoryDeleteRequestPayload,
   type MemoryImportChunkListPayload,
   type MemoryImportInputMode,
@@ -162,6 +163,9 @@ export function KnowledgeBasePage() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [refreshingCheck, setRefreshingCheck] = useState(false)
+  const [vectorRebuildDialogOpen, setVectorRebuildDialogOpen] = useState(false)
+  const [vectorRebuilding, setVectorRebuilding] = useState(false)
+  const [vectorRebuildPreview, setVectorRebuildPreview] = useState<Record<string, number> | null>(null)
   const [creatingImport, setCreatingImport] = useState(false)
   const [creatingTuning, setCreatingTuning] = useState(false)
   const [activeTab, setActiveTab] = useState<
@@ -1694,6 +1698,44 @@ export function KnowledgeBasePage() {
     }
   }, [toast])
 
+  const openVectorRebuildDialog = useCallback(async () => {
+    try {
+      setVectorRebuildDialogOpen(true)
+      setVectorRebuildPreview(null)
+      const payload = await rebuildMemoryRuntimeVectors({ dry_run: true })
+      setVectorRebuildPreview(payload.counts ?? null)
+    } catch (error) {
+      toast({
+        title: '读取向量重建预览失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    }
+  }, [toast])
+
+  const confirmVectorRebuild = useCallback(async () => {
+    try {
+      setVectorRebuilding(true)
+      const payload = await rebuildMemoryRuntimeVectors({ dry_run: false })
+      const nextRuntime = await getMemoryRuntimeConfig()
+      setRuntimeConfig(nextRuntime)
+      setVectorRebuildDialogOpen(false)
+      toast({
+        title: payload.success ? '向量重建完成' : '向量重建未完全成功',
+        description: `已处理 ${payload.done ?? 0} 条，失败 ${payload.failed ?? 0} 条`,
+        variant: payload.success ? 'default' : 'destructive',
+      })
+    } catch (error) {
+      toast({
+        title: '向量重建失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setVectorRebuilding(false)
+    }
+  }, [toast])
+
   const submitImportByMode = useCallback(async () => {
     if (creatingImport) {
       return
@@ -1880,6 +1922,43 @@ export function KnowledgeBasePage() {
             </div>
           ) : null}
 
+          <Dialog open={vectorRebuildDialogOpen} onOpenChange={setVectorRebuildDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>重建全部向量</DialogTitle>
+                <DialogDescription>
+                  将使用当前 embedding 配置重新生成段落、实体和已启用的关系向量，期间检索会临时降级（会对嵌入模型造成大量请求！）
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <Alert variant={runtimeConfig?.vector_rebuild_required ? 'destructive' : 'default'}>
+                  <AlertDescription>
+                    {runtimeConfig?.vector_rebuild_message || '这个操作会替换现有向量库，适合更换 embedding 模型或维度后执行。'}
+                  </AlertDescription>
+                </Alert>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(['paragraphs', 'entities', 'relations'] as const).map((key) => (
+                    <div key={key} className="rounded-lg border bg-muted/30 p-3">
+                      <div className="text-xs text-muted-foreground">
+                        {key === 'paragraphs' ? '段落' : key === 'entities' ? '实体' : '关系'}
+                      </div>
+                      <div className="mt-1 text-xl font-semibold">{vectorRebuildPreview?.[key] ?? '-'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVectorRebuildDialogOpen(false)} disabled={vectorRebuilding}>
+                  取消
+                </Button>
+                <Button variant="destructive" onClick={() => void confirmVectorRebuild()} disabled={vectorRebuilding}>
+                  <RotateCcw className={cn('mr-2 h-4 w-4', vectorRebuilding && 'animate-spin')} />
+                  确认重建
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* 快速开始 Hero —— 给新用户明确的"先做什么" */}
           <div className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 shadow-sm">
             <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
@@ -2001,13 +2080,31 @@ export function KnowledgeBasePage() {
 
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" />
-                      关键指标
-                    </CardTitle>
-                    <CardDescription>用于快速判断是否需要补回向量或重新调优</CardDescription>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4" />
+                          关键指标
+                        </CardTitle>
+                        <CardDescription>用于快速判断是否需要补回向量或重新调优</CardDescription>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={runtimeConfig?.vector_rebuild_required ? 'destructive' : 'outline'}
+                        onClick={() => void openVectorRebuildDialog()}
+                        disabled={vectorRebuilding}
+                      >
+                        <RotateCcw className={cn('mr-2 h-4 w-4', vectorRebuilding && 'animate-spin')} />
+                        重建向量
+                      </Button>
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-4 text-sm">
+                    {runtimeConfig?.vector_rebuild_required ? (
+                      <Alert variant="destructive">
+                        <AlertDescription>{runtimeConfig.vector_rebuild_message || '当前 embedding 与既有向量库不一致，需要重建全部向量。'}</AlertDescription>
+                      </Alert>
+                    ) : null}
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="rounded-lg border bg-muted/30 p-3">
                         <div className="text-xs text-muted-foreground">待补回段落向量</div>
