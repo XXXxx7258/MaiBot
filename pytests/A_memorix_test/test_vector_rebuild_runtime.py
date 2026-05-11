@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import asyncio
 import numpy as np
 import pytest
 
@@ -38,6 +39,24 @@ class _FakeEmbeddingManager:
         return await self.encode(texts, **kwargs)
 
 
+def _kernel_config(data_dir: Path, dimension: int) -> dict[str, Any]:
+    return {
+        "storage": {"data_dir": str(data_dir.resolve())},
+        "advanced": {"enable_auto_save": False},
+        "embedding": {
+            "dimension": dimension,
+            "batch_size": 2,
+            "paragraph_vector_backfill": {"enabled": False},
+        },
+        "retrieval": {
+            "relation_vectorization": {"enabled": True},
+            "sparse": {"enabled": False},
+            "enable_ppr": False,
+            "enable_parallel": False,
+        },
+    }
+
+
 async def _fake_runtime_self_check(**kwargs: Any) -> dict[str, Any]:
     vector_store = kwargs["vector_store"]
     embedding_manager = kwargs["embedding_manager"]
@@ -62,6 +81,7 @@ async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
     tmp_path: Path,
 ) -> None:
     fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
     monkeypatch.setattr(
         kernel_module,
         "create_embedding_api_adapter",
@@ -71,21 +91,7 @@ async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
 
     kernel = SDKMemoryKernel(
         plugin_root=tmp_path / "plugin_root",
-        config={
-            "storage": {"data_dir": str((tmp_path / "a_memorix_data").resolve())},
-            "advanced": {"enable_auto_save": False},
-            "embedding": {
-                "dimension": fake_embedding_manager.default_dimension,
-                "batch_size": 2,
-                "paragraph_vector_backfill": {"enabled": False},
-            },
-            "retrieval": {
-                "relation_vectorization": {"enabled": True},
-                "sparse": {"enabled": False},
-                "enable_ppr": False,
-                "enable_parallel": False,
-            },
-        },
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
     )
 
     await kernel.initialize()
@@ -95,6 +101,11 @@ async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
     paragraph_hash = kernel.metadata_store.add_paragraph("用户喜欢蓝色围巾", source="test")
     entity_hash = kernel.metadata_store.add_entity("蓝色围巾")
     relation_hash = kernel.metadata_store.add_relation("用户", "喜欢", "蓝色围巾")
+    inactive_relation_hash = kernel.metadata_store.add_relation("旧用户", "忘记", "旧围巾")
+    kernel.metadata_store.mark_relations_inactive([inactive_relation_hash])
+    old_summary_importer_store = kernel.summary_importer.vector_store
+    old_profile_store = kernel.person_profile_service.vector_store
+    old_episode_retriever = kernel.episode_retriever.retriever
     kernel.vector_store.add(
         np.ones((1, fake_embedding_manager.default_dimension), dtype=np.float32),
         ["stale-vector"],
@@ -112,10 +123,117 @@ async def test_runtime_admin_rebuild_all_vectors_replaces_existing_store(
     assert paragraph_hash in kernel.vector_store
     assert entity_hash in kernel.vector_store
     assert relation_hash in kernel.vector_store
+    assert inactive_relation_hash not in kernel.vector_store
     assert "stale-vector" not in kernel.vector_store
+    assert kernel.summary_importer.vector_store is kernel.vector_store
+    assert kernel.person_profile_service.vector_store is kernel.vector_store
+    assert kernel.episode_retriever.retriever is kernel.retriever
+    assert kernel.summary_importer.vector_store is not old_summary_importer_store
+    assert kernel.person_profile_service.vector_store is not old_profile_store
+    assert kernel.episode_retriever.retriever is not old_episode_retriever
 
     config = await kernel.memory_runtime_admin(action="get_config")
     assert config["vector_rebuild_required"] is False
     assert config["stored_vector_dimension"] == fake_embedding_manager.default_dimension
 
     await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_runtime_admin_rebuild_all_vectors_rejects_concurrent_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    data_dir = tmp_path / "a_memorix_data"
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: fake_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root",
+        config=_kernel_config(data_dir, fake_embedding_manager.default_dimension),
+    )
+
+    await kernel.initialize()
+    assert kernel.metadata_store is not None
+    kernel.metadata_store.add_paragraph("并发重建测试", source="test")
+
+    original_encode = kernel._encode_and_add_rebuild_vectors
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_encode(**kwargs: Any):
+        if not started.is_set():
+            started.set()
+            await release.wait()
+        return await original_encode(**kwargs)
+
+    monkeypatch.setattr(kernel, "_encode_and_add_rebuild_vectors", _slow_encode)
+    first_task = asyncio.create_task(kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=1))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        second = await kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=1)
+        assert second["success"] is False
+        assert second["error"] == "vector_rebuild_running"
+    finally:
+        release.set()
+
+    first = await first_task
+    assert first["success"] is True
+
+    await kernel.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "a_memorix_data"
+    first_embedding_manager = _FakeEmbeddingManager(dimension=8)
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: first_embedding_manager,
+    )
+    monkeypatch.setattr(kernel_module, "run_embedding_runtime_self_check", _fake_runtime_self_check)
+
+    first_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_first",
+        config=_kernel_config(data_dir, first_embedding_manager.default_dimension),
+    )
+    await first_kernel.initialize()
+    assert first_kernel.vector_store is not None
+    first_kernel.vector_store.add(
+        np.ones((1, first_embedding_manager.default_dimension), dtype=np.float32),
+        ["old-dimension-vector"],
+    )
+    first_kernel.vector_store.save()
+    await first_kernel.shutdown()
+
+    second_embedding_manager = _FakeEmbeddingManager(dimension=12)
+    monkeypatch.setattr(
+        kernel_module,
+        "create_embedding_api_adapter",
+        lambda **kwargs: second_embedding_manager,
+    )
+
+    second_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_second",
+        config=_kernel_config(data_dir, second_embedding_manager.default_dimension),
+    )
+    await second_kernel.initialize()
+    assert second_kernel.vector_store is not None
+    assert second_kernel.vector_store.dimension == second_embedding_manager.default_dimension
+    assert second_kernel.vector_store.num_vectors == 0
+    assert "old-dimension-vector" not in second_kernel.vector_store
+
+    config = await second_kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_rebuild_required"] is True
+    assert config["stored_vector_dimension"] == first_embedding_manager.default_dimension
+
+    await second_kernel.shutdown()
