@@ -1,6 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react'
 
-import { ChevronLeft, ChevronRight, Loader2, RefreshCw, Upload } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, RefreshCw, SlidersHorizontal, Upload } from 'lucide-react'
 
 import { MemoryMiniTabs } from '@/components/memory/MemoryMiniTabs'
 import { MemoryProgressIndicator } from '@/components/memory/MemoryProgressIndicator'
@@ -681,74 +681,141 @@ export function ImportTab(props: ImportTabProps) {
                   <div className="text-xs text-muted-foreground">迁移 MaiBot 历史长期记忆</div>
                   <div className="grid gap-3">
                     <div className="space-y-1">
-                      <Label>源数据库路径</Label>
-                      <Input value={maibotSourceDb} onChange={(event) => setMaibotSourceDb(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>起始时间</Label>
-                      <Input value={maibotTimeFrom} onChange={(event) => setMaibotTimeFrom(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>结束时间</Label>
-                      <Input value={maibotTimeTo} onChange={(event) => setMaibotTimeTo(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>起始 ID</Label>
-                      <Input type="number" min={1} value={maibotStartId} onChange={(event) => setMaibotStartId(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>结束 ID</Label>
-                      <Input type="number" min={1} value={maibotEndId} onChange={(event) => setMaibotEndId(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>会话 ID 列表</Label>
-                      <Input value={maibotStreamIds} onChange={(event) => setMaibotStreamIds(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>群组 ID 列表</Label>
-                      <Input value={maibotGroupIds} onChange={(event) => setMaibotGroupIds(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>用户 ID 列表</Label>
-                      <Input value={maibotUserIds} onChange={(event) => setMaibotUserIds(event.target.value)} />
-                    </div>
-                    <div className="space-y-1">
-                      <Label>读取批大小</Label>
+                      <Label htmlFor="maibot-source-db">源数据库路径</Label>
                       <Input
-                        type="number"
-                        min={1}
-                        value={maibotReadBatchSize}
-                        onChange={(event) => setMaibotReadBatchSize(event.target.value)}
+                        id="maibot-source-db"
+                        required
+                        value={maibotSourceDb}
+                        onChange={(event) => setMaibotSourceDb(event.target.value)}
+                        placeholder="data/MaiBot.db"
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-time-from">起始时间</Label>
+                        <Input
+                          id="maibot-time-from"
+                          type="datetime-local"
+                          step={1}
+                          max={maibotTimeTo || undefined}
+                          value={maibotTimeFrom}
+                          onChange={(event) => setMaibotTimeFrom(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-time-to">结束时间</Label>
+                        <Input
+                          id="maibot-time-to"
+                          type="datetime-local"
+                          step={1}
+                          min={maibotTimeFrom || undefined}
+                          value={maibotTimeTo}
+                          onChange={(event) => setMaibotTimeTo(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-start-id">起始 ID</Label>
+                        <Input
+                          id="maibot-start-id"
+                          type="number"
+                          min={1}
+                          max={maibotEndId || undefined}
+                          step={1}
+                          value={maibotStartId}
+                          onChange={(event) => setMaibotStartId(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-end-id">结束 ID</Label>
+                        <Input
+                          id="maibot-end-id"
+                          type="number"
+                          min={maibotStartId || 1}
+                          step={1}
+                          value={maibotEndId}
+                          onChange={(event) => setMaibotEndId(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="maibot-stream-ids">会话 ID 列表</Label>
+                      <Input
+                        id="maibot-stream-ids"
+                        value={maibotStreamIds}
+                        onChange={(event) => setMaibotStreamIds(event.target.value)}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label>提交窗口行数</Label>
+                      <Label htmlFor="maibot-group-ids">群组 ID 列表</Label>
                       <Input
-                        type="number"
-                        min={1}
-                        value={maibotCommitWindowRows}
-                        onChange={(event) => setMaibotCommitWindowRows(event.target.value)}
+                        id="maibot-group-ids"
+                        value={maibotGroupIds}
+                        onChange={(event) => setMaibotGroupIds(event.target.value)}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label>向量线程数</Label>
+                      <Label htmlFor="maibot-user-ids">用户 ID 列表</Label>
                       <Input
-                        type="number"
-                        min={1}
-                        value={maibotEmbedWorkers}
-                        onChange={(event) => setMaibotEmbedWorkers(event.target.value)}
+                        id="maibot-user-ids"
+                        value={maibotUserIds}
+                        onChange={(event) => setMaibotUserIds(event.target.value)}
                       />
                     </div>
                   </div>
+                  <details className="rounded-md border bg-background/70 p-3 text-sm">
+                    <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+                      <SlidersHorizontal className="h-4 w-4" />
+                      高级选项
+                    </summary>
+                    <div className="mt-3 grid gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-read-batch-size">读取批大小</Label>
+                        <Input
+                          id="maibot-read-batch-size"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={maibotReadBatchSize}
+                          onChange={(event) => setMaibotReadBatchSize(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-commit-window-rows">提交窗口行数</Label>
+                        <Input
+                          id="maibot-commit-window-rows"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={maibotCommitWindowRows}
+                          onChange={(event) => setMaibotCommitWindowRows(event.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="maibot-embed-workers">向量线程数</Label>
+                        <Input
+                          id="maibot-embed-workers"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={maibotEmbedWorkers}
+                          onChange={(event) => setMaibotEmbedWorkers(event.target.value)}
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <div className="flex items-center gap-2 text-sm">
+                          <Checkbox checked={maibotNoResume} onCheckedChange={(value) => setMaibotNoResume(Boolean(value))} />
+                          从头开始，不继续上次进度
+                        </div>
+                        <div className="flex items-center gap-2 text-sm">
+                          <Checkbox checked={maibotResetState} onCheckedChange={(value) => setMaibotResetState(Boolean(value))} />
+                          重置迁移状态
+                        </div>
+                      </div>
+                    </div>
+                  </details>
                   <div className="grid gap-2">
-                    <div className="flex items-center gap-2 text-sm">
-                      <Checkbox checked={maibotNoResume} onCheckedChange={(value) => setMaibotNoResume(Boolean(value))} />
-                      从头开始，不继续上次进度
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      <Checkbox checked={maibotResetState} onCheckedChange={(value) => setMaibotResetState(Boolean(value))} />
-                      重置迁移状态
-                    </div>
                     <div className="flex items-center gap-2 text-sm">
                       <Checkbox checked={maibotDryRun} onCheckedChange={(value) => setMaibotDryRun(Boolean(value))} />
                       只预演，不写入数据
