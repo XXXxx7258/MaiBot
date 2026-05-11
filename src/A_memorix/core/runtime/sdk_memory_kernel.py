@@ -177,6 +177,9 @@ class SDKMemoryKernel:
         self._initialized = False
         self._last_maintenance_at: Optional[float] = None
         self._request_dedup_tasks: Dict[str, asyncio.Task] = {}
+        self._vector_rebuild_lock = asyncio.Lock()
+        self._vector_persist_blocked_until_rebuild = False
+        self._vector_rebuild_source_dimension: Optional[int] = None
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._background_lock = asyncio.Lock()
         self._background_stopping = False
@@ -328,6 +331,8 @@ class SDKMemoryKernel:
 
     def _vector_rebuild_status(self) -> Dict[str, Any]:
         stored_dimension = self._stored_vector_dimension()
+        if self._vector_persist_blocked_until_rebuild and self._vector_rebuild_source_dimension is not None:
+            stored_dimension = int(self._vector_rebuild_source_dimension)
         current_dimension = int(self.embedding_dimension)
         rebuild_required = stored_dimension is not None and stored_dimension != current_dimension
         return {
@@ -632,7 +637,51 @@ class SDKMemoryKernel:
         return any(str(row.get("name", "") or "") == col for row in rows)
 
     def _active_row_filter_sql(self, table: str) -> str:
+        if str(table or "").strip() == "relations" and self._table_has_column("relations", "is_inactive"):
+            return "is_inactive IS NULL OR is_inactive = 0"
         return "is_deleted IS NULL OR is_deleted = 0" if self._table_has_column(table, "is_deleted") else "1 = 1"
+
+    def _refresh_runtime_dependents(self, *, preserve_managers: bool = True) -> None:
+        if (
+            self.metadata_store is None
+            or self.graph_store is None
+            or self.vector_store is None
+            or self.embedding_manager is None
+            or self.retriever is None
+        ):
+            return
+
+        runtime_config = self._build_runtime_config()
+        self.episode_retriever = EpisodeRetrievalService(metadata_store=self.metadata_store, retriever=self.retriever)
+        self.aggregate_query_service = AggregateQueryService(plugin_config=runtime_config)
+        self.person_profile_service = PersonProfileService(
+            metadata_store=self.metadata_store,
+            graph_store=self.graph_store,
+            vector_store=self.vector_store,
+            embedding_manager=self.embedding_manager,
+            sparse_index=self.sparse_index,
+            plugin_config=runtime_config,
+            retriever=self.retriever,
+        )
+        self.episode_segmentation_service = EpisodeSegmentationService(plugin_config=runtime_config)
+        self.episode_service = EpisodeService(
+            metadata_store=self.metadata_store,
+            plugin_config=runtime_config,
+            segmentation_service=self.episode_segmentation_service,
+        )
+        self.summary_importer = SummaryImporter(
+            vector_store=self.vector_store,
+            graph_store=self.graph_store,
+            metadata_store=self.metadata_store,
+            embedding_manager=self.embedding_manager,
+            plugin_config=runtime_config,
+        )
+        if not preserve_managers:
+            self.import_task_manager = ImportTaskManager(self._runtime_facade)
+            self.retrieval_tuning_manager = RetrievalTuningManager(
+                self._runtime_facade,
+                import_write_blocked_provider=self.import_task_manager.is_write_blocked,
+            )
 
     async def _encode_and_add_rebuild_vectors(
         self,
@@ -676,6 +725,26 @@ class SDKMemoryKernel:
         return done, failed, last_error, done_ids, failed_ids
 
     async def _rebuild_all_vectors(
+        self,
+        *,
+        batch_size: Optional[int] = None,
+        include_relations: Optional[bool] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        if self._vector_rebuild_lock.locked():
+            return {
+                "success": False,
+                "error": "vector_rebuild_running",
+                "detail": "已有向量重建任务正在运行",
+            }
+        async with self._vector_rebuild_lock:
+            return await self._rebuild_all_vectors_locked(
+                batch_size=batch_size,
+                include_relations=include_relations,
+                dry_run=dry_run,
+            )
+
+    async def _rebuild_all_vectors_locked(
         self,
         *,
         batch_size: Optional[int] = None,
@@ -837,7 +906,6 @@ class SDKMemoryKernel:
             conn.commit()
 
         self.vector_store.warmup_index(force_train=True)
-        self._persist()
         self._runtime_bundle = build_search_runtime(
             plugin_config=self._build_runtime_config(),
             logger_obj=logger,
@@ -848,6 +916,8 @@ class SDKMemoryKernel:
             self.retriever = self._runtime_bundle.retriever
             self.threshold_filter = self._runtime_bundle.threshold_filter
             self.sparse_index = self._runtime_bundle.sparse_index or self.sparse_index
+            self._refresh_runtime_dependents(preserve_managers=True)
+            self._apply_runtime_sparse_mode()
 
         report = await self._refresh_runtime_self_check(sample_text="A_Memorix vector rebuild self check")
         if bool(report.get("ok", False)) and not errors:
@@ -862,8 +932,13 @@ class SDKMemoryKernel:
         elapsed_ms = (time.time() - started) * 1000.0
         done_total = sum(int(item["done"]) for item in stats.values())
         failed_total = sum(int(item["failed"]) for item in stats.values())
+        rebuild_success = failed_total == 0 and bool(report.get("ok", False))
+        if rebuild_success:
+            self._vector_persist_blocked_until_rebuild = False
+            self._vector_rebuild_source_dimension = None
+        self._persist()
         return {
-            "success": failed_total == 0 and bool(report.get("ok", False)),
+            "success": rebuild_success,
             "dry_run": False,
             "counts": target_counts,
             "stats": stats,
@@ -946,11 +1021,7 @@ class SDKMemoryKernel:
         self.metadata_store = MetadataStore(data_dir=self.data_dir / "metadata")
         self.metadata_store.connect()
 
-        vector_store_loaded = False
-        if stored_dimension is not None and self.vector_store.has_data():
-            self.vector_store.load()
-            self.vector_store.warmup_index(force_train=True)
-            vector_store_loaded = True
+        skip_vector_load = False
         if self.graph_store.has_data():
             self.graph_store.load()
 
@@ -983,7 +1054,9 @@ class SDKMemoryKernel:
                 quantization_type=QuantizationType.INT8,
                 data_dir=self.data_dir / "vectors",
             )
-            vector_store_loaded = False
+            self._vector_persist_blocked_until_rebuild = True
+            self._vector_rebuild_source_dimension = stored_dimension
+            skip_vector_load = True
             self._set_embedding_degraded(
                 active=True,
                 reason=message,
@@ -996,7 +1069,7 @@ class SDKMemoryKernel:
                 data_dir=self.data_dir / "vectors",
             )
 
-        if not vector_store_loaded and self.vector_store.has_data():
+        if not skip_vector_load and self.vector_store.has_data():
             self.vector_store.load()
             self.vector_store.warmup_index(force_train=True)
 
@@ -1022,31 +1095,7 @@ class SDKMemoryKernel:
         self.sparse_index = self._runtime_bundle.sparse_index or self.sparse_index
         self._apply_runtime_sparse_mode()
 
-        runtime_config = self._build_runtime_config()
-        self.episode_retriever = EpisodeRetrievalService(metadata_store=self.metadata_store, retriever=self.retriever)
-        self.aggregate_query_service = AggregateQueryService(plugin_config=runtime_config)
-        self.person_profile_service = PersonProfileService(
-            metadata_store=self.metadata_store,
-            graph_store=self.graph_store,
-            vector_store=self.vector_store,
-            embedding_manager=self.embedding_manager,
-            sparse_index=self.sparse_index,
-            plugin_config=runtime_config,
-            retriever=self.retriever,
-        )
-        self.episode_segmentation_service = EpisodeSegmentationService(plugin_config=runtime_config)
-        self.episode_service = EpisodeService(
-            metadata_store=self.metadata_store,
-            plugin_config=runtime_config,
-            segmentation_service=self.episode_segmentation_service,
-        )
-        self.summary_importer = SummaryImporter(
-            vector_store=self.vector_store,
-            graph_store=self.graph_store,
-            metadata_store=self.metadata_store,
-            embedding_manager=self.embedding_manager,
-            plugin_config=runtime_config,
-        )
+        self._refresh_runtime_dependents(preserve_managers=True)
         self.import_task_manager = ImportTaskManager(self._runtime_facade)
         self.retrieval_tuning_manager = RetrievalTuningManager(
             self._runtime_facade,
@@ -2482,7 +2531,10 @@ class SDKMemoryKernel:
 
     def _persist(self) -> None:
         if self.vector_store is not None:
-            self.vector_store.save()
+            if self._vector_persist_blocked_until_rebuild:
+                logger.debug("检测到向量维度不匹配且尚未重建，跳过向量库持久化以保留重建提示")
+            else:
+                self.vector_store.save()
         if self.graph_store is not None:
             self.graph_store.save()
         if self.sparse_index is not None and getattr(self.sparse_index.config, "enabled", False):
