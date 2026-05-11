@@ -237,3 +237,33 @@ async def test_initialize_dimension_mismatch_keeps_vector_store_empty_until_rebu
     assert config["stored_vector_dimension"] == first_embedding_manager.default_dimension
 
     await second_kernel.shutdown()
+
+    third_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_third",
+        config=_kernel_config(data_dir, second_embedding_manager.default_dimension),
+    )
+    await third_kernel.initialize()
+    assert third_kernel.vector_store is not None
+    assert third_kernel.vector_store.dimension == second_embedding_manager.default_dimension
+    assert third_kernel.vector_store.num_vectors == 0
+
+    config = await third_kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_rebuild_required"] is True
+    assert config["stored_vector_dimension"] == first_embedding_manager.default_dimension
+
+    result = await third_kernel.memory_runtime_admin(action="rebuild_all_vectors", batch_size=2)
+    assert result["success"] is True
+
+    await third_kernel.shutdown()
+
+    fourth_kernel = SDKMemoryKernel(
+        plugin_root=tmp_path / "plugin_root_fourth",
+        config=_kernel_config(data_dir, second_embedding_manager.default_dimension),
+    )
+    await fourth_kernel.initialize()
+
+    config = await fourth_kernel.memory_runtime_admin(action="get_config")
+    assert config["vector_rebuild_required"] is False
+    assert config["stored_vector_dimension"] == second_embedding_manager.default_dimension
+
+    await fourth_kernel.shutdown()

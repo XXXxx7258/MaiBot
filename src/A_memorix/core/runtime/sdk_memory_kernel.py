@@ -178,6 +178,8 @@ class SDKMemoryKernel:
         self._last_maintenance_at: Optional[float] = None
         self._request_dedup_tasks: Dict[str, asyncio.Task] = {}
         self._vector_rebuild_lock = asyncio.Lock()
+        self._vector_persist_blocked_until_rebuild = False
+        self._vector_rebuild_source_dimension: Optional[int] = None
         self._background_tasks: Dict[str, asyncio.Task] = {}
         self._background_lock = asyncio.Lock()
         self._background_stopping = False
@@ -329,6 +331,8 @@ class SDKMemoryKernel:
 
     def _vector_rebuild_status(self) -> Dict[str, Any]:
         stored_dimension = self._stored_vector_dimension()
+        if self._vector_persist_blocked_until_rebuild and self._vector_rebuild_source_dimension is not None:
+            stored_dimension = int(self._vector_rebuild_source_dimension)
         current_dimension = int(self.embedding_dimension)
         rebuild_required = stored_dimension is not None and stored_dimension != current_dimension
         return {
@@ -902,7 +906,6 @@ class SDKMemoryKernel:
             conn.commit()
 
         self.vector_store.warmup_index(force_train=True)
-        self._persist()
         self._runtime_bundle = build_search_runtime(
             plugin_config=self._build_runtime_config(),
             logger_obj=logger,
@@ -929,8 +932,13 @@ class SDKMemoryKernel:
         elapsed_ms = (time.time() - started) * 1000.0
         done_total = sum(int(item["done"]) for item in stats.values())
         failed_total = sum(int(item["failed"]) for item in stats.values())
+        rebuild_success = failed_total == 0 and bool(report.get("ok", False))
+        if rebuild_success:
+            self._vector_persist_blocked_until_rebuild = False
+            self._vector_rebuild_source_dimension = None
+        self._persist()
         return {
-            "success": failed_total == 0 and bool(report.get("ok", False)),
+            "success": rebuild_success,
             "dry_run": False,
             "counts": target_counts,
             "stats": stats,
@@ -1046,6 +1054,8 @@ class SDKMemoryKernel:
                 quantization_type=QuantizationType.INT8,
                 data_dir=self.data_dir / "vectors",
             )
+            self._vector_persist_blocked_until_rebuild = True
+            self._vector_rebuild_source_dimension = stored_dimension
             skip_vector_load = True
             self._set_embedding_degraded(
                 active=True,
@@ -2521,7 +2531,10 @@ class SDKMemoryKernel:
 
     def _persist(self) -> None:
         if self.vector_store is not None:
-            self.vector_store.save()
+            if self._vector_persist_blocked_until_rebuild:
+                logger.debug("检测到向量维度不匹配且尚未重建，跳过向量库持久化以保留重建提示")
+            else:
+                self.vector_store.save()
         if self.graph_store is not None:
             self.graph_store.save()
         if self.sparse_index is not None and getattr(self.sparse_index.config, "enabled", False):
