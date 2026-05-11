@@ -150,9 +150,12 @@ function formatMaibotDateTimeLocalForApi(input: string, fieldName: string): stri
   if (!DATE_TIME_LOCAL_PATTERN.test(value)) {
     throw new Error(`${fieldName}格式无效，请使用时间选择器填写`)
   }
-  const [date = '', time = ''] = value.split('T')
-  const timeWithoutFraction = time.replace(/\.\d+$/, '')
-  return `${date} ${timeWithoutFraction.length === 5 ? `${timeWithoutFraction}:00` : timeWithoutFraction}`
+  const date = new Date(value)
+  const timestamp = date.getTime()
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${fieldName}不是有效时间`)
+  }
+  return date.toISOString()
 }
 
 export function KnowledgeBasePage() {

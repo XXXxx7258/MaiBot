@@ -645,10 +645,12 @@ describe('KnowledgeBasePage import workflow', () => {
 
     await user.click(screen.getByRole('button', { name: '创建导入任务' }))
     await waitFor(() => expect(memoryApi.createMemoryMaibotMigrationImport).toHaveBeenCalledTimes(1))
+    const expectedTimeFrom = new Date('2024-01-02T03:04').toISOString()
+    const expectedTimeTo = new Date('2024-01-03T05:06:07').toISOString()
     expect(vi.mocked(memoryApi.createMemoryMaibotMigrationImport).mock.calls[0][0]).toMatchObject({
       source_db: 'data/old-maibot.db',
-      time_from: '2024-01-02 03:04:00',
-      time_to: '2024-01-03 05:06:07',
+      time_from: expectedTimeFrom,
+      time_to: expectedTimeTo,
       start_id: 10,
       end_id: 20,
       read_batch_size: 123,
