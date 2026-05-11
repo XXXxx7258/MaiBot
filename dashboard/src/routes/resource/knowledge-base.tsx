@@ -109,6 +109,52 @@ import { ImportTab } from './knowledge-base/tabs/ImportTab'
 import { TuningTab } from './knowledge-base/tabs/TuningTab'
 import { KnowledgeGraphPage } from './knowledge-graph'
 
+const DATE_TIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/
+const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/
+
+function parseMaibotPositiveInt(input: string, fieldName: string): number | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!POSITIVE_INTEGER_PATTERN.test(value)) {
+    throw new Error(`${fieldName} 必须填写正整数`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${fieldName} 超过可支持的整数范围`)
+  }
+  return parsed
+}
+
+function getMaibotDateTimeLocalTimestamp(input: string, fieldName: string): number | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!DATE_TIME_LOCAL_PATTERN.test(value)) {
+    throw new Error(`${fieldName}格式无效，请使用时间选择器填写`)
+  }
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${fieldName}不是有效时间`)
+  }
+  return timestamp
+}
+
+function formatMaibotDateTimeLocalForApi(input: string, fieldName: string): string | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!DATE_TIME_LOCAL_PATTERN.test(value)) {
+    throw new Error(`${fieldName}格式无效，请使用时间选择器填写`)
+  }
+  const [date = '', time = ''] = value.split('T')
+  const timeWithoutFraction = time.replace(/\.\d+$/, '')
+  return `${date} ${timeWithoutFraction.length === 5 ? `${timeWithoutFraction}:00` : timeWithoutFraction}`
+}
+
 export function KnowledgeBasePage() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
@@ -190,6 +236,7 @@ export function KnowledgeBasePage() {
   const [maibotResetState, setMaibotResetState] = useState(false)
   const [maibotDryRun, setMaibotDryRun] = useState(false)
   const [maibotVerifyOnly, setMaibotVerifyOnly] = useState(false)
+  const maibotSourceDbDefaultAppliedRef = useRef(false)
 
   const [pathResolveAlias, setPathResolveAlias] = useState('raw')
   const [pathResolveRelativePath, setPathResolveRelativePath] = useState('')
@@ -278,21 +325,20 @@ export function KnowledgeBasePage() {
       setMemorySources(sourcePayload.items ?? [])
       setDeleteOperations(deleteOperationPayload.items ?? [])
       setFeedbackCorrections(feedbackCorrectionPayload.items ?? [])
-      if (!selectedImportTaskId && (importTaskPayload.items ?? []).length > 0) {
+      setSelectedImportTaskId((currentTaskId) => {
+        if (currentTaskId || (importTaskPayload.items ?? []).length === 0) {
+          return currentTaskId
+        }
         const initialTaskId = String(importTaskPayload.items?.[0]?.task_id ?? '')
-        if (initialTaskId) {
-          setSelectedImportTaskId(initialTaskId)
+        return initialTaskId || currentTaskId
+      })
+      setPathResolveAlias((currentAlias) => {
+        if (currentAlias) {
+          return currentAlias
         }
-      }
-      if (!maibotSourceDb && String(importSettingsPayload.settings?.maibot_source_db_default ?? '').trim()) {
-        setMaibotSourceDb(String(importSettingsPayload.settings?.maibot_source_db_default ?? '').trim())
-      }
-      if (!pathResolveAlias) {
         const aliasKeys = Object.keys(pathAliasPayload.path_aliases ?? {})
-        if (aliasKeys.length > 0) {
-          setPathResolveAlias(aliasKeys[0])
-        }
-      }
+        return aliasKeys[0] ?? currentAlias
+      })
     } catch (error) {
       toast({
         title: '加载长期记忆控制台失败',
@@ -302,7 +348,7 @@ export function KnowledgeBasePage() {
     } finally {
       setLoading(false)
     }
-  }, [maibotSourceDb, pathResolveAlias, selectedImportTaskId, toast])
+  }, [toast])
 
   useEffect(() => {
     void loadPage()
@@ -805,18 +851,36 @@ export function KnowledgeBasePage() {
   const submitMaibotMigrationImport = useCallback(async () => {
     try {
       setCreatingImport(true)
+      const sourceDb = maibotSourceDb.trim()
+      if (!sourceDb) {
+        throw new Error('请填写源数据库路径')
+      }
+      const timeFromTimestamp = getMaibotDateTimeLocalTimestamp(maibotTimeFrom, '起始时间')
+      const timeToTimestamp = getMaibotDateTimeLocalTimestamp(maibotTimeTo, '结束时间')
+      if (
+        timeFromTimestamp !== undefined &&
+        timeToTimestamp !== undefined &&
+        timeFromTimestamp > timeToTimestamp
+      ) {
+        throw new Error('起始时间不能晚于结束时间')
+      }
+      const startId = parseMaibotPositiveInt(maibotStartId, '起始 ID')
+      const endId = parseMaibotPositiveInt(maibotEndId, '结束 ID')
+      if (startId !== undefined && endId !== undefined && startId > endId) {
+        throw new Error('起始 ID 不能大于结束 ID')
+      }
       const result = await createMemoryMaibotMigrationImport({
-        source_db: maibotSourceDb || undefined,
-        time_from: maibotTimeFrom || undefined,
-        time_to: maibotTimeTo || undefined,
-        start_id: parseOptionalPositiveInt(maibotStartId),
-        end_id: parseOptionalPositiveInt(maibotEndId),
+        source_db: sourceDb,
+        time_from: formatMaibotDateTimeLocalForApi(maibotTimeFrom, '起始时间'),
+        time_to: formatMaibotDateTimeLocalForApi(maibotTimeTo, '结束时间'),
+        start_id: startId,
+        end_id: endId,
         stream_ids: parseCommaSeparatedList(maibotStreamIds),
         group_ids: parseCommaSeparatedList(maibotGroupIds),
         user_ids: parseCommaSeparatedList(maibotUserIds),
-        read_batch_size: parseOptionalPositiveInt(maibotReadBatchSize),
-        commit_window_rows: parseOptionalPositiveInt(maibotCommitWindowRows),
-        embed_workers: parseOptionalPositiveInt(maibotEmbedWorkers),
+        read_batch_size: parseMaibotPositiveInt(maibotReadBatchSize, '读取批大小'),
+        commit_window_rows: parseMaibotPositiveInt(maibotCommitWindowRows, '提交窗口行数'),
+        embed_workers: parseMaibotPositiveInt(maibotEmbedWorkers, '向量线程数'),
         no_resume: maibotNoResume,
         reset_state: maibotResetState,
         dry_run: maibotDryRun,
@@ -1014,18 +1078,21 @@ export function KnowledgeBasePage() {
     if (defaultChunkConcurrency && importCommonChunkConcurrency === '4') {
       setImportCommonChunkConcurrency(defaultChunkConcurrency)
     }
-    const defaultSourceDb = String(importSettings.maibot_source_db_default ?? '').trim()
-    if (defaultSourceDb && !maibotSourceDb.trim()) {
-      setMaibotSourceDb(defaultSourceDb)
-    }
   }, [
     importCommonChunkConcurrency,
     importCommonFileConcurrency,
     importSettings.default_chunk_concurrency,
     importSettings.default_file_concurrency,
-    importSettings.maibot_source_db_default,
-    maibotSourceDb,
   ])
+
+  useEffect(() => {
+    const defaultSourceDb = String(importSettings.maibot_source_db_default ?? '').trim()
+    if (!defaultSourceDb || maibotSourceDbDefaultAppliedRef.current) {
+      return
+    }
+    maibotSourceDbDefaultAppliedRef.current = true
+    setMaibotSourceDb((currentSourceDb) => currentSourceDb.trim() ? currentSourceDb : defaultSourceDb)
+  }, [importSettings.maibot_source_db_default])
 
   useEffect(() => {
     if (!selectedImportTaskId && importTasks.length > 0) {
