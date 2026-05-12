@@ -97,7 +97,7 @@ chats = []
 [episode]
 enabled = true
 generation_enabled = true
-pending_batch_size = 20
+pending_batch_size = 50
 pending_max_retry = 3
 max_paragraphs_per_call = 20
 max_chars_per_call = 6000
