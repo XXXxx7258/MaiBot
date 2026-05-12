@@ -370,7 +370,7 @@ class SummaryImporter:
             if any(marker in item for marker in blocked_markers):
                 continue
             kept.append(item)
-        cleaned = "".join(kept).strip() if kept else content
+        cleaned = "".join(kept).strip()
         return cleaned[:500]
 
     def _build_previous_summary_context(
