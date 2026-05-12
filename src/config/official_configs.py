@@ -751,7 +751,7 @@ class AMemorixIntegrationConfig(ConfigBase):
     """是否在 Maisaka 聊天过程中按消息窗口自动写回聊天摘要到长期记忆"""
 
     chat_summary_writeback_message_threshold: int = Field(
-        default=12,
+        default=36,
         ge=1,
         json_schema_extra={
             "x-widget": "input",
@@ -762,7 +762,7 @@ class AMemorixIntegrationConfig(ConfigBase):
     """自动写回聊天摘要的消息窗口阈值"""
 
     chat_summary_writeback_context_length: int = Field(
-        default=50,
+        default=36,
         ge=1,
         le=500,
         json_schema_extra={
@@ -1554,7 +1554,7 @@ class AMemorixEpisodeConfig(ConfigBase):
     """是否启用自动生成"""
 
     pending_batch_size: int = Field(
-        default=20,
+        default=50,
         ge=1,
         json_schema_extra={
             "label": {

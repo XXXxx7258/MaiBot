@@ -382,7 +382,8 @@ class ChatSummaryWritebackService:
         if not session_id:
             return
 
-        total_message_count = count_messages(session_id=session_id)
+        message_time = self._extract_message_timestamp(message)
+        total_message_count = self._count_messages_until_trigger(session_id=session_id, message_time=message_time)
         if total_message_count <= 0:
             return
 
@@ -402,8 +403,11 @@ class ChatSummaryWritebackService:
         if pending_message_count < threshold:
             return
 
-        context_length = self._context_length()
-        message_time = self._extract_message_timestamp(message)
+        configured_context_length = self._context_length()
+        context_length = self._effective_context_length(
+            configured_context_length=configured_context_length,
+            pending_message_count=pending_message_count,
+        )
         result = await memory_service.ingest_summary(
             external_id=f"chat_auto_summary:{session_id}:{total_message_count}",
             chat_id=session_id,
@@ -413,9 +417,13 @@ class ChatSummaryWritebackService:
             metadata={
                 "generate_from_chat": True,
                 "context_length": context_length,
+                "configured_context_length": configured_context_length,
                 "writeback_source": "memory_flow_service",
                 "trigger": "message_threshold",
+                "previous_trigger_message_count": state.last_trigger_message_count,
+                "pending_message_count": pending_message_count,
                 "trigger_message_count": total_message_count,
+                "summary_review_count": 2,
             },
             respect_filter=True,
             user_id=self._extract_session_user_id(message),
@@ -538,6 +546,19 @@ class ChatSummaryWritebackService:
     @staticmethod
     def _context_length() -> int:
         return max(1, int(global_config.a_memorix.integration.chat_summary_writeback_context_length))
+
+    @staticmethod
+    def _count_messages_until_trigger(*, session_id: str, message_time: float | None) -> int:
+        if message_time is None:
+            return count_messages(session_id=session_id)
+        return count_messages(session_id=session_id, end_time=message_time)
+
+    @staticmethod
+    def _effective_context_length(*, configured_context_length: int, pending_message_count: int) -> int:
+        """摘要只覆盖本轮新增消息，避免重叠窗口反复消耗 token。"""
+        configured = max(1, int(configured_context_length))
+        pending = max(1, int(pending_message_count))
+        return min(configured, pending)
 
 
 class MemoryAutomationService:

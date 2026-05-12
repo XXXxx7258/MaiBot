@@ -805,7 +805,7 @@
         "pending_batch_size": {
           "name": "pending_batch_size",
           "type": "integer",
-          "default": 20,
+          "default": 50,
           "description": "待处理批大小",
           "label": "待处理批大小",
           "ui_type": "number",
