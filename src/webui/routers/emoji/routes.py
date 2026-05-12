@@ -246,6 +246,16 @@ async def update_emoji(
                 emoji.register_time = update_data["register_time"]
 
             session.add(emoji)
+
+            # 若通过更新接口封禁表情包，同步从内存列表移除
+            if update_data.get("is_banned"):
+                from src.emoji_system.emoji_manager import emoji_manager
+
+                emoji_manager.emojis = [
+                    e for e in emoji_manager.emojis if e.file_hash != emoji.image_hash
+                ]
+                emoji_manager._emoji_num = len(emoji_manager.emojis)
+
             logger.info(f"表情包已更新: ID={emoji_id}, 字段: {list(update_data.keys())}")
 
             return EmojiUpdateResponse(
@@ -439,6 +449,14 @@ async def ban_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None))
             emoji.is_banned = True
             emoji.is_registered = False
             session.add(emoji)
+
+            # 同步从内存列表移除，确保插件等消费者不会继续选中已封禁表情包
+            from src.emoji_system.emoji_manager import emoji_manager
+
+            emoji_manager.emojis = [
+                e for e in emoji_manager.emojis if e.file_hash != emoji.image_hash
+            ]
+            emoji_manager._emoji_num = len(emoji_manager.emojis)
 
             logger.info(f"表情包已禁用: ID={emoji_id}")
             return EmojiUpdateResponse(success=True, message="表情包禁用成功", data=emoji_to_response(emoji))
