@@ -738,6 +738,7 @@ class EmojiManager:
                     # 按 file_hash 从内存列表移除（MaiEmoji 未定义 __eq__，
                     # 依赖身份比较的 remove 在跨实例调用时静默失败）
                     self.emojis = [e for e in self.emojis if e.file_hash != emoji.file_hash]
+                    self._emoji_num = len(self.emojis)
                     logger.info(f"[封禁表情包] 成功封禁表情包: {emoji.file_name}")
                 else:
                     logger.warning(f"[封禁表情包] 未找到表情包记录: {emoji.file_name}")

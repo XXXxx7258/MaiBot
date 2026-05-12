@@ -254,6 +254,7 @@ async def update_emoji(
                 emoji_manager.emojis = [
                     e for e in emoji_manager.emojis if e.file_hash != emoji.image_hash
                 ]
+                emoji_manager._emoji_num = len(emoji_manager.emojis)
 
             logger.info(f"表情包已更新: ID={emoji_id}, 字段: {list(update_data.keys())}")
 
@@ -455,6 +456,7 @@ async def ban_emoji(emoji_id: int, maibot_session: Optional[str] = Cookie(None))
             emoji_manager.emojis = [
                 e for e in emoji_manager.emojis if e.file_hash != emoji.image_hash
             ]
+            emoji_manager._emoji_num = len(emoji_manager.emojis)
 
             logger.info(f"表情包已禁用: ID={emoji_id}")
             return EmojiUpdateResponse(success=True, message="表情包禁用成功", data=emoji_to_response(emoji))
