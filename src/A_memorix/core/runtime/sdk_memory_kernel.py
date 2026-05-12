@@ -1373,7 +1373,7 @@ class SDKMemoryKernel:
         self.metadata_store.enqueue_episode_pending(paragraph_hash, source=source)
         self._persist()
         await self.process_episode_pending_batch(
-            limit=max(1, int(self._cfg("episode.pending_batch_size", 12))),
+            limit=max(1, int(self._cfg("episode.pending_batch_size", 50))),
             max_retry=max(1, int(self._cfg("episode.pending_max_retry", 3))),
         )
         for person_id in person_tokens:
@@ -2602,7 +2602,7 @@ class SDKMemoryKernel:
                 if not bool(self._cfg("episode.generation_enabled", True)):
                     continue
                 await self.process_episode_pending_batch(
-                    limit=max(1, int(self._cfg("episode.pending_batch_size", 20) or 20)),
+                    limit=max(1, int(self._cfg("episode.pending_batch_size", 50) or 50)),
                     max_retry=max(1, int(self._cfg("episode.pending_max_retry", 3) or 3)),
                 )
         except asyncio.CancelledError:
