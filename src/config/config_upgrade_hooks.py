@@ -236,6 +236,26 @@ def _normalize_group_item_fields(data: dict[str, Any]) -> list[str]:
     return reasons
 
 
+def _upgrade_expression_learning_defaults(data: dict[str, Any]) -> list[str]:
+    """
+    8.12.1: 表达学习并发默认值调整为 3，并补齐默认开启的学习优化开关。
+    """
+    expression = _as_dict(data.get("expression"))
+    if expression is None:
+        expression = {}
+        data["expression"] = expression
+
+    reasons: list[str] = []
+    if expression.get("max_expression_learner") in (None, 2):
+        expression["max_expression_learner"] = 3
+        reasons.append("expression.max_expression_learner")
+    if "expression_self_reflect" not in expression:
+        expression["expression_self_reflect"] = True
+        reasons.append("expression.expression_self_reflect")
+
+    return reasons
+
+
 def _normalize_group_list_fields(section: dict[str, Any], list_key: str, old_inner_key: str) -> bool:
     group_list = _as_list(section.get(list_key))
     if group_list is None:
@@ -325,6 +345,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.10.20",
         config_names=("bot_config.toml",),
         migrate=_normalize_group_item_fields,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.12.1",
+        config_names=("bot_config.toml",),
+        migrate=_upgrade_expression_learning_defaults,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()

@@ -22,7 +22,6 @@ class MaiExpression(BaseDatabaseDataModel[Expression]):
         item_id: Optional[int] = None,
         session_id: Optional[str] = None,
         checked: bool = False,
-        rejected: bool = False,
         modified_by: Optional[ModifiedBy] = None,
     ):
         self.item_id = item_id
@@ -42,11 +41,9 @@ class MaiExpression(BaseDatabaseDataModel[Expression]):
         self.session_id: Optional[str] = session_id
 
         self.checked: bool = checked
-        """是否已经被检查过"""
-        self.rejected: bool = rejected
-        """是否被拒绝但是未更新"""
+        """是否已经通过人工审核"""
         self.modified_by: Optional[ModifiedBy] = modified_by
-        """最后修改者，标记用户或AI，为空表示未检查"""
+        """最后修改者，标记用户或AI，为空表示暂无修改来源"""
 
     @classmethod
     def from_db_instance(cls, db_record: Expression):
@@ -65,7 +62,6 @@ class MaiExpression(BaseDatabaseDataModel[Expression]):
             create_time=db_record.create_time,
             session_id=db_record.session_id,
             checked=db_record.checked,
-            rejected=db_record.rejected,
             modified_by=db_record.modified_by,
         )
 
@@ -83,6 +79,5 @@ class MaiExpression(BaseDatabaseDataModel[Expression]):
             create_time=self.create_time,
             session_id=self.session_id,
             checked=self.checked,
-            rejected=self.rejected,
             modified_by=self.modified_by,
         )

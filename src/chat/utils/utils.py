@@ -392,7 +392,12 @@ def split_into_sentences_w_remove_punctuation(text: str) -> list[str]:
 
         # 检查是否可以与下一段合并
         # 条件：不是最后一段，且随机数小于合并概率，且当前段有内容（避免合并空段）
-        if idx + 1 < len(segments) and random.random() < merge_probability and current_content:
+        if (
+            idx + 1 < len(segments)
+            and current_content
+            and current_sep != "\n"
+            and random.random() < merge_probability
+        ):
             next_content, next_sep = segments[idx + 1]
             # 合并: (内容1 + 分隔符1 + 内容2, 分隔符2)
             # 只有当下一段也有内容时才合并文本，否则只传递分隔符
@@ -415,6 +420,11 @@ def split_into_sentences_w_remove_punctuation(text: str) -> list[str]:
     final_sentences = [
         s for s in final_sentences if s.strip()
     ]  # 过滤掉空字符串以及仅包含空白（如换行符、空格）的字符串
+    final_sentences = [
+        normalized_sentence
+        for sentence in final_sentences
+        if (normalized_sentence := re.sub(r"[^\S\r\n]*[\r\n]+[^\S\r\n]*", " ", sentence).strip())
+    ]
 
     logger.debug(f"分割并合并后的句子: {final_sentences}")
     return final_sentences

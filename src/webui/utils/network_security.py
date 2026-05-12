@@ -1,7 +1,8 @@
-import ipaddress
-import socket
 from typing import Iterable, Set
 from urllib.parse import urlparse
+
+import ipaddress
+import socket
 
 
 def _resolve_ip_addresses(hostname: str, port: int) -> Set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -37,7 +38,24 @@ def _is_forbidden_ip_address(address: ipaddress.IPv4Address | ipaddress.IPv6Addr
     )
 
 
-def validate_public_url(url: str, allowed_schemes: Iterable[str] = ("http", "https")) -> str:
+def _should_enforce_public_network(require_public_network: bool | None) -> bool:
+    if require_public_network is not None:
+        return require_public_network
+
+    try:
+        from src.config.config import global_config
+
+        return global_config.webui.enforce_public_outbound_url
+    except (AttributeError, ImportError, RuntimeError):
+        return True
+
+
+def validate_public_url(
+    url: str,
+    allowed_schemes: Iterable[str] = ("http", "https"),
+    require_public_network: bool | None = None,
+) -> str:
+    """校验 WebUI 出站 URL，必要时要求目标解析到公网地址。"""
     normalized_url = url.strip()
     if not normalized_url:
         raise ValueError("URL 不能为空")
@@ -59,7 +77,9 @@ def validate_public_url(url: str, allowed_schemes: Iterable[str] = ("http", "htt
     if parsed.fragment:
         raise ValueError("URL 不允许包含片段")
 
-    if parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
+    enforce_public_network = _should_enforce_public_network(require_public_network)
+
+    if enforce_public_network and parsed.hostname.lower() in {"localhost", "localhost.localdomain"}:
         raise ValueError("不允许访问本地主机")
 
     try:
@@ -67,8 +87,9 @@ def validate_public_url(url: str, allowed_schemes: Iterable[str] = ("http", "htt
     except ValueError as exc:
         raise ValueError("URL 端口非法") from exc
 
-    for address in _resolve_ip_addresses(parsed.hostname, port):
-        if _is_forbidden_ip_address(address):
-            raise ValueError(f"禁止访问非公网地址: {address}")
+    if enforce_public_network:
+        for address in _resolve_ip_addresses(parsed.hostname, port):
+            if _is_forbidden_ip_address(address):
+                raise ValueError(f"禁止访问非公网地址: {address}")
 
     return normalized_url

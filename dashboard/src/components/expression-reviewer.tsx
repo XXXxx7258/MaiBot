@@ -2,7 +2,7 @@
  * 表达方式审核器弹窗组件
  * 
  * 功能：
- * 1. 分页显示待审核/已通过/已拒绝的表达方式
+ * 1. 分页显示待审核/已通过的表达方式
  * 2. 支持单条通过/拒绝
  * 3. 支持批量操作
  * 4. 冲突检测（防止与AI自动检查冲突）
@@ -67,18 +67,31 @@ import {
 import type { Expression, ReviewStats, ChatInfo, BatchReviewItem } from '@/types/expression'
 
 interface ExpressionReviewerProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  embedded?: boolean
+  className?: string
+  mode?: 'list' | 'quick'
+  onReviewed?: () => void
 }
 
-export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerProps) {
+export function ExpressionReviewer({
+  open = true,
+  onOpenChange = () => undefined,
+  embedded = false,
+  className,
+  mode,
+  onReviewed,
+}: ExpressionReviewerProps) {
   // 审核模式：list（列表模式）或 quick（快速审核模式）
-  const [reviewMode, setReviewMode] = useState<'list' | 'quick'>('list')
+  const [internalReviewMode, setInternalReviewMode] = useState<'list' | 'quick'>('list')
+  const reviewMode = mode ?? internalReviewMode
+  const showModeSwitcher = mode === undefined
   const [stats, setStats] = useState<ReviewStats | null>(null)
   const [expressions, setExpressions] = useState<Expression[]>([])
   
   // 快速审核模式状态
-  const [quickFilterType, setQuickFilterType] = useState<'unchecked' | 'passed' | 'rejected' | 'all'>('unchecked')
+  const [quickFilterType, setQuickFilterType] = useState<'unchecked' | 'passed' | 'all'>('unchecked')
   const [quickExpressions, setQuickExpressions] = useState<Expression[]>([])
   const quickExpressionsRef = useRef<Expression[]>([])
   const [quickCurrentIndex, setQuickCurrentIndex] = useState(0)
@@ -103,7 +116,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [jumpPage, setJumpPage] = useState('')
-  const [filterType, setFilterType] = useState<'unchecked' | 'passed' | 'rejected' | 'all'>('unchecked')
+  const [filterType, setFilterType] = useState<'unchecked' | 'passed' | 'all'>('unchecked')
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -252,17 +265,11 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
     } else if (quickFilterType === 'passed') {
       // 已通过：只能左滑改为拒绝
       return { left: true, right: false }
-    } else if (quickFilterType === 'rejected') {
-      // 已拒绝：只能右滑改为通过
-      return { left: false, right: true }
     } else {
       // 全部：智能判断
       if (!expr.checked) {
         // 未审核：双向
         return { left: true, right: true }
-      } else if (expr.rejected) {
-        // 已拒绝：只能右滑
-        return { left: false, right: true }
       } else {
         // 已通过：只能左滑
         return { left: true, right: false }
@@ -271,23 +278,23 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
   }, [quickFilterType])
 
   // 快速审核 - 执行审核操作
-  const handleQuickReview = useCallback(async (rejected: boolean) => {
+  const handleQuickReview = useCallback(async (approved: boolean) => {
     const currentExpr = quickExpressions[quickCurrentIndex]
     if (!currentExpr || isAnimatingRef.current) return
 
     const directions = getAllowedDirections(currentExpr)
-    if ((rejected && !directions.left) || (!rejected && !directions.right)) {
+    if ((!approved && !directions.left) || (approved && !directions.right)) {
       return
     }
 
     isAnimatingRef.current = true
-    swipeDirectionRef.current = rejected ? 'left' : 'right'
-    cardApi.start({ x: rejected ? -400 : 400, rotate: rejected ? -20 : 20, opacity: 0 })
+    swipeDirectionRef.current = approved ? 'right' : 'left'
+    cardApi.start({ x: approved ? 400 : -400, rotate: approved ? 20 : -20, opacity: 0 })
 
     try {
       const result = await batchReviewExpressions([{
         id: currentExpr.id,
-        rejected,
+        approved,
         require_unchecked: quickFilterType === 'unchecked',
       }])
 
@@ -302,8 +309,8 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
 
       if (result.data.results[0]?.success) {
         toast({
-          title: rejected ? '已拒绝' : '已通过',
-          description: `表达方式 #${currentExpr.id} ${rejected ? '已拒绝' : '已通过'}`,
+          title: approved ? '已通过' : '已删除',
+          description: `表达方式 #${currentExpr.id} ${approved ? '已通过' : '已删除'}`,
         })
         
         // 从列表中移除当前项
@@ -324,6 +331,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
           
           // 刷新统计
           loadStats()
+          onReviewed?.()
           
           // 如果列表为空且还有更多数据，加载下一页
           if (quickExpressions.length <= 1 && quickTotal > 1) {
@@ -361,7 +369,18 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
       cardApi.set({ x: 0, opacity: 1, rotate: 0 })
       isAnimatingRef.current = false
     }
-  }, [quickExpressions, quickCurrentIndex, isAnimatingRef, getAllowedDirections, quickFilterType, toast, loadStats, quickTotal, loadQuickList])
+  }, [
+    quickExpressions,
+    quickCurrentIndex,
+    isAnimatingRef,
+    getAllowedDirections,
+    quickFilterType,
+    toast,
+    loadStats,
+    onReviewed,
+    quickTotal,
+    loadQuickList,
+  ])
 
   // 拖拽开始
   const handleDragStart = useCallback((clientX: number, clientY: number) => {
@@ -424,7 +443,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
     const threshold = 100
     const currentX = cardSpring.x.get()
     if (Math.abs(currentX) > threshold && swipeDirectionRef.current) {
-      handleQuickReview(swipeDirectionRef.current === 'left')
+      handleQuickReview(swipeDirectionRef.current === 'right')
     } else {
       // 回弹
       cardApi.start({ x: 0, rotate: 0, opacity: 1 })
@@ -493,13 +512,13 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
 
       if (e.key === 'ArrowLeft') {
         if (directions.left) {
-          handleQuickReview(true) // 拒绝
+          handleQuickReview(false) // 拒绝
         } else {
           triggerInvalidAnimation('left')
         }
       } else if (e.key === 'ArrowRight') {
         if (directions.right) {
-          handleQuickReview(false) // 通过
+          handleQuickReview(true) // 通过
         } else {
           triggerInvalidAnimation('right')
         }
@@ -566,12 +585,12 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
   }
 
   // 单条审核
-  const handleReview = async (id: number, rejected: boolean) => {
+  const handleReview = async (id: number, approved: boolean) => {
     try {
       setProcessingIds((prev) => new Set(prev).add(id))
       
       const result = await batchReviewExpressions([
-        { id, rejected, require_unchecked: filterType === 'unchecked' }
+        { id, approved, require_unchecked: filterType === 'unchecked' }
       ])
       
       if (!result.success) {
@@ -585,12 +604,13 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
 
       if (result.data.results[0]?.success) {
         toast({
-          title: rejected ? '已拒绝' : '已通过',
-          description: `表达方式 #${id} ${rejected ? '已拒绝' : '已通过'}`,
+          title: approved ? '已通过' : '已删除',
+          description: `表达方式 #${id} ${approved ? '已通过' : '已删除'}`,
         })
         // 刷新列表和统计
         loadList()
         loadStats()
+        onReviewed?.()
       } else {
         toast({
           title: '操作失败',
@@ -614,7 +634,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
   }
 
   // 批量审核
-  const handleBatchReview = async (rejected: boolean) => {
+  const handleBatchReview = async (approved: boolean) => {
     if (selectedIds.size === 0) {
       toast({
         title: '请选择',
@@ -629,7 +649,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
       
       const items: BatchReviewItem[] = Array.from(selectedIds).map((id) => ({
         id,
-        rejected,
+        approved,
         require_unchecked: filterType === 'unchecked',
       }))
       
@@ -654,6 +674,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
       setSelectedIds(new Set())
       loadList()
       loadStats()
+      onReviewed?.()
     } catch (error) {
       toast({
         title: '批量审核失败',
@@ -705,14 +726,6 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
         <Badge variant="outline" className="gap-1">
           <Clock className="h-3 w-3" />
           待审核
-        </Badge>
-      )
-    }
-    if (expr.rejected) {
-      return (
-        <Badge variant="destructive" className="gap-1">
-          <XCircle className="h-3 w-3" />
-          已拒绝
         </Badge>
       )
     }
@@ -790,14 +803,41 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl w-[95vw] sm:w-full h-[90vh] sm:h-[85vh] flex flex-col p-0" hideCloseButton>
-        {/* 浏览器标签页风格的模式切换器 */}
+  const renderListHeaderTitle = () => {
+    if (embedded) {
+      return null
+    }
+    return <DialogTitle className="text-lg sm:text-xl">表达方式审核</DialogTitle>
+  }
+
+  const renderListHeaderDescription = () => {
+    const description = '审核麦麦学习到的表达方式。通过人工审核的项目才会被使用（可在配置中调整），不通过的项目会被直接删除。'
+    if (embedded) {
+      return null
+    }
+    return <DialogDescription className="text-xs sm:text-sm">{description}</DialogDescription>
+  }
+
+  const handleReviewModeChange = (nextMode: 'list' | 'quick') => {
+    if (mode === undefined) {
+      setInternalReviewMode(nextMode)
+    }
+  }
+
+  const reviewerContent = (
+    <div
+      className={cn(
+        'flex min-h-0 flex-col overflow-hidden',
+        embedded ? 'h-full rounded-lg border bg-card' : 'h-full',
+        className
+      )}
+    >
+      {/* 浏览器标签页风格的模式切换器 */}
+      {showModeSwitcher && (
         <div className="flex items-end bg-muted/30 px-2 pt-2 shrink-0">
           {/* 列表模式标签 */}
           <button
-            onClick={() => setReviewMode('list')}
+            onClick={() => handleReviewModeChange('list')}
             className={cn(
               'group relative flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-all',
               'hover:bg-background/50',
@@ -815,7 +855,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
           
           {/* 快速审核标签 */}
           <button
-            onClick={() => setReviewMode('quick')}
+            onClick={() => handleReviewModeChange('quick')}
             className={cn(
               'group relative flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-t-lg transition-all',
               'hover:bg-background/50',
@@ -836,48 +876,43 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
           
           {/* 右侧空白区域和关闭按钮 */}
           <div className="flex-1 border-b border-border" />
-          <button
-            onClick={() => onOpenChange(false)}
-            className="mb-[1px] p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {!embedded && (
+            <button
+              onClick={() => onOpenChange(false)}
+              className="mb-[1px] p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
+      )}
 
         {/* 列表模式内容 */}
         {reviewMode === 'list' && (
           <>
-        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-4 border-b shrink-0">
-          <DialogTitle className="text-lg sm:text-xl">表达方式审核</DialogTitle>
-          <DialogDescription className="text-xs sm:text-sm">
-            审核麦麦学习到的表达方式。通过审核的项目才会被使用（可在配置中调整），被拒绝的项目永远不会被使用。
-          </DialogDescription>
+        <DialogHeader className={cn('px-4 sm:px-6 border-b shrink-0', embedded ? 'py-2' : 'pt-4 sm:pt-6 pb-3')}>
+          {renderListHeaderTitle()}
+          {renderListHeaderDescription()}
           
           {/* 统计卡片 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mt-4">
-            <div className="rounded-lg border p-2 sm:p-3 text-center">
-              <div className="text-xl sm:text-2xl font-bold text-orange-500">
+          <div className={cn('grid grid-cols-3 gap-2', !embedded && 'mt-3')}>
+            <div className="flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border bg-background/50 px-3">
+              <div className="truncate text-xs text-muted-foreground">待审核</div>
+              <div className="text-sm font-semibold leading-none tabular-nums text-orange-500">
                 {statsLoading ? '-' : stats?.unchecked ?? 0}
               </div>
-              <div className="text-xs text-muted-foreground">待审核</div>
             </div>
-            <div className="rounded-lg border p-2 sm:p-3 text-center">
-              <div className="text-xl sm:text-2xl font-bold text-green-500">
+            <div className="flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border bg-background/50 px-3">
+              <div className="truncate text-xs text-muted-foreground">已通过</div>
+              <div className="text-sm font-semibold leading-none tabular-nums text-green-500">
                 {statsLoading ? '-' : stats?.passed ?? 0}
               </div>
-              <div className="text-xs text-muted-foreground">已通过</div>
             </div>
-            <div className="rounded-lg border p-2 sm:p-3 text-center">
-              <div className="text-xl sm:text-2xl font-bold text-red-500">
-                {statsLoading ? '-' : stats?.rejected ?? 0}
-              </div>
-              <div className="text-xs text-muted-foreground">已拒绝</div>
-            </div>
-            <div className="rounded-lg border p-2 sm:p-3 text-center">
-              <div className="text-xl sm:text-2xl font-bold text-blue-500">
+            <div className="flex h-9 min-w-0 items-center justify-between gap-2 rounded-md border bg-background/50 px-3">
+              <div className="truncate text-xs text-muted-foreground">总计</div>
+              <div className="text-sm font-semibold leading-none tabular-nums text-blue-500">
                 {statsLoading ? '-' : stats?.total ?? 0}
               </div>
-              <div className="text-xs text-muted-foreground">总计</div>
             </div>
           </div>
         </DialogHeader>
@@ -889,7 +924,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
             onValueChange={(v) => setFilterType(v as typeof filterType)}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="unchecked" className="gap-1 text-xs sm:text-sm px-1 sm:px-3">
                 <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="hidden sm:inline">待审核</span>
@@ -901,12 +936,6 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                 <span className="hidden sm:inline">已通过</span>
                 <span className="sm:hidden">通过</span>
                 <span className="hidden sm:inline">({stats?.passed ?? 0})</span>
-              </TabsTrigger>
-              <TabsTrigger value="rejected" className="gap-1 text-xs sm:text-sm px-1 sm:px-3">
-                <XCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">已拒绝</span>
-                <span className="sm:hidden">拒绝</span>
-                <span className="hidden sm:inline">({stats?.rejected ?? 0})</span>
               </TabsTrigger>
               <TabsTrigger value="all" className="gap-1 text-xs sm:text-sm px-1 sm:px-3">
                 <span>全部</span>
@@ -953,7 +982,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                       variant="default"
                       size="sm"
                       className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
-                      onClick={() => handleBatchReview(false)}
+                      onClick={() => handleBatchReview(true)}
                       disabled={loading}
                     >
                       <CheckCircle2 className="h-4 w-4 mr-1" />
@@ -965,7 +994,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                       variant="destructive"
                       size="sm"
                       className="flex-1 sm:flex-none"
-                      onClick={() => handleBatchReview(true)}
+                      onClick={() => handleBatchReview(false)}
                       disabled={loading}
                     >
                       <XCircle className="h-4 w-4 mr-1" />
@@ -980,26 +1009,12 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                     variant="destructive"
                     size="sm"
                     className="flex-1 sm:flex-none"
-                    onClick={() => handleBatchReview(true)}
+                    onClick={() => handleBatchReview(false)}
                     disabled={loading}
                   >
                     <XCircle className="h-4 w-4 mr-1" />
                     <span className="hidden sm:inline">批量改为拒绝</span>
                     <span className="sm:hidden">改为拒绝</span>
-                    ({selectedIds.size})
-                  </Button>
-                ) : filterType === 'rejected' ? (
-                  // 已拒绝：只显示批量改为通过
-                  <Button
-                    variant="default"
-                    size="sm"
-                    className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
-                    onClick={() => handleBatchReview(false)}
-                    disabled={loading}
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-1" />
-                    <span className="hidden sm:inline">批量改为通过</span>
-                    <span className="sm:hidden">改为通过</span>
                     ({selectedIds.size})
                   </Button>
                 ) : (
@@ -1009,7 +1024,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                       variant="default"
                       size="sm"
                       className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
-                      onClick={() => handleBatchReview(false)}
+                      onClick={() => handleBatchReview(true)}
                       disabled={loading}
                     >
                       <CheckCircle2 className="h-4 w-4 mr-1" />
@@ -1021,7 +1036,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                       variant="destructive"
                       size="sm"
                       className="flex-1 sm:flex-none"
-                      onClick={() => handleBatchReview(true)}
+                      onClick={() => handleBatchReview(false)}
                       disabled={loading}
                     >
                       <XCircle className="h-4 w-4 mr-1" />
@@ -1133,7 +1148,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                             size="sm"
                             variant="outline"
                             className="text-green-600 hover:text-green-700 hover:bg-green-50 h-8 sm:h-9 px-2 sm:px-3"
-                            onClick={() => handleReview(expr.id, false)}
+                            onClick={() => handleReview(expr.id, true)}
                             disabled={processingIds.has(expr.id)}
                           >
                             <CheckCircle2 className="h-4 w-4 sm:mr-1" />
@@ -1143,7 +1158,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                             size="sm"
                             variant="outline"
                             className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 sm:h-9 px-2 sm:px-3"
-                            onClick={() => handleReview(expr.id, true)}
+                            onClick={() => handleReview(expr.id, false)}
                             disabled={processingIds.has(expr.id)}
                           >
                             <XCircle className="h-4 w-4 sm:mr-1" />
@@ -1155,43 +1170,21 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                           size="sm"
                           variant="outline"
                           className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 sm:h-9 px-2 sm:px-3"
-                          onClick={() => handleReview(expr.id, true)}
+                          onClick={() => handleReview(expr.id, false)}
                           disabled={processingIds.has(expr.id)}
                         >
                           <XCircle className="h-4 w-4 sm:mr-1" />
                           <span className="hidden sm:inline">改为拒绝</span>
                         </Button>
-                      ) : filterType === 'rejected' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-green-600 hover:text-green-700 hover:bg-green-50 h-8 sm:h-9 px-2 sm:px-3"
-                          onClick={() => handleReview(expr.id, false)}
-                          disabled={processingIds.has(expr.id)}
-                        >
-                          <CheckCircle2 className="h-4 w-4 sm:mr-1" />
-                          <span className="hidden sm:inline">改为通过</span>
-                        </Button>
                       ) : (
                         // all 模式下显示两个按钮
                         <>
-                          {expr.rejected ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-green-600 hover:text-green-700 hover:bg-green-50 h-8 sm:h-9 px-2 sm:px-3"
-                              onClick={() => handleReview(expr.id, false)}
-                              disabled={processingIds.has(expr.id)}
-                            >
-                              <CheckCircle2 className="h-4 w-4 sm:mr-1" />
-                              <span className="hidden sm:inline">改为通过</span>
-                            </Button>
-                          ) : expr.checked ? (
+                          {expr.checked ? (
                             <Button
                               size="sm"
                               variant="outline"
                               className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 sm:h-9 px-2 sm:px-3"
-                              onClick={() => handleReview(expr.id, true)}
+                              onClick={() => handleReview(expr.id, false)}
                               disabled={processingIds.has(expr.id)}
                             >
                               <XCircle className="h-4 w-4 sm:mr-1" />
@@ -1203,7 +1196,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                                 size="sm"
                                 variant="outline"
                                 className="text-green-600 hover:text-green-700 hover:bg-green-50 h-8 sm:h-9 px-2 sm:px-3"
-                                onClick={() => handleReview(expr.id, false)}
+                                onClick={() => handleReview(expr.id, true)}
                                 disabled={processingIds.has(expr.id)}
                               >
                                 <CheckCircle2 className="h-4 w-4 sm:mr-1" />
@@ -1213,7 +1206,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                                 size="sm"
                                 variant="outline"
                                 className="text-red-600 hover:text-red-700 hover:bg-red-50 h-8 sm:h-9 px-2 sm:px-3"
-                                onClick={() => handleReview(expr.id, true)}
+                                onClick={() => handleReview(expr.id, false)}
                                 disabled={processingIds.has(expr.id)}
                               >
                                 <XCircle className="h-4 w-4 sm:mr-1" />
@@ -1348,9 +1341,6 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                   <span className="text-muted-foreground">
                     已通过: <span className="font-medium text-green-500">{stats?.passed ?? 0}</span>
                   </span>
-                  <span className="text-muted-foreground">
-                    已拒绝: <span className="font-medium text-red-500">{stats?.rejected ?? 0}</span>
-                  </span>
                 </div>
                 <Button
                   variant="outline"
@@ -1372,7 +1362,7 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                 onValueChange={(v) => setQuickFilterType(v as typeof quickFilterType)}
                 className="w-full"
               >
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="unchecked" className="gap-1 text-xs sm:text-sm">
                     <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">待审核</span>
@@ -1382,11 +1372,6 @@ export function ExpressionReviewer({ open, onOpenChange }: ExpressionReviewerPro
                     <CheckCircle2 className="h-3 w-3 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">已通过</span>
                     <span className="sm:hidden">通过</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="rejected" className="gap-1 text-xs sm:text-sm">
-                    <XCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">已拒绝</span>
-                    <span className="sm:hidden">拒绝</span>
                   </TabsTrigger>
                   <TabsTrigger value="all" className="gap-1 text-xs sm:text-sm">
                     全部
@@ -1672,7 +1657,7 @@ if (isCurrent) {
                               'w-16 h-16 rounded-full border-2 shadow-lg transition-all active:scale-95',
                               !directions.left ? 'opacity-30 cursor-not-allowed' : 'hover:bg-red-50 hover:text-red-600 hover:border-red-200'
                             )}
-                            onClick={() => directions.left && handleQuickReview(true)}
+                            onClick={() => directions.left && handleQuickReview(false)}
                             disabled={!directions.left || isAnimatingRef.current}
                           >
                             <XCircle className="h-8 w-8" />
@@ -1684,7 +1669,7 @@ if (isCurrent) {
                               'w-16 h-16 rounded-full border-2 shadow-lg transition-all active:scale-95',
                               !directions.right ? 'opacity-30 cursor-not-allowed' : 'hover:bg-green-50 hover:text-green-600 hover:border-green-200'
                             )}
-                            onClick={() => directions.right && handleQuickReview(false)}
+                            onClick={() => directions.right && handleQuickReview(true)}
                             disabled={!directions.right || isAnimatingRef.current}
                           >
                             <CheckCircle2 className="h-8 w-8" />
@@ -1720,6 +1705,17 @@ if (isCurrent) {
             </div>
           </div>
         )}
+    </div>
+  )
+
+  if (embedded) {
+    return reviewerContent
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl w-[95vw] sm:w-full h-[90vh] sm:h-[85vh] flex flex-col p-0" hideCloseButton>
+        {reviewerContent}
       </DialogContent>
     </Dialog>
   )

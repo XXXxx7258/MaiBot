@@ -68,11 +68,9 @@ export interface ExpressionConfig {
   expression_manual_reflect: boolean
   manual_reflect_operator_id: TargetItem | null
   allow_reflect: TargetItem[]
-  expression_self_reflect: boolean
-  expression_auto_check_interval: number
-  expression_auto_check_count: number
-  expression_auto_check_custom_criteria: string[]
   expression_checked_only: boolean
+  expression_self_reflect: boolean
+  max_expression_learner: number
   all_global_jargon?: boolean
   enable_jargon_explanation?: boolean
   jargon_mode?: string

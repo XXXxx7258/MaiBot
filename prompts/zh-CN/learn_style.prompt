@@ -30,9 +30,9 @@
 [
   {{"situation": "AAAAA", "style": "BBBBB", "source_id": "3"}},
   {{"situation": "CCCC", "style": "DDDD", "source_id": "7"}}
-  {{"situation": "对某件事表示十分惊叹", "style": "使用 我嘞个xxxx", "source_id": "[消息编号]"}},
-  {{"situation": "表示讽刺的赞同，不讲道理", "style": "对对对", "source_id": "[消息编号]"}},
-  {{"situation": "当涉及游戏相关时，夸赞，略带戏谑意味", "style": "使用 这么强！", "source_id": "[消息编号]"}},
+  {{"situation": "对某件事表示十分惊叹", "style": "使用 我嘞个xxxx", "source_id": "3"}},
+  {{"situation": "表示讽刺的赞同，不讲道理", "style": "对对对", "source_id": "4"}},
+  {{"situation": "当涉及游戏相关时，夸赞，略带戏谑意味", "style": "使用 这么强！", "source_id": "5"}},
   {{"content": "词条", "source_id": "12"}},
   {{"content": "词条2", "source_id": "5"}}
 ]
@@ -41,9 +41,9 @@
 表达方式条目：
 - situation：表示“在什么情境下”的简短概括（不超过20个字）
 - style：表示对应的语言风格或常用表达（不超过20个字）
-- source_id：该表达方式对应的“来源行编号”，即上方聊天记录中方括号里的数字（例如 [3]），请只输出数字本身，不要包含方括号
+- source_id：该表达方式对应的来源编号，即上方聊天记录中的 source_id 数字（例如 [source_id:3] 对应 "3"），请只输出数字本身
 黑话jargon条目：
 - content:表示黑话的内容
-- source_id：该黑话对应的“来源行编号”，即上方聊天记录中方括号里的数字（例如 [3]），请只输出数字本身，不要包含方括号
+- source_id：该黑话对应的来源编号，即上方聊天记录中的 source_id 数字（例如 [source_id:3] 对应 "3"），请只输出数字本身
 
 现在请你输出 JSON：

@@ -14,7 +14,6 @@ from src.common.logger import get_logger
 from src.common.message_server.server import Server, get_global_server
 from src.config.config import config_manager, global_config
 from src.emoji_system.emoji_manager import emoji_manager
-from src.learners.expression_auto_check_task import ExpressionAutoCheckTask
 from src.manager.async_task_manager import async_task_manager
 from src.plugin_runtime.integration import get_plugin_runtime_manager
 from src.prompt.prompt_manager import prompt_manager
@@ -116,9 +115,6 @@ class MainSystem:
         from src.common.remote import TelemetryHeartBeatTask
 
         await async_task_manager.add_task(TelemetryHeartBeatTask())
-
-        # 添加表达方式自动检查任务
-        await async_task_manager.add_task(ExpressionAutoCheckTask())
 
         # 启动API服务器
         # start_api_server()

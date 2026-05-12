@@ -2258,6 +2258,49 @@ class ExpressionConfig(ConfigBase):
     __ui_label__ = "表达与黑话"
     __ui_icon__ = "pen-tool"
 
+    expression_checked_only: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "仅用人工检查表达",
+                "en_US": "Use human-reviewed expressions only",
+                "ja_JP": "人間が確認した表現のみ使用",
+            },
+            "x-widget": "switch",
+            "x-icon": "check",
+        },
+    )
+    """是否仅选择已由用户人工检查的表达方式"""
+
+    expression_self_reflect: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "优化表达方式学习",
+                "en_US": "Optimize expression learning",
+                "ja_JP": "表現学習を最適化",
+            },
+            "x-widget": "switch",
+            "x-icon": "sparkles",
+        },
+    )
+    """是否在表达学习写入前进行 AI 审核；开启后只有审核通过的表达方式会被写入。"""
+
+    max_expression_learner: int = Field(
+        default=3,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "表达学习最大并发",
+                "en_US": "Max expression learners",
+                "ja_JP": "表現学習の最大同時実行数",
+            },
+            "x-widget": "input",
+            "x-icon": "layers",
+            "advanced": True,
+        },
+    )
+    """所有聊天流合计允许同时运行的表达学习批次数；同一聊天流始终只允许一个批次。"""
+
     learning_list: list[LearningItem] = Field(
         default_factory=lambda: [
             LearningItem(
@@ -2293,64 +2336,6 @@ class ExpressionConfig(ConfigBase):
         },
     )
     """_wrap_表达学习互通组"""
-
-    expression_checked_only: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "仅用已检查表达",
-                "en_US": "Use checked expressions only",
-                "ja_JP": "確認済み表現のみ使用",
-            },
-            "x-widget": "switch",
-            "x-icon": "check",
-        },
-    )
-    """是否仅选择已检查且未拒绝的表达方式"""
-
-    expression_self_reflect: bool = Field(
-        default=True,
-        json_schema_extra={
-            "label": {
-                "zh_CN": "自动优化表达",
-                "en_US": "Auto-refine expressions",
-                "ja_JP": "表現を自動改善",
-            },
-            "x-widget": "switch",
-            "x-icon": "refresh-cw",
-        },
-    )
-    """是否启用自动表达优化"""
-
-    expression_auto_check_interval: int = Field(
-        default=900,
-        json_schema_extra={
-            "x-widget": "input",
-            "x-icon": "clock",
-            "advanced": True,
-        },
-    )
-    """表达方式自动检查的间隔时间（秒）"""
-
-    expression_auto_check_count: int = Field(
-        default=5,
-        json_schema_extra={
-            "x-widget": "input",
-            "x-icon": "hash",
-            "advanced": True,
-        },
-    )
-    """每次自动检查时随机选取的表达方式数量"""
-
-    expression_auto_check_custom_criteria: list[str] = Field(
-        default_factory=list,
-        json_schema_extra={
-            "x-widget": "custom",
-            "x-icon": "file-text",
-            "advanced": True,
-        },
-    )
-    """表达方式自动检查的额外自定义评估标准"""
 
 
 class JargonConfig(ConfigBase):
@@ -3368,6 +3353,21 @@ class WebUIConfig(ConfigBase):
         },
     )
     """是否启用安全Cookie（仅通过HTTPS传输，默认false）"""
+
+    enforce_public_outbound_url: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "强制公网出站 URL 校验",
+                "en_US": "Enforce public outbound URL check",
+                "ja_JP": "公開ネットワーク URL チェックを強制",
+            },
+            "x-widget": "switch",
+            "x-icon": "shield-alert",
+            "advanced": False,
+        },
+    )
+    """是否要求 WebUI 出站 URL 解析到公网地址；关闭后允许内网、本机或 TUN 代理地址，用于内网 LLM、反向代理等场景。"""
 
     enable_paragraph_content: bool = Field(
         default=False,
