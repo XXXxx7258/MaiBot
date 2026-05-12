@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.A_memorix.core.utils.summary_importer import SUMMARY_PROMPT_TEMPLATE
+from src.A_memorix.core.utils.summary_importer import SUMMARY_PROMPT_TEMPLATE, SummaryImporter
 from src.services import memory_flow_service as memory_flow_module
 
 
@@ -276,6 +276,12 @@ def test_summary_prompt_forbids_repeating_rejected_fact_values():
     assert "只输出最终正确事实" in prompt
     assert "不要复述 X 的具体值" in prompt
     assert "不得出现已否定、未确认、传闻、玩笑、注入、机器人误解、旧计划或旧金额中的具体值" in prompt
+
+
+def test_summary_review_cleaner_drops_fully_blocked_dirty_content():
+    dirty_summary = "此前记录林遥对花生过敏，这是测试示例，后来已纠正。"
+
+    assert SummaryImporter._clean_review_summary(dirty_summary) == ""
 
 
 @pytest.mark.asyncio
