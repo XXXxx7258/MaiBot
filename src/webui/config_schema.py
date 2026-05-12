@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Any, Dict, List, get_args, get_origin
 
 from pydantic_core import PydanticUndefined
@@ -27,6 +28,11 @@ AMEMORIX_BASIC_FIELDS: Dict[str, set[str]] = {
 
 class ConfigSchemaGenerator:
     @staticmethod
+    @lru_cache(maxsize=None)
+    def _get_class_field_docs(config_class: type[ConfigBase]) -> Dict[str, str]:
+        return config_class.get_class_field_docs()
+
+    @staticmethod
     def _build_label(label: str) -> Dict[str, str]:
         return {"zh_CN": label}
 
@@ -38,12 +44,13 @@ class ConfigSchemaGenerator:
     def generate_config_schema(cls, config_class: type[ConfigBase], include_nested: bool = True) -> Dict[str, Any]:
         fields: List[Dict[str, Any]] = []
         nested: Dict[str, Dict[str, Any]] = {}
+        field_docs = cls._get_class_field_docs(config_class)
 
         for field_name, field_info in config_class.model_fields.items():
             if field_name in {"field_docs", "_validate_any", "suppress_any_warning"}:
                 continue
 
-            field_schema = cls._build_field_schema(config_class, field_name, field_info.annotation, field_info)
+            field_schema = cls._build_field_schema(config_class, field_name, field_info.annotation, field_info, field_docs)
             fields.append(field_schema)
 
             if include_nested:
@@ -88,9 +95,13 @@ class ConfigSchemaGenerator:
 
     @classmethod
     def _build_field_schema(
-        cls, config_class: type[ConfigBase], field_name: str, annotation: Any, field_info: Any
+        cls,
+        config_class: type[ConfigBase],
+        field_name: str,
+        annotation: Any,
+        field_info: Any,
+        field_docs: Dict[str, str],
     ) -> Dict[str, Any]:
-        field_docs = config_class.get_class_field_docs()
         field_type = cls._map_field_type(annotation)
         raw_description = field_docs.get(field_name, field_info.description or "")
         # `_wrap_` 标记在配置类 docstring 中表示该说明应作为块级注释（独立成行）

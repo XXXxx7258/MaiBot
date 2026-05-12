@@ -3,6 +3,7 @@ import inspect
 import types
 
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List, Literal, Set, Tuple, Union, cast, get_args, get_origin
@@ -62,10 +63,15 @@ class AttrDocBase:
         # 读取文件内容并以 UTF-8 编码返回
         return Path(class_file).read_text(encoding="utf-8")
 
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _parse_class_source(class_source: str) -> ast.Module:
+        return ast.parse(class_source)
+
     @classmethod
     def _find_class_node(cls, class_source: str) -> ast.ClassDef:
         """在源代码中找到类定义的AST节点"""
-        tree = ast.parse(class_source)
+        tree = cls._parse_class_source(class_source)
         # 遍历 AST 中的所有节点
         for node in ast.walk(tree):
             # 查找类定义节点，且类名与当前类名匹配
