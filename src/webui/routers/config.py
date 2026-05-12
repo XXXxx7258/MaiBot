@@ -58,6 +58,7 @@ router = APIRouter(prefix="/config", tags=["config"], dependencies=[Depends(requ
 PROMPTS_DIR = PROJECT_ROOT / "prompts"
 CUSTOM_PROMPTS_DIR = PROJECT_ROOT / "data" / "custom_prompts"
 MAISAKA_PROMPT_PREVIEW_DIR = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
+_SCHEMA_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 class PromptFileInfo(BaseModel):
@@ -88,6 +89,14 @@ class PromptFileResponse(BaseModel):
     filename: str
     content: str
     customized: bool = False
+
+
+def _get_cached_schema(cache_key: str, config_class: type[ConfigBase], include_nested: bool = True) -> Dict[str, Any]:
+    schema = _SCHEMA_CACHE.get(cache_key)
+    if schema is None:
+        schema = ConfigSchemaGenerator.generate_config_schema(config_class, include_nested=include_nested)
+        _SCHEMA_CACHE[cache_key] = schema
+    return copy.deepcopy(schema)
 
 
 def _safe_prompt_path(language: str, filename: str) -> Path:
@@ -366,7 +375,7 @@ async def get_bot_config_schema():
     """获取麦麦主程序配置架构"""
     try:
         # Config 类包含所有子配置
-        schema = ConfigSchemaGenerator.generate_config_schema(Config)
+        schema = _get_cached_schema("bot", Config)
         return {"success": True, "schema": schema}
     except Exception as e:
         logger.error(f"获取配置架构失败: {e}")
@@ -377,7 +386,7 @@ async def get_bot_config_schema():
 async def get_model_config_schema():
     """获取模型配置架构（包含提供商和模型任务配置）"""
     try:
-        schema = ConfigSchemaGenerator.generate_config_schema(ModelConfig)
+        schema = _get_cached_schema("model", ModelConfig)
         return {"success": True, "schema": schema}
     except Exception as e:
         logger.error(f"获取模型配置架构失败: {e}")
@@ -439,7 +448,7 @@ async def get_config_section_schema(section_name: str):
 
     try:
         config_class = section_map[section_name]
-        schema = ConfigSchemaGenerator.generate_schema(config_class, include_nested=False)
+        schema = _get_cached_schema(f"section:{section_name}", config_class, include_nested=False)
         return {"success": True, "schema": schema}
     except Exception as e:
         logger.error(f"获取配置节架构失败: {e}")

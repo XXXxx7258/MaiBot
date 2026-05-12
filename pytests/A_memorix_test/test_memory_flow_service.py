@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.A_memorix.core.utils.summary_importer import SUMMARY_PROMPT_TEMPLATE, SummaryImporter
 from src.services import memory_flow_service as memory_flow_module
 
 
@@ -124,7 +125,10 @@ async def test_chat_summary_writeback_service_triggers_when_threshold_reached(mo
     assert payload["chat_id"] == "session-1"
     assert payload["text"] == ""
     assert payload["metadata"]["generate_from_chat"] is True
-    assert payload["metadata"]["context_length"] == 7
+    assert payload["metadata"]["context_length"] == 5
+    assert payload["metadata"]["configured_context_length"] == 7
+    assert payload["metadata"]["previous_trigger_message_count"] == 0
+    assert payload["metadata"]["pending_message_count"] == 5
     assert payload["metadata"]["trigger"] == "message_threshold"
     assert payload["user_id"] == "user-1"
     assert payload["group_id"] == "group-1"
@@ -208,6 +212,76 @@ async def test_chat_summary_writeback_service_restores_previous_trigger_count(mo
     _, payload = events[0]
     assert payload["external_id"] == "chat_auto_summary:session-1:8"
     assert service._states["session-1"].last_trigger_message_count == 8
+
+
+def test_chat_summary_writeback_effective_context_length_uses_pending_window():
+    assert (
+        memory_flow_module.ChatSummaryWritebackService._effective_context_length(
+            configured_context_length=50,
+            pending_message_count=12,
+        )
+        == 12
+    )
+    assert (
+        memory_flow_module.ChatSummaryWritebackService._effective_context_length(
+            configured_context_length=8,
+            pending_message_count=12,
+        )
+        == 8
+    )
+
+
+def test_chat_summary_writeback_counts_until_trigger_message(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_count_messages(**kwargs):
+        calls.append(kwargs)
+        return 12
+
+    monkeypatch.setattr(memory_flow_module, "count_messages", fake_count_messages)
+
+    assert (
+        memory_flow_module.ChatSummaryWritebackService._count_messages_until_trigger(
+            session_id="session-1",
+            message_time=123.45,
+        )
+        == 12
+    )
+    assert calls == [{"session_id": "session-1", "end_time": 123.45}]
+
+
+def test_summary_prompt_keeps_static_rules_before_chat_history():
+    prompt = SUMMARY_PROMPT_TEMPLATE.format(
+        bot_name="测试机器人",
+        personality_context="你的性格设定是：稳定。",
+        previous_summary_context="",
+        chat_history="用户：第一条动态消息",
+    )
+
+    rules_index = prompt.index("事实筛选规则")
+    chat_history_index = prompt.index("聊天记录内容")
+    dynamic_history_index = prompt.index("用户：第一条动态消息")
+
+    assert rules_index < chat_history_index < dynamic_history_index
+
+
+def test_summary_prompt_forbids_repeating_rejected_fact_values():
+    prompt = SUMMARY_PROMPT_TEMPLATE.format(
+        bot_name="测试机器人",
+        personality_context="你的性格设定是：稳定。",
+        previous_summary_context="",
+        chat_history="用户：不是猫毛，是青霉素",
+    )
+
+    assert "只输出最终正确事实" in prompt
+    assert "不要复述 X 的具体值" in prompt
+    assert "不得出现已否定、未确认、传闻、玩笑、注入、机器人误解、旧计划或旧金额中的具体值" in prompt
+
+
+def test_summary_review_cleaner_drops_fully_blocked_dirty_content():
+    dirty_summary = "此前记录林遥对花生过敏，这是测试示例，后来已纠正。"
+
+    assert SummaryImporter._clean_review_summary(dirty_summary) == ""
 
 
 @pytest.mark.asyncio

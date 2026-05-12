@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { Textarea } from '@/components/ui/textarea'
+import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
 import { resolveLocalizedText } from '@/lib/config-label'
 import type { FieldHookComponent } from '@/lib/field-hooks'
 import type { ConfigSchema, FieldSchema } from '@/types/config-schema'
@@ -66,7 +67,7 @@ export function createJsonFieldHook(options: JsonFieldHookOptions): FieldHookCom
     return (
       <div className="space-y-3 rounded-lg border bg-card p-4 sm:p-6">
         <div className="space-y-1">
-          <h3 className="text-base font-semibold">{label}</h3>
+          <h3 className={fieldTitleClassName(schema, 'text-base font-semibold')}>{label}</h3>
           {description && (
             <p className="text-sm text-muted-foreground whitespace-pre-line">{description}</p>
           )}

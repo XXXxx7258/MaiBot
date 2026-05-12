@@ -86,7 +86,6 @@ class ExpressionResponse(BaseModel):
     chat_name: Optional[str] = None
     create_date: Optional[float]
     checked: bool
-    rejected: bool
     modified_by: Optional[str] = None  # 'ai' 或 'user' 或 None
 
 
@@ -156,7 +155,6 @@ class ExpressionExportItem(BaseModel):
     last_active_time: Optional[str] = None
     create_time: Optional[str] = None
     checked: bool = False
-    rejected: bool = False
     modified_by: Optional[str] = None
 
 
@@ -367,8 +365,7 @@ def expression_to_response(expression: Expression, db_session: Optional[Any] = N
         chat_name=get_chat_name(chat_id, db_session) if chat_id else None,
         create_date=create_date,
         checked=expression.checked,
-        rejected=expression.rejected,
-        modified_by=expression.modified_by.value if expression.modified_by else None,
+        modified_by=expression.modified_by.value.lower() if expression.modified_by else None,
     )
 
 
@@ -383,7 +380,6 @@ def expression_to_export_item(expression: Expression) -> ExpressionExportItem:
         last_active_time=expression.last_active_time.isoformat() if expression.last_active_time else None,
         create_time=expression.create_time.isoformat() if expression.create_time else None,
         checked=expression.checked,
-        rejected=expression.rejected,
         modified_by=expression.modified_by.value if expression.modified_by else None,
     )
 
@@ -1042,7 +1038,6 @@ async def import_expressions(request: ExpressionImportRequest) -> ExpressionImpo
                     create_time=parse_export_datetime(item.create_time),
                     session_id=chat_id,
                     checked=item.checked,
-                    rejected=item.rejected,
                     modified_by=parse_modified_by(item.modified_by),
                 )
                 session.add(expression)
@@ -1169,6 +1164,12 @@ async def import_legacy_expressions(request: LegacyExpressionImportRequest) -> L
                     failed_count += 1
                     continue
 
+                legacy_checked = normalize_legacy_bool(row["checked"] if "checked" in expression_columns else None)
+                legacy_rejected = normalize_legacy_bool(row["rejected"] if "rejected" in expression_columns else None)
+                if legacy_checked and legacy_rejected:
+                    skipped_count += 1
+                    continue
+
                 dedupe_key = (situation, style)
                 for target_chat_id in target_chat_ids:
                     if target_chat_id not in existing_pairs_by_chat:
@@ -1199,8 +1200,7 @@ async def import_legacy_expressions(request: LegacyExpressionImportRequest) -> L
                             row["create_date"] if "create_date" in expression_columns else None
                         ),
                         session_id=target_chat_id,
-                        checked=normalize_legacy_bool(row["checked"] if "checked" in expression_columns else None),
-                        rejected=normalize_legacy_bool(row["rejected"] if "rejected" in expression_columns else None),
+                        checked=legacy_checked,
                         modified_by=parse_modified_by(
                             str(row["modified_by"]) if "modified_by" in expression_columns and row["modified_by"] else None
                         ),
@@ -1500,7 +1500,6 @@ class ReviewStatsResponse(BaseModel):
     total: int
     unchecked: int
     passed: int
-    rejected: int
     ai_checked: int
     user_checked: int
 
@@ -1510,10 +1509,10 @@ def apply_review_filter(statement: Any, filter_type: str) -> Any:
     if filter_type == "unchecked":
         return statement.where(col(Expression.checked).is_(False))
     if filter_type == "passed":
-        return statement.where(col(Expression.checked).is_(True), col(Expression.rejected).is_(False))
-    if filter_type == "rejected":
-        return statement.where(col(Expression.checked).is_(True), col(Expression.rejected).is_(True))
-    return statement
+        return statement.where(col(Expression.checked).is_(True))
+    if filter_type == "all":
+        return statement
+    return statement.where(col(Expression.id).is_(None))
 
 
 def count_expressions(session: Any, statement: Any) -> int:
@@ -1533,7 +1532,6 @@ async def get_review_stats() -> ReviewStatsResponse:
             total = count_expressions(session, select(Expression.id))
             unchecked = count_expressions(session, apply_review_filter(select(Expression.id), "unchecked"))
             passed = count_expressions(session, apply_review_filter(select(Expression.id), "passed"))
-            rejected = count_expressions(session, apply_review_filter(select(Expression.id), "rejected"))
             ai_checked = count_expressions(
                 session,
                 select(Expression.id).where(
@@ -1553,7 +1551,6 @@ async def get_review_stats() -> ReviewStatsResponse:
             total=total,
             unchecked=unchecked,
             passed=passed,
-            rejected=rejected,
             ai_checked=ai_checked,
             user_checked=user_checked,
         )
@@ -1579,7 +1576,7 @@ class ReviewListResponse(BaseModel):
 async def get_review_list(
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
-    filter_type: str = Query("unchecked", description="筛选类型: unchecked/passed/rejected/all"),
+    filter_type: str = Query("unchecked", description="筛选类型: unchecked/passed/all"),
     order: str = Query("latest", description="排序方式: latest/random"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     chat_id: Optional[str] = Query(None, description="聊天ID筛选"),
@@ -1590,7 +1587,7 @@ async def get_review_list(
     Args:
         page: 页码。
         page_size: 每页数量。
-        filter_type: 筛选类型，可选 unchecked、passed、rejected 或 all。
+        filter_type: 筛选类型，可选 unchecked、passed 或 all。
         order: 排序方式，可选 latest 或 random。
         search: 搜索关键词。
         chat_id: 聊天 ID 筛选条件。
@@ -1660,7 +1657,7 @@ class BatchReviewItem(BaseModel):
     """批量审核项"""
 
     id: int
-    rejected: bool
+    approved: bool
     require_unchecked: bool = True  # 前端保留的来源标记，人工审核提交时不再阻断覆盖
 
 
@@ -1733,14 +1730,16 @@ async def batch_review_expressions(
                         )
                         failed += 1
                         continue
-                    db_expression.checked = True
-                    db_expression.rejected = item.rejected
-                    db_expression.modified_by = ModifiedBy.USER
-                    db_expression.last_active_time = datetime.now()
-                    session.add(db_expression)
+                    if not item.approved:
+                        session.exec(delete(Expression).where(col(Expression.id) == item.id))
+                    else:
+                        db_expression.checked = True
+                        db_expression.modified_by = ModifiedBy.USER
+                        db_expression.last_active_time = datetime.now()
+                        session.add(db_expression)
 
                 results.append(
-                    BatchReviewResultItem(id=item.id, success=True, message="拒绝" if item.rejected else "通过")
+                    BatchReviewResultItem(id=item.id, success=True, message="通过" if item.approved else "拒绝并删除")
                 )
                 succeeded += 1
 

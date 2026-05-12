@@ -21,6 +21,7 @@ from src.common.logger import get_logger
 logger = get_logger("webui_dashboard_update")
 
 DASHBOARD_PACKAGE_NAME = "maibot-dashboard"
+PYTHON_OVERLAY_TARGET_ENV = "MAIBOT_PYTHON_OVERLAY_TARGET"
 PYPI_JSON_URL = f"https://pypi.org/pypi/{DASHBOARD_PACKAGE_NAME}/json"
 PYPI_PROJECT_URL = f"https://pypi.org/project/{DASHBOARD_PACKAGE_NAME}/"
 PYPI_CACHE_TTL_SECONDS = 60 * 60 * 6
@@ -211,6 +212,23 @@ def detect_package_runner() -> PackageRunner:
 
 
 def _build_update_command(runner: PackageRunner) -> list[str]:
+    overlay_target = os.getenv(PYTHON_OVERLAY_TARGET_ENV, "").strip()
+    if overlay_target:
+        base_command = (
+            ["uv", "pip", "install", "--python", sys.executable]
+            if runner == "uv" and shutil.which("uv")
+            else [sys.executable, "-m", "pip", "install"]
+        )
+        return [
+            *base_command,
+            "--upgrade",
+            "--target",
+            overlay_target,
+            "--no-compile",
+            "--no-warn-script-location",
+            DASHBOARD_PACKAGE_NAME,
+        ]
+
     if runner == "uv" and shutil.which("uv"):
         return ["uv", "pip", "install", "--python", sys.executable, "--upgrade", DASHBOARD_PACKAGE_NAME]
     return [sys.executable, "-m", "pip", "install", "--upgrade", DASHBOARD_PACKAGE_NAME]
@@ -240,6 +258,9 @@ async def auto_update_dashboard_if_needed() -> DashboardUpdateResult:
 
     update_runner = runner if runner != "unknown" else "pip"
     command = _build_update_command(update_runner)
+    overlay_target = os.getenv(PYTHON_OVERLAY_TARGET_ENV, "").strip()
+    if overlay_target:
+        logger.info(f"WebUI auto update target: {overlay_target}")
     logger.info(
         f"检测到 WebUI 新版本: {version_info.current_version} -> {version_info.latest_version}，"
         f"使用 {update_runner} 自动更新"

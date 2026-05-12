@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
 import type { FieldHookComponent } from '@/lib/field-hooks'
 
 import { createJsonFieldHook } from './JsonFieldHookFactory'
@@ -147,7 +148,7 @@ interface StringListHookOptions {
 }
 
 function createStringListHook(options: StringListHookOptions): FieldHookComponent {
-  return ({ onChange, value }) => {
+  return ({ onChange, schema, value }) => {
     const items = Array.isArray(value) ? value.map((item) => String(item ?? '')) : []
 
     const updateItems = (nextItems: string[]) => {
@@ -171,7 +172,9 @@ function createStringListHook(options: StringListHookOptions): FieldHookComponen
     return (
       <div className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <Label className="text-[15px] leading-6">{options.label}</Label>
+          <Label className={fieldTitleClassName(schema, 'text-[15px] leading-6')}>
+            {options.label}
+          </Label>
           <Button type="button" size="sm" variant="outline" onClick={addItem}>
             <Plus className="mr-2 h-4 w-4" />
             {options.addLabel}

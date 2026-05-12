@@ -72,7 +72,7 @@ chats = []
 [episode]
 enabled = true
 generation_enabled = true
-pending_batch_size = 20
+pending_batch_size = 50
 pending_max_retry = 3
 max_paragraphs_per_call = 20
 max_chars_per_call = 6000
@@ -278,7 +278,7 @@ chats = ["group:123", "user:456", "stream:abc"]
 
 - `episode.enabled` (默认 `true`)
 - `episode.generation_enabled` (默认 `true`)
-- `episode.pending_batch_size` (默认 `20`，部分路径默认 `12`)
+- `episode.pending_batch_size` (默认 `50`)
 - `episode.pending_max_retry` (默认 `3`)
 - `episode.max_paragraphs_per_call` (默认 `20`)
 - `episode.max_chars_per_call` (默认 `6000`)

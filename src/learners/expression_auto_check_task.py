@@ -4,8 +4,8 @@
 功能：
 1. 定期随机选取指定数量的表达方式
 2. 使用 LLM 进行评估
-3. 通过评估的：rejected=0, checked=1
-4. 未通过评估的：rejected=1, checked=1
+3. 通过评估的：保持 checked=0，等待人工审核
+4. 未通过评估的：直接删除
 """
 
 from typing import List
@@ -16,8 +16,7 @@ import random
 from sqlmodel import select
 
 from src.common.database.database import get_db_session
-from src.common.database.database_model import Expression
-from src.common.database.database_model import ModifiedBy
+from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.learners.expression_utils import check_expression_suitability
@@ -39,7 +38,7 @@ class ExpressionAutoCheckTask(AsyncTask):
 
     async def _select_expressions(self, count: int) -> List[Expression]:
         """
-        随机选择指定数量的未检查表达方式。
+        随机选择指定数量的未人工审核表达方式。
 
         Args:
             count: 需要选择的数量
@@ -56,13 +55,13 @@ class ExpressionAutoCheckTask(AsyncTask):
             unevaluated_expressions = [expr for expr in all_expressions if not expr.checked]
 
             if not unevaluated_expressions:
-                logger.info("没有未检查的表达方式")
+                logger.info("没有待人工审核的表达方式")
                 return []
 
             selected_count = min(count, len(unevaluated_expressions))
             selected = random.sample(unevaluated_expressions, selected_count)
 
-            logger.info(f"从 {len(unevaluated_expressions)} 条未检查表达方式中随机选择了 {selected_count} 条")
+            logger.info(f"从 {len(unevaluated_expressions)} 条待人工审核表达方式中随机选择了 {selected_count} 条")
             return selected
 
         except Exception as e:
@@ -92,10 +91,12 @@ class ExpressionAutoCheckTask(AsyncTask):
             with get_db_session() as session:
                 expr = session.exec(select(Expression).where(Expression.id == expression.id)).first()
                 if expr:
-                    expr.checked = True
-                    expr.rejected = not suitable
-                    expr.modified_by = ModifiedBy.AI
-                    session.add(expr)
+                    if suitable:
+                        expr.checked = False
+                        expr.modified_by = ModifiedBy.AI
+                        session.add(expr)
+                    else:
+                        session.delete(expr)
 
             status = "通过" if suitable else "不通过"
             # 保留这段注释，方便后续需要时恢复更详细的审核日志。

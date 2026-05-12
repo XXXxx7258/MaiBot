@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { DynamicConfigForm } from '@/components/dynamic-form/DynamicConfigForm'
+import { fieldTitleClassName } from '@/components/dynamic-form/fieldStyle'
 import { resolveLocalizedText } from '@/lib/config-label'
 import type { FieldHookComponent } from '@/lib/field-hooks'
 import type { ConfigSchema, FieldSchema } from '@/types/config-schema'
@@ -321,7 +322,7 @@ export function createListItemEditorHook(
       return (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{label}</CardTitle>
+            <CardTitle className={fieldTitleClassName(schema, 'text-base')}>{label}</CardTitle>
             <CardDescription>未获取到子配置 schema，无法渲染富编辑器。</CardDescription>
           </CardHeader>
         </Card>
@@ -334,7 +335,7 @@ export function createListItemEditorHook(
           <div className="flex items-start justify-between gap-3">
             <div className="flex min-w-0 items-center gap-2">
               {renderLucideIcon(iconName, 'h-5 w-5 flex-shrink-0 text-muted-foreground')}
-              <CardTitle className="truncate text-base">{label}</CardTitle>
+              <CardTitle className={fieldTitleClassName(schema, 'truncate text-base')}>{label}</CardTitle>
             </div>
             {shouldCollapse && options.collapseButtonDisplay === 'icon' && (
               <Button

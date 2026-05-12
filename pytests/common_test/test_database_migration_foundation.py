@@ -33,6 +33,8 @@ from src.common.database.migrations import (
     SQLiteUserVersionStore,
     V4_SCHEMA_VERSION,
     V5_SCHEMA_VERSION,
+    V6_SCHEMA_VERSION,
+    V7_SCHEMA_VERSION,
     build_default_migration_registry,
     build_default_schema_version_resolver,
     create_database_migration_bootstrapper,
@@ -851,6 +853,137 @@ def test_default_bootstrapper_adds_chat_session_route_columns_from_v5_database(t
     assert row["scope"] is None
 
 
+def test_default_bootstrapper_removes_expression_rejected_from_v6_database(tmp_path: Path) -> None:
+    """v6 -> v7 迁移应删除已拒绝表达方式，并移除 rejected 列。"""
+
+    engine = _create_sqlite_engine(tmp_path / "v6_to_v7.db")
+    bootstrapper = create_database_migration_bootstrapper(engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE expressions (
+                    id INTEGER NOT NULL,
+                    situation VARCHAR(255) NOT NULL,
+                    style VARCHAR(255) NOT NULL,
+                    content_list VARCHAR NOT NULL,
+                    count INTEGER NOT NULL,
+                    last_active_time DATETIME,
+                    create_time DATETIME,
+                    session_id VARCHAR(255),
+                    checked BOOLEAN NOT NULL,
+                    rejected BOOLEAN NOT NULL,
+                    modified_by VARCHAR(4),
+                    PRIMARY KEY (id)
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO expressions (
+                    id,
+                    situation,
+                    style,
+                    content_list,
+                    count,
+                    last_active_time,
+                    create_time,
+                    session_id,
+                    checked,
+                    rejected,
+                    modified_by
+                ) VALUES
+                    (1, '通过情景', '通过风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 1, 0, 'AI'),
+                    (2, '拒绝情景', '拒绝风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 1, 1, 'USER'),
+                    (3, '待审情景', '待审风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 0, 0, NULL)
+                """
+            )
+        )
+        SQLiteUserVersionStore().write_version(connection, V6_SCHEMA_VERSION)
+
+    migration_state = bootstrapper.prepare_database()
+
+    assert migration_state.resolved_version.version == LATEST_SCHEMA_VERSION
+
+    with engine.connect() as connection:
+        snapshot = SQLiteSchemaInspector().inspect(connection)
+        expression_ids = [
+            row["id"]
+            for row in connection.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM expressions
+                    ORDER BY id
+                    """
+                )
+            ).mappings()
+        ]
+        recorded_version = SQLiteUserVersionStore().read_version(connection)
+
+    assert recorded_version == LATEST_SCHEMA_VERSION
+    assert not snapshot.has_column("expressions", "rejected")
+    assert expression_ids == [1, 3]
+
+
+def test_default_bootstrapper_clears_ai_checked_expressions_from_v7_database(tmp_path: Path) -> None:
+    """v7 -> v8 迁移应将 AI 标记的 checked 表达方式改回待人工审核。"""
+
+    engine = _create_sqlite_engine(tmp_path / "v7_to_v8.db")
+    bootstrapper = create_database_migration_bootstrapper(engine)
+
+    with engine.begin() as connection:
+        _create_current_schema(connection)
+        connection.execute(
+            text(
+                """
+                INSERT INTO expressions (
+                    id,
+                    situation,
+                    style,
+                    content_list,
+                    count,
+                    last_active_time,
+                    create_time,
+                    session_id,
+                    checked,
+                    modified_by
+                ) VALUES
+                    (1, 'AI大写情景', 'AI大写风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 1, 'AI'),
+                    (2, 'AI小写情景', 'AI小写风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 1, 'ai'),
+                    (3, '人工情景', '人工风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 1, 'USER'),
+                    (4, 'AI待审情景', 'AI待审风格', '[]', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'chat-1', 0, 'AI')
+                """
+            )
+        )
+        SQLiteUserVersionStore().write_version(connection, V7_SCHEMA_VERSION)
+
+    migration_state = bootstrapper.prepare_database()
+
+    assert migration_state.resolved_version.version == LATEST_SCHEMA_VERSION
+
+    with engine.connect() as connection:
+        rows = {
+            row["id"]: row["checked"]
+            for row in connection.execute(
+                text(
+                    """
+                    SELECT id, checked
+                    FROM expressions
+                    ORDER BY id
+                    """
+                )
+            ).mappings()
+        }
+        recorded_version = SQLiteUserVersionStore().read_version(connection)
+
+    assert recorded_version == LATEST_SCHEMA_VERSION
+    assert rows == {1: 0, 2: 0, 3: 1, 4: 0}
+
+
 def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> None:
     """默认桥接器应能把旧版 ``0.x`` 数据库整体迁移到最新结构。"""
     engine = _create_sqlite_engine(tmp_path / "legacy_v1_to_v2.db")
@@ -919,6 +1052,7 @@ def test_default_bootstrapper_can_migrate_legacy_v1_database(tmp_path: Path) -> 
     assert snapshot.has_table("tool_records")
     assert not snapshot.has_table("action_records")
     assert not snapshot.has_column("mai_messages", "display_message")
+    assert not snapshot.has_column("expressions", "rejected")
 
     unpacked_raw_content = msgpack.unpackb(message_row["raw_content"], raw=False)
     additional_config = json.loads(message_row["additional_config"])
@@ -961,8 +1095,8 @@ def test_legacy_v1_migration_reports_table_progress(tmp_path: Path) -> None:
 
     migration_plan = manager.migrate(target_version=LATEST_SCHEMA_VERSION)
 
-    assert migration_plan.step_count() == 5
-    assert len(reporter_instances) == 5
+    assert migration_plan.step_count() == 7
+    assert len(reporter_instances) == 7
     reporter_events = reporter_instances[0].events
 
     assert reporter_events[0] == ("open", None, None, None)

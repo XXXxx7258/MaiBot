@@ -791,7 +791,7 @@ export async function getReviewStats(): Promise<ApiResponse<ReviewStats>> {
 export async function getReviewList(params: {
   page?: number
   page_size?: number
-  filter_type?: 'unchecked' | 'passed' | 'rejected' | 'all'
+  filter_type?: 'unchecked' | 'passed' | 'all'
   order?: 'latest' | 'random'
   search?: string
   chat_id?: string

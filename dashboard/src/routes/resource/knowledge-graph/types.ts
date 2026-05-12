@@ -36,6 +36,7 @@ export interface FlowNodeData {
   label: string
   content: string
   type: GraphNode['type']
+  layout?: 'radial' | 'evidence'
 }
 
 export type FlowNode = Node<FlowNodeData>

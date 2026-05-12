@@ -195,9 +195,24 @@ def _parse_optional_positive_int(value: Any, field_name: str) -> Optional[int]:
     try:
         parsed = int(text)
     except Exception:
-        raise ValueError(f"{field_name} 必须为整数")
+        raise ValueError(f"{field_name} 必须为整数") from None
     if parsed <= 0:
         raise ValueError(f"{field_name} 必须 > 0")
+    return parsed
+
+
+def _parse_optional_non_negative_int(value: Any, field_name: str) -> Optional[int]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    try:
+        parsed = int(text)
+    except Exception:
+        raise ValueError(f"{field_name} 必须为整数") from None
+    if parsed < 0:
+        raise ValueError(f"{field_name} 必须 >= 0")
     return parsed
 
 
@@ -422,8 +437,7 @@ class ImportTaskManager:
         return scripts_root() / "migrate_maibot_memory.py"
 
     def _default_maibot_source_db(self) -> Path:
-        # A_memorix/core/utils -> workspace root
-        return self._resolve_repo_root() / "MaiBot" / "data" / "MaiBot.db"
+        return self._resolve_repo_root() / "data" / "MaiBot.db"
 
     def _cfg(self, key: str, default: Any) -> Any:
         return self.plugin.get_config(key, default)
@@ -603,7 +617,7 @@ class ImportTaskManager:
         try:
             candidate.relative_to(root)
         except ValueError:
-            raise ValueError("路径越界：relative_path 超出白名单目录")
+            raise ValueError("路径越界：relative_path 超出白名单目录") from None
         if must_exist and not candidate.exists():
             raise ValueError(f"路径不存在: {candidate}")
         return candidate
@@ -947,7 +961,9 @@ class ImportTaskManager:
             _parse_optional_positive_int(payload.get("entity_embed_batch_size"), "entity_embed_batch_size") or 512
         )
         embed_workers = _parse_optional_positive_int(payload.get("embed_workers"), "embed_workers")
-        max_errors = _parse_optional_positive_int(payload.get("max_errors"), "max_errors") or 500
+        max_errors = _parse_optional_non_negative_int(payload.get("max_errors"), "max_errors")
+        if max_errors is None:
+            max_errors = 0
         log_every = _parse_optional_positive_int(payload.get("log_every"), "log_every") or 5000
         preview_limit = _parse_optional_positive_int(payload.get("preview_limit"), "preview_limit") or 20
 
@@ -2827,7 +2843,7 @@ class ImportTaskManager:
         try:
             data = json.loads(content)
         except Exception as e:
-            raise RuntimeError(f"JSON 解析失败: {e}")
+            raise RuntimeError(f"JSON 解析失败: {e}") from e
 
         schema = self._detect_json_schema(data)
         async with self._lock:

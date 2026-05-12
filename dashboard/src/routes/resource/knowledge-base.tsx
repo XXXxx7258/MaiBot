@@ -2,20 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   Database,
-  Gauge,
   Loader2,
   RefreshCw,
   RotateCcw,
   SlidersHorizontal,
-  Sparkles,
   Upload,
   CheckCircle2,
   CircleAlert,
   FolderOpen,
   HardDrive,
+  X,
 } from 'lucide-react'
 
-import { CodeEditor } from '@/components/CodeEditor'
 import { MemoryDeleteDialog } from '@/components/memory/MemoryDeleteDialog'
 import { MemoryEpisodeManager } from '@/components/memory/MemoryEpisodeManager'
 import { MemoryMaintenanceManager } from '@/components/memory/MemoryMaintenanceManager'
@@ -23,7 +21,6 @@ import { MemoryMiniTabs } from '@/components/memory/MemoryMiniTabs'
 import { MemoryProfileManager } from '@/components/memory/MemoryProfileManager'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Dialog,
   DialogContent,
@@ -63,6 +60,7 @@ import {
   getMemorySources,
   getMemoryTuningProfile,
   getMemoryTuningTasks,
+  rebuildMemoryRuntimeVectors,
   type MemoryDeleteRequestPayload,
   type MemoryImportChunkListPayload,
   type MemoryImportInputMode,
@@ -109,19 +107,79 @@ import { ImportTab } from './knowledge-base/tabs/ImportTab'
 import { TuningTab } from './knowledge-base/tabs/TuningTab'
 import { KnowledgeGraphPage } from './knowledge-graph'
 
+const DATE_TIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/
+const MEMORY_QUICK_START_DISMISSED_KEY = 'memory-quick-start-dismissed'
+const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/
+type MemoryConsoleTab = 'graph' | 'import' | 'tuning' | 'episodes' | 'profiles' | 'maintenance' | 'delete' | 'feedback'
+type LoadableMemoryTab = Extract<MemoryConsoleTab, 'import' | 'tuning' | 'delete' | 'feedback'>
+
+function parseMaibotPositiveInt(input: string, fieldName: string): number | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!POSITIVE_INTEGER_PATTERN.test(value)) {
+    throw new Error(`${fieldName} 必须填写正整数`)
+  }
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${fieldName} 超过可支持的整数范围`)
+  }
+  return parsed
+}
+
+function getMaibotDateTimeLocalTimestamp(input: string, fieldName: string): number | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!DATE_TIME_LOCAL_PATTERN.test(value)) {
+    throw new Error(`${fieldName}格式无效，请使用时间选择器填写`)
+  }
+  const timestamp = new Date(value).getTime()
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${fieldName}不是有效时间`)
+  }
+  return timestamp
+}
+
+function formatMaibotDateTimeLocalForApi(input: string, fieldName: string): string | undefined {
+  const value = input.trim()
+  if (!value) {
+    return undefined
+  }
+  if (!DATE_TIME_LOCAL_PATTERN.test(value)) {
+    throw new Error(`${fieldName}格式无效，请使用时间选择器填写`)
+  }
+  const date = new Date(value)
+  const timestamp = date.getTime()
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${fieldName}不是有效时间`)
+  }
+  return date.toISOString()
+}
+
 export function KnowledgeBasePage() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
   const [refreshingCheck, setRefreshingCheck] = useState(false)
+  const [vectorRebuildDialogOpen, setVectorRebuildDialogOpen] = useState(false)
+  const [vectorRebuilding, setVectorRebuilding] = useState(false)
+  const [vectorRebuildPreview, setVectorRebuildPreview] = useState<Record<string, number> | null>(null)
   const [creatingImport, setCreatingImport] = useState(false)
   const [creatingTuning, setCreatingTuning] = useState(false)
-  const [activeTab, setActiveTab] = useState<
-    'overview' | 'graph' | 'import' | 'tuning' | 'episodes' | 'profiles' | 'maintenance' | 'delete' | 'feedback'
-  >('overview')
-  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<string>>(() => new Set())
+  const [activeTab, setActiveTab] = useState<MemoryConsoleTab>('graph')
+  const [quickStartVisible, setQuickStartVisible] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true
+    }
+    return window.localStorage.getItem(MEMORY_QUICK_START_DISMISSED_KEY) !== 'true'
+  })
+  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(() => new Set(['graph']))
+  const [tabLoading, setTabLoading] = useState<Partial<Record<LoadableMemoryTab, boolean>>>({})
+  const loadedPanelDataRef = useRef<Set<LoadableMemoryTab>>(new Set())
 
   const [runtimeConfig, setRuntimeConfig] = useState<MemoryRuntimeConfigPayload | null>(null)
-  const [selfCheckReport, setSelfCheckReport] = useState<Record<string, unknown> | null>(null)
   const [importSettings, setImportSettings] = useState<MemoryImportSettings>({})
   const [importPathAliases, setImportPathAliases] = useState<Record<string, string>>({})
   const [importTasks, setImportTasks] = useState<MemoryImportTaskPayload[]>([])
@@ -190,6 +248,7 @@ export function KnowledgeBasePage() {
   const [maibotResetState, setMaibotResetState] = useState(false)
   const [maibotDryRun, setMaibotDryRun] = useState(false)
   const [maibotVerifyOnly, setMaibotVerifyOnly] = useState(false)
+  const maibotSourceDbDefaultAppliedRef = useRef(false)
 
   const [pathResolveAlias, setPathResolveAlias] = useState('raw')
   const [pathResolveRelativePath, setPathResolveRelativePath] = useState('')
@@ -243,56 +302,151 @@ export function KnowledgeBasePage() {
   const [tuningSampleSize, setTuningSampleSize] = useState('24')
   const [tuningTopKEval, setTuningTopKEval] = useState('20')
 
-  const loadPage = useCallback(async () => {
+  const setPanelLoading = useCallback((tab: LoadableMemoryTab, value: boolean) => {
+    setTabLoading((current) => ({ ...current, [tab]: value }))
+  }, [])
+
+  const loadRuntimeConfig = useCallback(async () => {
+    const runtimePayload = await getMemoryRuntimeConfig()
+    setRuntimeConfig(runtimePayload)
+  }, [])
+
+  const loadImportPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('import')) {
+      return
+    }
     try {
-      setLoading(true)
-      const [
-        runtimePayload,
-        importSettingsPayload,
-        pathAliasPayload,
-        importTaskPayload,
-        tuningProfilePayload,
-        tuningTaskPayload,
-        sourcePayload,
-        deleteOperationPayload,
-        feedbackCorrectionPayload,
-      ] = await Promise.all([
-        getMemoryRuntimeConfig(),
+      setPanelLoading('import', true)
+      const [importSettingsPayload, pathAliasPayload, importTaskPayload] = await Promise.all([
         getMemoryImportSettings(),
         getMemoryImportPathAliases(),
         getMemoryImportTasks(20),
-        getMemoryTuningProfile(),
-        getMemoryTuningTasks(20),
-        getMemorySources(),
-        getMemoryDeleteOperations(DELETE_OPERATION_FETCH_LIMIT),
-        getMemoryFeedbackCorrections({ limit: FEEDBACK_CORRECTION_FETCH_LIMIT }),
       ])
 
-      setRuntimeConfig(runtimePayload)
       setImportSettings(importSettingsPayload.settings ?? {})
       setImportPathAliases(pathAliasPayload.path_aliases ?? {})
       setImportTasks(importTaskPayload.items ?? [])
+      setSelectedImportTaskId((currentTaskId) => {
+        if (currentTaskId || (importTaskPayload.items ?? []).length === 0) {
+          return currentTaskId
+        }
+        const initialTaskId = String(importTaskPayload.items?.[0]?.task_id ?? '')
+        return initialTaskId || currentTaskId
+      })
+      setPathResolveAlias((currentAlias) => {
+        if (currentAlias) {
+          return currentAlias
+        }
+        const aliasKeys = Object.keys(pathAliasPayload.path_aliases ?? {})
+        return aliasKeys[0] ?? currentAlias
+      })
+      loadedPanelDataRef.current.add('import')
+    } catch (error) {
+      toast({
+        title: '加载导入数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('import', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadTuningPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('tuning')) {
+      return
+    }
+    try {
+      setPanelLoading('tuning', true)
+      const [tuningProfilePayload, tuningTaskPayload] = await Promise.all([
+        getMemoryTuningProfile(),
+        getMemoryTuningTasks(20),
+      ])
       setTuningProfile(tuningProfilePayload.profile ?? {})
       setTuningProfileToml(tuningProfilePayload.toml ?? '')
       setTuningTasks(tuningTaskPayload.items ?? [])
+      loadedPanelDataRef.current.add('tuning')
+    } catch (error) {
+      toast({
+        title: '加载调优数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('tuning', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadDeletePanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('delete')) {
+      return
+    }
+    try {
+      setPanelLoading('delete', true)
+      const [sourcePayload, deleteOperationPayload] = await Promise.all([
+        getMemorySources(),
+        getMemoryDeleteOperations(DELETE_OPERATION_FETCH_LIMIT),
+      ])
       setMemorySources(sourcePayload.items ?? [])
       setDeleteOperations(deleteOperationPayload.items ?? [])
+      loadedPanelDataRef.current.add('delete')
+    } catch (error) {
+      toast({
+        title: '加载删除数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('delete', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadFeedbackPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('feedback')) {
+      return
+    }
+    try {
+      setPanelLoading('feedback', true)
+      const feedbackCorrectionPayload = await getMemoryFeedbackCorrections({
+        limit: FEEDBACK_CORRECTION_FETCH_LIMIT,
+      })
       setFeedbackCorrections(feedbackCorrectionPayload.items ?? [])
-      if (!selectedImportTaskId && (importTaskPayload.items ?? []).length > 0) {
-        const initialTaskId = String(importTaskPayload.items?.[0]?.task_id ?? '')
-        if (initialTaskId) {
-          setSelectedImportTaskId(initialTaskId)
-        }
-      }
-      if (!maibotSourceDb && String(importSettingsPayload.settings?.maibot_source_db_default ?? '').trim()) {
-        setMaibotSourceDb(String(importSettingsPayload.settings?.maibot_source_db_default ?? '').trim())
-      }
-      if (!pathResolveAlias) {
-        const aliasKeys = Object.keys(pathAliasPayload.path_aliases ?? {})
-        if (aliasKeys.length > 0) {
-          setPathResolveAlias(aliasKeys[0])
-        }
-      }
+      loadedPanelDataRef.current.add('feedback')
+    } catch (error) {
+      toast({
+        title: '加载纠错历史失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('feedback', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadActiveTabData = useCallback(async (tab: MemoryConsoleTab, force = false) => {
+    switch (tab) {
+      case 'import':
+        await loadImportPanel(force)
+        break
+      case 'tuning':
+        await loadTuningPanel(force)
+        break
+      case 'delete':
+        await loadDeletePanel(force)
+        break
+      case 'feedback':
+        await loadFeedbackPanel(force)
+        break
+      default:
+        break
+    }
+  }, [loadDeletePanel, loadFeedbackPanel, loadImportPanel, loadTuningPanel])
+
+  const loadPage = useCallback(async () => {
+    try {
+      setLoading(true)
+      await loadRuntimeConfig()
+      await loadActiveTabData(activeTab, true)
     } catch (error) {
       toast({
         title: '加载长期记忆控制台失败',
@@ -302,16 +456,35 @@ export function KnowledgeBasePage() {
     } finally {
       setLoading(false)
     }
-  }, [maibotSourceDb, pathResolveAlias, selectedImportTaskId, toast])
+  }, [activeTab, loadActiveTabData, loadRuntimeConfig, toast])
 
   useEffect(() => {
-    void loadPage()
-  }, [loadPage])
-
-  useEffect(() => {
-    if (!['episodes', 'profiles', 'maintenance'].includes(activeTab)) {
-      return
+    let cancelled = false
+    const loadInitialRuntime = async () => {
+      try {
+        setLoading(true)
+        await loadRuntimeConfig()
+      } catch (error) {
+        if (!cancelled) {
+          toast({
+            title: '加载长期记忆运行状态失败',
+            description: error instanceof Error ? error.message : '未知错误',
+            variant: 'destructive',
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
     }
+    void loadInitialRuntime()
+    return () => {
+      cancelled = true
+    }
+  }, [loadRuntimeConfig, toast])
+
+  useEffect(() => {
     setVisitedMemoryTabs((current) => {
       if (current.has(activeTab)) {
         return current
@@ -320,7 +493,8 @@ export function KnowledgeBasePage() {
       next.add(activeTab)
       return next
     })
-  }, [activeTab])
+    void loadActiveTabData(activeTab)
+  }, [activeTab, loadActiveTabData])
 
   const runtimeBadges = useMemo(() => {
     if (!runtimeConfig) {
@@ -342,14 +516,6 @@ export function KnowledgeBasePage() {
         icon: HardDrive,
         className: 'border-sky-500/20 bg-sky-500/5',
         iconClassName: 'text-sky-500',
-      },
-      {
-        label: '自动保存',
-        value: runtimeConfig.auto_save ? '开启' : '关闭',
-        description: runtimeConfig.auto_save ? '运行数据会自动落盘' : '请留意手动保存',
-        icon: runtimeConfig.auto_save ? CheckCircle2 : CircleAlert,
-        className: runtimeConfig.auto_save ? 'border-primary/20 bg-primary/5' : 'border-muted-foreground/20 bg-muted/30',
-        iconClassName: runtimeConfig.auto_save ? 'text-primary' : 'text-muted-foreground',
       },
       {
         label: '数据目录',
@@ -457,6 +623,7 @@ export function KnowledgeBasePage() {
       setImportSettings(settingsPayload.settings ?? {})
       setImportPathAliases(pathAliasPayload.path_aliases ?? {})
       setImportErrorText('')
+      loadedPanelDataRef.current.add('import')
 
       if (nextTasks.length <= 0) {
         setSelectedImportTaskId('')
@@ -805,18 +972,36 @@ export function KnowledgeBasePage() {
   const submitMaibotMigrationImport = useCallback(async () => {
     try {
       setCreatingImport(true)
+      const sourceDb = maibotSourceDb.trim()
+      if (!sourceDb) {
+        throw new Error('请填写源数据库路径')
+      }
+      const timeFromTimestamp = getMaibotDateTimeLocalTimestamp(maibotTimeFrom, '起始时间')
+      const timeToTimestamp = getMaibotDateTimeLocalTimestamp(maibotTimeTo, '结束时间')
+      if (
+        timeFromTimestamp !== undefined &&
+        timeToTimestamp !== undefined &&
+        timeFromTimestamp > timeToTimestamp
+      ) {
+        throw new Error('起始时间不能晚于结束时间')
+      }
+      const startId = parseMaibotPositiveInt(maibotStartId, '起始 ID')
+      const endId = parseMaibotPositiveInt(maibotEndId, '结束 ID')
+      if (startId !== undefined && endId !== undefined && startId > endId) {
+        throw new Error('起始 ID 不能大于结束 ID')
+      }
       const result = await createMemoryMaibotMigrationImport({
-        source_db: maibotSourceDb || undefined,
-        time_from: maibotTimeFrom || undefined,
-        time_to: maibotTimeTo || undefined,
-        start_id: parseOptionalPositiveInt(maibotStartId),
-        end_id: parseOptionalPositiveInt(maibotEndId),
+        source_db: sourceDb,
+        time_from: formatMaibotDateTimeLocalForApi(maibotTimeFrom, '起始时间'),
+        time_to: formatMaibotDateTimeLocalForApi(maibotTimeTo, '结束时间'),
+        start_id: startId,
+        end_id: endId,
         stream_ids: parseCommaSeparatedList(maibotStreamIds),
         group_ids: parseCommaSeparatedList(maibotGroupIds),
         user_ids: parseCommaSeparatedList(maibotUserIds),
-        read_batch_size: parseOptionalPositiveInt(maibotReadBatchSize),
-        commit_window_rows: parseOptionalPositiveInt(maibotCommitWindowRows),
-        embed_workers: parseOptionalPositiveInt(maibotEmbedWorkers),
+        read_batch_size: parseMaibotPositiveInt(maibotReadBatchSize, '读取批大小'),
+        commit_window_rows: parseMaibotPositiveInt(maibotCommitWindowRows, '提交窗口行数'),
+        embed_workers: parseMaibotPositiveInt(maibotEmbedWorkers, '向量线程数'),
         no_resume: maibotNoResume,
         reset_state: maibotResetState,
         dry_run: maibotDryRun,
@@ -1014,26 +1199,35 @@ export function KnowledgeBasePage() {
     if (defaultChunkConcurrency && importCommonChunkConcurrency === '4') {
       setImportCommonChunkConcurrency(defaultChunkConcurrency)
     }
-    const defaultSourceDb = String(importSettings.maibot_source_db_default ?? '').trim()
-    if (defaultSourceDb && !maibotSourceDb.trim()) {
-      setMaibotSourceDb(defaultSourceDb)
-    }
   }, [
     importCommonChunkConcurrency,
     importCommonFileConcurrency,
     importSettings.default_chunk_concurrency,
     importSettings.default_file_concurrency,
-    importSettings.maibot_source_db_default,
-    maibotSourceDb,
   ])
 
   useEffect(() => {
+    const defaultSourceDb = String(importSettings.maibot_source_db_default ?? '').trim()
+    if (!defaultSourceDb || maibotSourceDbDefaultAppliedRef.current) {
+      return
+    }
+    maibotSourceDbDefaultAppliedRef.current = true
+    setMaibotSourceDb((currentSourceDb) => currentSourceDb.trim() ? currentSourceDb : defaultSourceDb)
+  }, [importSettings.maibot_source_db_default])
+
+  useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     if (!selectedImportTaskId && importTasks.length > 0) {
       void selectImportTask(importTasks[0].task_id)
     }
-  }, [importTasks, selectImportTask, selectedImportTaskId])
+  }, [activeTab, importTasks, selectImportTask, selectedImportTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     if (!selectedImportTaskId) {
       setSelectedImportTask(null)
       setSelectedImportFileId('')
@@ -1045,10 +1239,10 @@ export function KnowledgeBasePage() {
       return
     }
     void loadImportTaskDetail(selectedImportTaskId, true)
-  }, [importTasks, loadImportTaskDetail, selectImportTask, selectedImportTaskId])
+  }, [activeTab, importTasks, loadImportTaskDetail, selectImportTask, selectedImportTaskId])
 
   useEffect(() => {
-    if (!importAutoPolling) {
+    if (activeTab !== 'import' || !importAutoPolling) {
       return
     }
     const timerId = window.setInterval(() => {
@@ -1060,7 +1254,7 @@ export function KnowledgeBasePage() {
     return () => {
       window.clearInterval(timerId)
     }
-  }, [importAutoPolling, importPollInterval, loadImportTaskDetail, refreshImportQueue, selectedImportTaskId])
+  }, [activeTab, importAutoPolling, importPollInterval, loadImportTaskDetail, refreshImportQueue, selectedImportTaskId])
 
   // 统一 WebSocket 推送：作为轮询的实时增强；后端未广播时由轮询兜底
   const selectedImportTaskIdRef = useRef<string>('')
@@ -1069,6 +1263,9 @@ export function KnowledgeBasePage() {
   }, [selectedImportTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     let cancelled = false
     let unsubscribe: (() => Promise<void>) | undefined
     const handleEvent = (event: MemoryProgressEvent) => {
@@ -1098,7 +1295,7 @@ export function KnowledgeBasePage() {
         void unsubscribe()
       }
     }
-  }, [loadImportTaskDetail, refreshImportQueue])
+  }, [activeTab, loadImportTaskDetail, refreshImportQueue])
 
   const filteredSources = useMemo(() => {
     const keyword = sourceSearch.trim().toLowerCase()
@@ -1175,6 +1372,9 @@ export function KnowledgeBasePage() {
   }, [selectedDeleteOperation, selectedOperationId])
 
   useEffect(() => {
+    if (activeTab !== 'delete') {
+      return
+    }
     const operationId = selectedDeleteOperation?.operation_id
     if (!operationId) {
       setSelectedOperationDetail(null)
@@ -1214,7 +1414,7 @@ export function KnowledgeBasePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedDeleteOperation?.operation_id])
+  }, [activeTab, selectedDeleteOperation?.operation_id])
 
   const toggleSourceSelection = useCallback((source: string, checked: boolean) => {
     setSelectedSources((current) => {
@@ -1396,6 +1596,9 @@ export function KnowledgeBasePage() {
   }, [selectedFeedbackCorrection, selectedFeedbackTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'feedback') {
+      return
+    }
     const taskId = selectedFeedbackCorrection?.task_id
     if (!taskId) {
       setSelectedFeedbackTaskDetail(null)
@@ -1435,7 +1638,7 @@ export function KnowledgeBasePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedFeedbackCorrection?.task_id])
+  }, [activeTab, selectedFeedbackCorrection?.task_id])
 
   const selectedFeedbackResolved = useMemo<MemoryFeedbackCorrectionDetailTaskPayload | null>(() => {
     if (!selectedFeedbackCorrection) {
@@ -1605,7 +1808,6 @@ export function KnowledgeBasePage() {
     try {
       setRefreshingCheck(true)
       const payload = await refreshMemoryRuntimeSelfCheck()
-      setSelfCheckReport((payload.report ?? null) as Record<string, unknown> | null)
       const nextRuntime = await getMemoryRuntimeConfig()
       setRuntimeConfig(nextRuntime)
       toast({
@@ -1621,6 +1823,44 @@ export function KnowledgeBasePage() {
       })
     } finally {
       setRefreshingCheck(false)
+    }
+  }, [toast])
+
+  const openVectorRebuildDialog = useCallback(async () => {
+    try {
+      setVectorRebuildDialogOpen(true)
+      setVectorRebuildPreview(null)
+      const payload = await rebuildMemoryRuntimeVectors({ dry_run: true })
+      setVectorRebuildPreview(payload.counts ?? null)
+    } catch (error) {
+      toast({
+        title: '读取向量重建预览失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    }
+  }, [toast])
+
+  const confirmVectorRebuild = useCallback(async () => {
+    try {
+      setVectorRebuilding(true)
+      const payload = await rebuildMemoryRuntimeVectors({ dry_run: false })
+      const nextRuntime = await getMemoryRuntimeConfig()
+      setRuntimeConfig(nextRuntime)
+      setVectorRebuildDialogOpen(false)
+      toast({
+        title: payload.success ? '向量重建完成' : '向量重建未完全成功',
+        description: `已处理 ${payload.done ?? 0} 条，失败 ${payload.failed ?? 0} 条`,
+        variant: payload.success ? 'default' : 'destructive',
+      })
+    } catch (error) {
+      toast({
+        title: '向量重建失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setVectorRebuilding(false)
     }
   }, [toast])
 
@@ -1710,6 +1950,22 @@ export function KnowledgeBasePage() {
     }
   }, [toast])
 
+  const dismissQuickStart = useCallback(() => {
+    window.localStorage.setItem(MEMORY_QUICK_START_DISMISSED_KEY, 'true')
+    setQuickStartVisible(false)
+  }, [])
+
+  const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
+  const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
+  const renderPanelFallback = (tab: LoadableMemoryTab, label: string) => (
+    <TabsContent value={tab} className="space-y-4">
+      <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
+        <Loader2 className={cn('mr-2 h-4 w-4', tabLoading[tab] ? 'animate-spin' : '')} />
+        正在加载{label}...
+      </div>
+    </TabsContent>
+  )
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -1722,33 +1978,13 @@ export function KnowledgeBasePage() {
 
   return (
     <div className="flex h-full flex-col bg-gradient-to-b from-background via-background to-muted/15">
-      <div className="flex-none border-b bg-card/70 px-6 py-4 backdrop-blur">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary/80">
-              A_Memorix
-            </div>
-            <h1 className="mt-1 text-2xl font-bold leading-tight">长期记忆控制台</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-                      在这里完成自检、导入资料和检索调优——一站式管理记忆库
-            </p>
-          </div>
-
-          <div className="hidden">
-            <Button variant="outline" size="sm" onClick={() => setActiveTab('graph')}>
-              <Database className="mr-2 h-4 w-4" />
-              打开图谱
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => void loadPage()}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              刷新数据
-            </Button>
-          </div>
-        </div>
-      </div>
-
       <div className="flex-1 overflow-auto">
         <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6 px-6 py-6">
+          <div>
+            <h1 className="text-2xl font-bold leading-tight sm:text-3xl">长期记忆</h1>
+            <p className="mt-1 text-sm text-muted-foreground">管理麦麦的长期记忆和知识库</p>
+          </div>
+
           <div className="hidden">
             <Button variant="outline" size="sm" onClick={() => void loadPage()}>
               <RefreshCw className="mr-2 h-4 w-4" />
@@ -1757,50 +1993,60 @@ export function KnowledgeBasePage() {
           </div>
           {/* 运行时状态条 —— 紧凑、常驻、一眼看完 */}
           {runtimeBadges.length > 0 ? (
-            <div className="rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm backdrop-blur">
-              <div className="mb-3 flex items-center gap-2">
-                <div className="mr-auto flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  <Gauge className="h-3.5 w-3.5" />
-                  运行时状态
-                </div>
+            <div className="rounded-xl border border-border/60 bg-card/60 p-3 shadow-sm backdrop-blur">
+              <div className="mb-2 flex items-center justify-end gap-2">
+                {runtimeConfig?.vector_rebuild_required ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => void openVectorRebuildDialog()}
+                    disabled={vectorRebuilding}
+                  >
+                    <RotateCcw className={cn('mr-1 h-3 w-3', vectorRebuilding && 'animate-spin')} />
+                    重建向量
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="h-6 px-2 text-[11px]"
                   onClick={() => void loadPage()}
                 >
-                  <RefreshCw className="mr-1.5 h-3 w-3" />
+                  <RefreshCw className="mr-1 h-3 w-3" />
                   刷新数据
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 text-xs"
+                  className="h-6 px-2 text-[11px]"
                   onClick={() => void refreshSelfCheck()}
                   disabled={refreshingCheck}
                 >
-                  <RefreshCw className={cn('mr-1.5 h-3 w-3', refreshingCheck && 'animate-spin')} />
+                  <RefreshCw className={cn('mr-1 h-3 w-3', refreshingCheck && 'animate-spin')} />
                   自检
                 </Button>
               </div>
-              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {runtimeBadges.map((item) => (
                   <div
                     key={item.label}
                     className={cn(
-                      'flex items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors',
+                      'flex items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors',
                       item.className,
                     )}
                   >
-                    <div className="flex-none rounded-lg border bg-background/70 p-1.5 shadow-sm">
-                      <item.icon className={cn('h-4 w-4', item.iconClassName)} />
+                    <div className="flex-none rounded-md border bg-background/70 p-1 shadow-sm">
+                      <item.icon className={cn('h-3.5 w-3.5', item.iconClassName)} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[11px] font-medium text-muted-foreground">{item.label}</div>
-                      <div className="truncate text-sm font-semibold leading-snug" title={item.value}>
+                      <div className="truncate text-[10px] font-medium leading-tight text-muted-foreground">
+                        {item.label}
+                      </div>
+                      <div className="truncate text-xs font-semibold leading-tight" title={item.value}>
                         {item.value}
                       </div>
-                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      <div className="mt-0.5 hidden truncate text-[10px] text-muted-foreground xl:block">
                         {item.description}
                       </div>
                     </div>
@@ -1810,9 +2056,58 @@ export function KnowledgeBasePage() {
             </div>
           ) : null}
 
+          <Dialog open={vectorRebuildDialogOpen} onOpenChange={setVectorRebuildDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>重建全部向量</DialogTitle>
+                <DialogDescription>
+                  将使用当前 embedding 配置重新生成段落、实体和已启用的关系向量，期间检索会临时降级（会对嵌入模型造成大量请求！）
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-3 text-sm">
+                <Alert variant={runtimeConfig?.vector_rebuild_required ? 'destructive' : 'default'}>
+                  <AlertDescription>
+                    {runtimeConfig?.vector_rebuild_message || '这个操作会替换现有向量库，适合更换 embedding 模型或维度后执行。'}
+                  </AlertDescription>
+                </Alert>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {(['paragraphs', 'entities', 'relations'] as const).map((key) => (
+                    <div key={key} className="rounded-lg border bg-muted/30 p-3">
+                      <div className="text-xs text-muted-foreground">
+                        {key === 'paragraphs' ? '段落' : key === 'entities' ? '实体' : '关系'}
+                      </div>
+                      <div className="mt-1 text-xl font-semibold">{vectorRebuildPreview?.[key] ?? '-'}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setVectorRebuildDialogOpen(false)} disabled={vectorRebuilding}>
+                  取消
+                </Button>
+                <Button variant="destructive" onClick={() => void confirmVectorRebuild()} disabled={vectorRebuilding}>
+                  <RotateCcw className={cn('mr-2 h-4 w-4', vectorRebuilding && 'animate-spin')} />
+                  确认重建
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           {/* 快速开始 Hero —— 给新用户明确的"先做什么" */}
-          <div className="overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 shadow-sm">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          {quickStartVisible && (
+            <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 pr-12 shadow-sm">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-3 top-3 h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={dismissQuickStart}
+                aria-label="关闭快速开始"
+                title="关闭快速开始"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
               <div className="space-y-1.5 lg:max-w-sm">
                 <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-primary">
                   快速开始
@@ -1869,96 +2164,45 @@ export function KnowledgeBasePage() {
                   </div>
                 </button>
               </div>
+              </div>
             </div>
-          </div>
+          )}
 
           <Tabs
             value={activeTab}
             onValueChange={(value) => setActiveTab(value as typeof activeTab)}
             className="space-y-5"
           >
-            <div className="sticky top-0 z-10 -mx-6 border-b border-border/40 bg-background/85 px-6 pb-2 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-              <MemoryMiniTabs
-                items={[
-                  { value: 'overview', label: '概览', description: '运行状态与运行时摘要' },
-                  { value: 'graph', label: '图谱', description: '实体关系图与证据视图' },
-                  { value: 'import', label: '导入', description: '创建并管理导入任务' },
-                  { value: 'tuning', label: '调优', description: '检索策略调优' },
-                  { value: 'episodes', label: '情景记忆', description: '查看和重建情景记忆' },
-                  { value: 'profiles', label: '人物画像', description: '查询和维护人物画像' },
-                  { value: 'maintenance', label: '维护', description: '回收站与记忆状态维护' },
-                  { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
-                  { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
-                ]}
-                triggerClassName="px-4"
-              />
+            <div className="-mx-6 border-b border-border/40 bg-background/85 px-6 pb-2 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+              <div className="flex flex-wrap items-center gap-3">
+                <MemoryMiniTabs
+                  items={[
+                    { value: 'graph', label: '图谱', description: '实体关系图与证据视图' },
+                    { value: 'tuning', label: '调优', description: '检索策略调优' },
+                    { value: 'episodes', label: '情景记忆', description: '查看和重建情景记忆' },
+                    { value: 'profiles', label: '人物画像', description: '查询和维护人物画像' },
+                  ]}
+                  className="w-fit max-w-full"
+                  triggerClassName="px-4"
+                />
+                <MemoryMiniTabs
+                  items={[
+                    { value: 'import', label: '导入', description: '创建并管理导入任务' },
+                    { value: 'maintenance', label: '维护', description: '回收站与记忆状态维护' },
+                    { value: 'delete', label: '删除', description: '批量删除与历史回溯' },
+                    { value: 'feedback', label: '纠错历史', description: '查看反馈与回滚' },
+                  ]}
+                  className="w-fit max-w-full"
+                  triggerClassName="px-4"
+                />
+              </div>
             </div>
 
-            <TabsContent value="graph" className="h-[calc(100vh-220px)] min-h-[720px] overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm">
-              <KnowledgeGraphPage embedded onOpenConsole={() => setActiveTab('overview')} />
+            <TabsContent value="graph" className="h-[calc(100vh-132px)] min-h-[820px] overflow-hidden rounded-2xl border border-border/60 bg-background shadow-sm">
+              <KnowledgeGraphPage embedded onOpenConsole={() => setActiveTab('graph')} />
             </TabsContent>
 
-            <TabsContent value="overview" className="space-y-4">
-              <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-                <Card>
-                  <CardHeader className="flex flex-row items-start justify-between space-y-0">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        <Gauge className="h-4 w-4" />
-                        运行时自检
-                      </CardTitle>
-                      <CardDescription>用于确认 embedding、向量库与运行时状态是否一致</CardDescription>
-                    </div>
-                    <Button size="sm" onClick={() => void refreshSelfCheck()} disabled={refreshingCheck}>
-                      <RefreshCw className={`mr-2 h-4 w-4 ${refreshingCheck ? 'animate-spin' : ''}`} />
-                      重新自检
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    <Alert>
-                      <AlertDescription>
-                        长期记忆配置已移动到主程序配置，请在“主程序配置 / 长期记忆”中调整。
-                      </AlertDescription>
-                    </Alert>
-                    <CodeEditor
-                      value={JSON.stringify(selfCheckReport ?? runtimeConfig ?? {}, null, 2)}
-                      language="json"
-                      readOnly
-                      height="320px"
-                    />
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4" />
-                      关键指标
-                    </CardTitle>
-                    <CardDescription>用于快速判断是否需要补回向量或重新调优</CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4 text-sm">
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-lg border bg-muted/30 p-3">
-                        <div className="text-xs text-muted-foreground">待补回段落向量</div>
-                        <div className="mt-1 text-2xl font-semibold">{runtimeConfig?.paragraph_vector_backfill_pending ?? 0}</div>
-                      </div>
-                      <div className="rounded-lg border bg-muted/30 p-3">
-                        <div className="text-xs text-muted-foreground">失败补回任务</div>
-                        <div className="mt-1 text-2xl font-semibold">{runtimeConfig?.paragraph_vector_backfill_failed ?? 0}</div>
-                      </div>
-                    </div>
-                    <details className="rounded-lg border bg-muted/30 p-3" open>
-                      <summary className="cursor-pointer text-xs font-medium text-muted-foreground">当前调优配置</summary>
-                      <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">
-                        {JSON.stringify(tuningProfile, null, 2)}
-                      </pre>
-                    </details>
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-
+            {shouldRenderMemoryTab('import') && (shouldShowPanelFallback('import') ? renderPanelFallback('import', '导入数据') : (
             <ImportTab
               importCreateMode={importCreateMode}
               setImportCreateMode={setImportCreateMode}
@@ -2098,7 +2342,9 @@ export function KnowledgeBasePage() {
               importChunksLoading={importChunksLoading}
               selectedImportChunks={selectedImportChunks}
             />
+            ))}
 
+            {shouldRenderMemoryTab('tuning') && (shouldShowPanelFallback('tuning') ? renderPanelFallback('tuning', '调优数据') : (
             <TuningTab
               tuningObjective={tuningObjective}
               setTuningObjective={setTuningObjective}
@@ -2115,19 +2361,21 @@ export function KnowledgeBasePage() {
               tuningTasks={tuningTasks}
               applyBestTask={applyBestTask}
             />
+            ))}
 
             <TabsContent value="episodes" className="space-y-4">
-              {visitedMemoryTabs.has('episodes') ? <MemoryEpisodeManager /> : null}
+              {shouldRenderMemoryTab('episodes') ? <MemoryEpisodeManager /> : null}
             </TabsContent>
 
             <TabsContent value="profiles" className="space-y-4">
-              {visitedMemoryTabs.has('profiles') ? <MemoryProfileManager /> : null}
+              {shouldRenderMemoryTab('profiles') ? <MemoryProfileManager /> : null}
             </TabsContent>
 
             <TabsContent value="maintenance" className="space-y-4">
-              {visitedMemoryTabs.has('maintenance') ? <MemoryMaintenanceManager /> : null}
+              {shouldRenderMemoryTab('maintenance') ? <MemoryMaintenanceManager /> : null}
             </TabsContent>
 
+            {shouldRenderMemoryTab('delete') && (shouldShowPanelFallback('delete') ? renderPanelFallback('delete', '删除数据') : (
             <DeleteTab
               sourceSearch={sourceSearch}
               setSourceSearch={setSourceSearch}
@@ -2165,7 +2413,9 @@ export function KnowledgeBasePage() {
               selectedOperationItemPageCount={selectedOperationItemPageCount}
               pagedSelectedOperationItems={pagedSelectedOperationItems}
             />
+            ))}
 
+            {shouldRenderMemoryTab('feedback') && (shouldShowPanelFallback('feedback') ? renderPanelFallback('feedback', '纠错历史') : (
             <FeedbackTab
               feedbackSearch={feedbackSearch}
               setFeedbackSearch={setFeedbackSearch}
@@ -2196,6 +2446,7 @@ export function KnowledgeBasePage() {
               pagedFeedbackActionLogs={pagedFeedbackActionLogs}
               selectedFeedbackActionLogs={selectedFeedbackActionLogs}
             />
+            ))}
           </Tabs>
         </div>
       </div>

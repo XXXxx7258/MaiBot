@@ -58,9 +58,9 @@ BOT_CONFIG_PATH: Path = (CONFIG_DIR / "bot_config.toml").resolve().absolute()
 MODEL_CONFIG_PATH: Path = (CONFIG_DIR / "model_config.toml").resolve().absolute()
 LEGACY_ENV_PATH: Path = (PROJECT_ROOT / ".env").resolve().absolute()
 A_MEMORIX_LEGACY_CONFIG_PATH: Path = (CONFIG_DIR / "a_memorix.toml").resolve().absolute()
-MMC_VERSION: str = "1.0.0-pre.18"
-CONFIG_VERSION: str = "8.10.22"
-MODEL_CONFIG_VERSION: str = "1.16.1"
+MMC_VERSION: str = "1.0.0-pre.19"
+CONFIG_VERSION: str = "8.12.2"
+MODEL_CONFIG_VERSION: str = "1.17.0"
 
 logger = get_logger("config")
 

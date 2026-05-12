@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Any, Dict, List, get_args, get_origin
 
 from pydantic_core import PydanticUndefined
@@ -6,8 +7,31 @@ import inspect
 
 from src.config.config_base import ConfigBase
 
+AMEMORIX_BASIC_FIELDS: Dict[str, set[str]] = {
+    "AMemorixConfig": {"integration", "plugin", "embedding"},
+    "AMemorixIntegrationConfig": {
+        "enable_memory_query_tool",
+        "memory_query_default_limit",
+        "enable_person_profile_query_tool",
+    },
+    "AMemorixPluginConfig": {"enabled"},
+    "AMemorixEmbeddingConfig": {
+        "model_name",
+        "dimension",
+        "batch_size",
+        "max_concurrent",
+        "enable_cache",
+        "quantization_type",
+    },
+}
+
 
 class ConfigSchemaGenerator:
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _get_class_field_docs(config_class: type[ConfigBase]) -> Dict[str, str]:
+        return config_class.get_class_field_docs()
+
     @staticmethod
     def _build_label(label: str) -> Dict[str, str]:
         return {"zh_CN": label}
@@ -20,12 +44,13 @@ class ConfigSchemaGenerator:
     def generate_config_schema(cls, config_class: type[ConfigBase], include_nested: bool = True) -> Dict[str, Any]:
         fields: List[Dict[str, Any]] = []
         nested: Dict[str, Dict[str, Any]] = {}
+        field_docs = cls._get_class_field_docs(config_class)
 
         for field_name, field_info in config_class.model_fields.items():
             if field_name in {"field_docs", "_validate_any", "suppress_any_warning"}:
                 continue
 
-            field_schema = cls._build_field_schema(config_class, field_name, field_info.annotation, field_info)
+            field_schema = cls._build_field_schema(config_class, field_name, field_info.annotation, field_info, field_docs)
             fields.append(field_schema)
 
             if include_nested:
@@ -70,9 +95,13 @@ class ConfigSchemaGenerator:
 
     @classmethod
     def _build_field_schema(
-        cls, config_class: type[ConfigBase], field_name: str, annotation: Any, field_info: Any
+        cls,
+        config_class: type[ConfigBase],
+        field_name: str,
+        annotation: Any,
+        field_info: Any,
+        field_docs: Dict[str, str],
     ) -> Dict[str, Any]:
-        field_docs = config_class.get_class_field_docs()
         field_type = cls._map_field_type(annotation)
         raw_description = field_docs.get(field_name, field_info.description or "")
         # `_wrap_` 标记在配置类 docstring 中表示该说明应作为块级注释（独立成行）
@@ -110,7 +139,23 @@ class ConfigSchemaGenerator:
                 if hasattr(constraint, "le"):
                     schema["maxValue"] = constraint.le
 
+        cls._apply_a_memorix_visibility_policy(config_class, field_name, schema)
+
         return schema
+
+    @staticmethod
+    def _apply_a_memorix_visibility_policy(
+        config_class: type[ConfigBase],
+        field_name: str,
+        schema: Dict[str, Any],
+    ) -> None:
+        class_name = config_class.__name__
+        if not class_name.startswith("AMemorix"):
+            return
+
+        basic_fields = AMEMORIX_BASIC_FIELDS.get(class_name, set())
+        if field_name not in basic_fields:
+            schema["advanced"] = True
 
     @staticmethod
     def _extract_options(annotation: Any) -> List[str] | None:
