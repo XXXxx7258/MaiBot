@@ -374,15 +374,17 @@ export function ImportTab(props: ImportTabProps) {
                   <MemoryMiniTabs items={IMPORT_KIND_OPTIONS} />
                 </div>
 
-                <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">公共参数</div>
-                  <div className="text-xs text-muted-foreground">这些设置会应用到当前导入任务。一般保持默认即可，只在批量导入或排查问题时调整。</div>
+                <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+                <div className="rounded-md border border-border/60 bg-background/80 px-3 py-2">
+                  <div className="text-sm font-medium text-foreground">公共参数</div>
+                  <div className="mt-0.5 text-xs leading-relaxed text-foreground/75">这些设置会应用到当前导入任务。一般保持默认即可，只在批量导入或排查问题时调整。</div>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label>文件并发数</Label>
-                    <div className="text-xs text-muted-foreground">同时处理多少个文件；文件很多时再适当调高。</div>
+                  <div className="grid gap-2 rounded-md border bg-background/70 p-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center">
+                    <div className="min-w-0">
+                      <Label>文件并发数</Label>
+                      <div className="mt-0.5 text-xs text-muted-foreground">同时处理多少个文件；文件很多时再适当调高。</div>
+                    </div>
                     <Input
                       type="number"
                       min={1}
@@ -391,9 +393,11 @@ export function ImportTab(props: ImportTabProps) {
                       onChange={(event) => setImportCommonFileConcurrency(event.target.value)}
                     />
                   </div>
-                  <div className="space-y-1">
-                    <Label>分块并发数</Label>
-                    <div className="text-xs text-muted-foreground">单个文件内并行处理多少个分块；过高会增加资源占用。</div>
+                  <div className="grid gap-2 rounded-md border bg-background/70 p-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:items-center">
+                    <div className="min-w-0">
+                      <Label>分块并发数</Label>
+                      <div className="mt-0.5 text-xs text-muted-foreground">单个文件内并行处理多少个分块；过高会增加资源占用。</div>
+                    </div>
                     <Input
                       type="number"
                       min={1}
@@ -402,25 +406,25 @@ export function ImportTab(props: ImportTabProps) {
                       onChange={(event) => setImportCommonChunkConcurrency(event.target.value)}
                     />
                   </div>
-                  <div className="rounded-md border bg-background/70 p-3">
-                    <div className="flex items-center gap-2 text-sm">
+                  <div className="rounded-md border bg-background/70 px-2.5 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium leading-tight">
                       <Checkbox
                         checked={importCommonLlmEnabled}
                         onCheckedChange={(value) => setImportCommonLlmEnabled(Boolean(value))}
                       />
                       启用 LLM 抽取
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">需要模型参与抽取，质量更高但耗时更长。</div>
+                    <div className="mt-0.5 pl-6 text-[11px] leading-snug text-muted-foreground">需要模型参与抽取，质量更高但耗时更长。</div>
                   </div>
-                  <div className="rounded-md border bg-background/70 p-3">
-                    <div className="flex items-center gap-2 text-sm">
+                  <div className="rounded-md border bg-background/70 px-2.5 py-2">
+                    <div className="flex items-center gap-2 text-sm font-medium leading-tight">
                       <Checkbox
                         checked={importCommonChatLog}
                         onCheckedChange={(value) => setImportCommonChatLog(Boolean(value))}
                       />
                       按聊天日志解析
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">适合导入聊天记录，会尽量保留时间和对话上下文。</div>
+                    <div className="mt-0.5 pl-6 text-[11px] leading-snug text-muted-foreground">适合导入聊天记录，会尽量保留时间和对话上下文。</div>
                   </div>
                 </div>
 

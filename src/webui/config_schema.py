@@ -6,6 +6,24 @@ import inspect
 
 from src.config.config_base import ConfigBase
 
+AMEMORIX_BASIC_FIELDS: Dict[str, set[str]] = {
+    "AMemorixConfig": {"integration", "plugin", "embedding"},
+    "AMemorixIntegrationConfig": {
+        "enable_memory_query_tool",
+        "memory_query_default_limit",
+        "enable_person_profile_query_tool",
+    },
+    "AMemorixPluginConfig": {"enabled"},
+    "AMemorixEmbeddingConfig": {
+        "model_name",
+        "dimension",
+        "batch_size",
+        "max_concurrent",
+        "enable_cache",
+        "quantization_type",
+    },
+}
+
 
 class ConfigSchemaGenerator:
     @staticmethod
@@ -110,7 +128,23 @@ class ConfigSchemaGenerator:
                 if hasattr(constraint, "le"):
                     schema["maxValue"] = constraint.le
 
+        cls._apply_a_memorix_visibility_policy(config_class, field_name, schema)
+
         return schema
+
+    @staticmethod
+    def _apply_a_memorix_visibility_policy(
+        config_class: type[ConfigBase],
+        field_name: str,
+        schema: Dict[str, Any],
+    ) -> None:
+        class_name = config_class.__name__
+        if not class_name.startswith("AMemorix"):
+            return
+
+        basic_fields = AMEMORIX_BASIC_FIELDS.get(class_name, set())
+        if field_name not in basic_fields:
+            schema["advanced"] = True
 
     @staticmethod
     def _extract_options(annotation: Any) -> List[str] | None:

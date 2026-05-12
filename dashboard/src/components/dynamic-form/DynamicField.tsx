@@ -19,11 +19,12 @@ import { cn } from "@/lib/utils"
 import { resolveFieldLabel } from "@/lib/config-label"
 import type { FieldSchema } from "@/types/config-schema"
 
+import { fieldTitleClassName } from "./fieldStyle"
+
 export interface DynamicFieldProps {
   schema: FieldSchema
   value: unknown
   onChange: (value: unknown) => void
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   fieldPath?: string // 用于 Hook 系统（未来使用）
 }
 
@@ -158,11 +159,11 @@ export const DynamicField: React.FC<DynamicFieldProps> = ({
         const label = (
           <Label
             className={cn(
-              "inline-flex min-w-0 items-center gap-1.5 text-[15px] leading-6",
+              fieldTitleClassName(
+                schema,
+                "inline-flex min-w-0 items-center gap-1.5 text-[15px] leading-6",
+              ),
               descriptionDisplay === 'label-hover' && fieldDescription && "cursor-help",
-              schema.advanced
-                ? "text-sky-700 dark:text-sky-300"
-                : "text-foreground",
             )}
           >
             {renderIcon()}

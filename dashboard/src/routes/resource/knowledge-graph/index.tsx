@@ -746,8 +746,8 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
 
   return (
     <div className="flex h-full flex-col">
-      <div className={embedded ? 'flex-none border-b bg-card/60 px-4 py-4 backdrop-blur' : 'flex-none border-b bg-card/60 px-6 py-4 backdrop-blur'}>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className={embedded ? 'flex-none border-b bg-card/60 px-4 py-3 backdrop-blur' : 'flex-none border-b bg-card/60 px-6 py-4 backdrop-blur'}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           {!embedded && (
             <div>
               <h1 className="text-2xl font-bold">长期记忆图谱</h1>
@@ -774,8 +774,15 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
           </div>
         </div>
 
-        <div className="mt-4 flex flex-col gap-3">
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as GraphViewMode)}>
+              <TabsList className="h-10 flex-nowrap justify-start">
+                <TabsTrigger value="entity" className="whitespace-nowrap">实体关系图</TabsTrigger>
+                <TabsTrigger value="evidence" className="whitespace-nowrap">证据视图</TabsTrigger>
+              </TabsList>
+            </Tabs>
+
             <div className="flex flex-1 gap-2">
               <Input
                 value={searchInput}
@@ -811,13 +818,6 @@ export function KnowledgeGraphPage({ embedded = false, onOpenConsole }: Knowledg
               </Button>
             </div>
           </div>
-
-          <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as GraphViewMode)}>
-            <TabsList className="h-auto flex-wrap justify-start">
-              <TabsTrigger value="entity">实体关系图</TabsTrigger>
-              <TabsTrigger value="evidence">证据视图</TabsTrigger>
-            </TabsList>
-          </Tabs>
 
           {appliedSearchQuery ? (
             <div className="rounded-lg border bg-background/80 p-3">

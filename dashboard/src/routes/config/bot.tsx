@@ -74,6 +74,7 @@ const DEFAULT_VISIBLE_TAB_IDS = new Set([
   'chat',
   'expression',
   'a_memorix',
+  'visual',
 ])
 
 // ==================== Tab 分组类型与构建 ====================
@@ -400,9 +401,6 @@ function BotConfigPageContent() {
       }
       setHasUnsavedChanges(false)
       initialLoadRef.current = false
-      
-      // 同时加载源代码
-      await loadSourceCode()
     } catch (error) {
       console.error('加载配置失败:', error)
       toast({
@@ -413,7 +411,7 @@ function BotConfigPageContent() {
     } finally {
       setLoading(false)
     }
-  }, [toast, loadSourceCode, parseAndSetConfig])
+  }, [toast, parseAndSetConfig])
 
   useEffect(() => {
     loadConfig()
@@ -635,6 +633,9 @@ function BotConfigPageContent() {
   const handleReloadFromFile = async () => {
     cancelPendingAutoSave()
     await loadConfig()
+    if (editMode === 'source') {
+      await loadSourceCode()
+    }
     setHasUnsavedChanges(false)
     toast({
       title: '已刷新',

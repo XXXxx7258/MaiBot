@@ -371,26 +371,6 @@ class ChatConfig(ConfigBase):
     )
     """是否启用at必回复"""
 
-    enable_at: bool = Field(
-        default=True,
-        json_schema_extra={
-            "x-widget": "switch",
-            "x-icon": "at-sign",
-            "advanced": True,
-        },
-    )
-    """是否允许 replyer 使用 at[msg_id] 标记来发送真正的 at 消息"""
-
-    enable_reply_quote: bool = Field(
-        default=True,
-        json_schema_extra={
-            "x-widget": "switch",
-            "x-icon": "quote",
-            "advanced": True,
-        },
-    )
-    """是否启用回复时附带引用回复"""
-
     max_context_size: int = Field(
         default=40,
         json_schema_extra={
@@ -425,10 +405,45 @@ class ChatConfig(ConfigBase):
     )
     """私聊上下文长度"""
 
+    enable_at: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "允许发送 At",
+                "en_US": "Allow sending @",
+                "ja_JP": "@ 送信を許可",
+            },
+            "x-widget": "switch",
+            "x-icon": "at-sign",
+            "advanced": True,
+        },
+    )
+    """是否允许 replyer 使用 at[msg_id] 标记来发送真正的 at 消息"""
+
+    enable_reply_quote: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用引用回复",
+                "en_US": "Enable quoted replies",
+                "ja_JP": "引用返信を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "quote",
+            "advanced": True,
+        },
+    )
+    """是否启用回复时附带引用回复"""
+
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
         ge=0,
         json_schema_extra={
+            "label": {
+                "zh_CN": "规划器连续打断上限",
+                "en_US": "Planner consecutive interrupt limit",
+                "ja_JP": "プランナー連続中断上限",
+            },
             "x-widget": "input",
             "x-icon": "pause-circle",
             "advanced": True,
@@ -629,7 +644,7 @@ class TargetItem(ConfigBase):
 
 
 class AMemorixIntegrationConfig(ConfigBase):
-    """A_Memorix 与 Maisaka 集成配置"""
+    """记忆在聊天中的使用"""
 
     __ui_parent__ = "a_memorix"
 
@@ -638,14 +653,14 @@ class AMemorixIntegrationConfig(ConfigBase):
         json_schema_extra={
             "label": {
                 "zh_CN": "启用记忆检索",
-                "en_US": "Enable memory query",
+                "en_US": "Enable memory search",
                 "ja_JP": "記憶検索を有効化",
             },
             "x-widget": "switch",
             "x-icon": "database",
         },
     )
-    """是否启用 Maisaka 内置长期记忆检索工具 query_memory"""
+    """是否允许麦麦在聊天时查询长期记忆"""
 
     memory_query_default_limit: int = Field(
         default=5,
@@ -653,29 +668,29 @@ class AMemorixIntegrationConfig(ConfigBase):
         le=20,
         json_schema_extra={
             "label": {
-                "zh_CN": "默认返回条数",
-                "en_US": "Default result limit",
-                "ja_JP": "既定の返却件数",
+                "zh_CN": "默认检索条数",
+                "en_US": "Default memory result count",
+                "ja_JP": "既定の記憶検索件数",
             },
             "x-widget": "input",
             "x-icon": "hash",
         },
     )
-    """Maisaka 内置长期记忆检索工具 query_memory 的默认返回条数"""
+    """每次默认从长期记忆中取回多少条结果"""
 
     enable_person_profile_query_tool: bool = Field(
         default=True,
         json_schema_extra={
             "label": {
-                "zh_CN": "启用画像查询",
-                "en_US": "Enable profile query",
+                "zh_CN": "启用人物画像查询",
+                "en_US": "Enable profile search",
                 "ja_JP": "人物プロファイル検索を有効化",
             },
             "x-widget": "switch",
             "x-icon": "user-round-search",
         },
     )
-    """是否启用 Maisaka 内置人物画像查询工具 query_person_profile"""
+    """是否允许麦麦查询人物画像记忆"""
 
     enable_person_profile_injection: bool = Field(
         default=True,
@@ -959,19 +974,19 @@ class AMemorixIntegrationConfig(ConfigBase):
 
 
 class AMemorixPluginConfig(ConfigBase):
-    """A_Memorix 子系统状态"""
+    """记忆系统"""
 
     enabled: bool = Field(
         default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "启用子系统",
-                "en_US": "Enable subsystem",
-                "ja_JP": "サブシステムを有効化",
+                "zh_CN": "启用记忆",
+                "en_US": "Enable memory",
+                "ja_JP": "記憶を有効化",
             },
         },
     )
-    """是否启用 A_Memorix"""
+    """是否启用长期记忆系统"""
 
 
 class AMemorixStorageConfig(ConfigBase):
@@ -1087,19 +1102,19 @@ class AMemorixParagraphVectorBackfillConfig(ConfigBase):
 
 
 class AMemorixEmbeddingConfig(ConfigBase):
-    """A_Memorix Embedding 配置"""
+    """记忆向量化配置"""
 
     model_name: str = Field(
         default="auto",
         json_schema_extra={
             "label": {
-                "zh_CN": "Embedding 模型",
+                "zh_CN": "向量化模型",
                 "en_US": "Embedding model",
                 "ja_JP": "Embedding モデル",
             },
         },
     )
-    """Embedding 模型选择"""
+    """用于把记忆内容转换成向量的模型，auto 表示自动选择"""
 
     dimension: int = Field(
         default=1024,
@@ -1112,45 +1127,45 @@ class AMemorixEmbeddingConfig(ConfigBase):
             },
         },
     )
-    """向量维度"""
+    """记忆向量的维度，需要与向量化模型保持一致"""
 
     batch_size: int = Field(
         default=32,
         ge=1,
         json_schema_extra={
             "label": {
-                "zh_CN": "批量大小",
+                "zh_CN": "单批数量",
                 "en_US": "Batch size",
                 "ja_JP": "バッチサイズ",
             },
         },
     )
-    """单批请求大小"""
+    """每次向量化请求处理的记忆条数"""
 
     max_concurrent: int = Field(
         default=5,
         ge=1,
         json_schema_extra={
             "label": {
-                "zh_CN": "最大并发",
+                "zh_CN": "最大并发数",
                 "en_US": "Max concurrency",
                 "ja_JP": "最大同時実行数",
             },
         },
     )
-    """最大并发数"""
+    """同时进行的向量化请求数量"""
 
     enable_cache: bool = Field(
         default=False,
         json_schema_extra={
             "label": {
-                "zh_CN": "启用缓存",
+                "zh_CN": "启用向量缓存",
                 "en_US": "Enable cache",
                 "ja_JP": "キャッシュを有効化",
             },
         },
     )
-    """是否启用缓存"""
+    """是否缓存向量化结果"""
 
     quantization_type: Literal["int8"] = Field(
         default="int8",
@@ -1162,7 +1177,7 @@ class AMemorixEmbeddingConfig(ConfigBase):
             },
         },
     )
-    """量化方式，当前 vNext 仅支持 int8(SQ8)"""
+    """向量压缩方式，当前仅支持 int8(SQ8)"""
 
     fallback: AMemorixEmbeddingFallbackConfig = Field(
         default_factory=AMemorixEmbeddingFallbackConfig,
@@ -1996,7 +2011,7 @@ class AMemorixWebConfig(ConfigBase):
 
 
 class AMemorixConfig(ConfigBase):
-    """A_Memorix 长期记忆子系统配置"""
+    """长期记忆配置"""
 
     __ui_label__ = "长期记忆"
     __ui_icon__ = "brain"
@@ -2005,25 +2020,25 @@ class AMemorixConfig(ConfigBase):
         default_factory=AMemorixIntegrationConfig,
         json_schema_extra={
             "label": {
-                "zh_CN": "麦麦集成",
-                "en_US": "MaiSaka integration",
+                "zh_CN": "聊天中使用记忆",
+                "en_US": "Use memory in chat",
                 "ja_JP": "MaiSaka 連携",
             },
         },
     )
-    """Maisaka 集成配置"""
+    """控制麦麦在聊天中如何使用长期记忆"""
 
     plugin: AMemorixPluginConfig = Field(
         default_factory=AMemorixPluginConfig,
         json_schema_extra={
             "label": {
-                "zh_CN": "子系统状态",
-                "en_US": "Subsystem status",
-                "ja_JP": "サブシステム状態",
+                "zh_CN": "记忆系统",
+                "en_US": "Memory system",
+                "ja_JP": "記憶システム",
             },
         },
     )
-    """子系统状态"""
+    """长期记忆系统的总开关"""
 
     storage: AMemorixStorageConfig = Field(
         default_factory=AMemorixStorageConfig,
@@ -2041,13 +2056,13 @@ class AMemorixConfig(ConfigBase):
         default_factory=AMemorixEmbeddingConfig,
         json_schema_extra={
             "label": {
-                "zh_CN": "Embedding",
-                "en_US": "Embedding",
-                "ja_JP": "Embedding",
+                "zh_CN": "记忆向量化",
+                "en_US": "Memory embedding",
+                "ja_JP": "記憶ベクトル化",
             },
         },
     )
-    """Embedding 配置"""
+    """把记忆内容转换为向量时使用的基础设置"""
 
     retrieval: AMemorixRetrievalConfig = Field(
         default_factory=AMemorixRetrievalConfig,
@@ -2409,6 +2424,11 @@ class EmojiConfig(ConfigBase):
         ge=1,
         le=64,
         json_schema_extra={
+            "label": {
+                "zh_CN": "单次发送候选数",
+                "en_US": "Emoji send candidate count",
+                "ja_JP": "送信候補の絵文字数",
+            },
             "x-widget": "input",
             "x-icon": "grid",
             "advanced": True,
@@ -2419,6 +2439,11 @@ class EmojiConfig(ConfigBase):
     max_reg_num: int = Field(
         default=64,
         json_schema_extra={
+            "label": {
+                "zh_CN": "最大注册数量",
+                "en_US": "Max registered emojis",
+                "ja_JP": "最大登録数",
+            },
             "x-widget": "input",
             "x-icon": "hash",
         },
@@ -2428,6 +2453,11 @@ class EmojiConfig(ConfigBase):
     do_replace: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "满额后替换旧表情",
+                "en_US": "Replace old emojis when full",
+                "ja_JP": "上限到達時に古い絵文字を置換",
+            },
             "x-widget": "switch",
             "x-icon": "refresh-cw",
             "advanced": True,
@@ -2438,6 +2468,11 @@ class EmojiConfig(ConfigBase):
     check_interval: int = Field(
         default=10,
         json_schema_extra={
+            "label": {
+                "zh_CN": "检查间隔",
+                "en_US": "Check interval",
+                "ja_JP": "チェック間隔",
+            },
             "x-widget": "input",
             "x-icon": "clock",
         },
@@ -2447,6 +2482,11 @@ class EmojiConfig(ConfigBase):
     steal_emoji: bool = Field(
         default=True,
         json_schema_extra={
+            "label": {
+                "zh_CN": "收集聊天表情",
+                "en_US": "Collect chat emojis",
+                "ja_JP": "チャット絵文字を収集",
+            },
             "x-widget": "switch",
             "x-icon": "copy",
         },
@@ -2456,6 +2496,11 @@ class EmojiConfig(ConfigBase):
     content_filtration: bool = Field(
         default=False,
         json_schema_extra={
+            "label": {
+                "zh_CN": "启用内容过滤",
+                "en_US": "Enable content filtering",
+                "ja_JP": "内容フィルタリングを有効化",
+            },
             "advanced": True,
             "x-widget": "switch",
             "x-icon": "filter",

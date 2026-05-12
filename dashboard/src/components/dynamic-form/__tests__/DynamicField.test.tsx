@@ -365,6 +365,22 @@ describe('DynamicField', () => {
   })
 
   describe('visual features', () => {
+    it('uses the advanced title color for advanced fields', () => {
+      const schema: FieldSchema = {
+        name: 'advanced_field',
+        type: 'string',
+        label: 'Advanced Field',
+        description: 'An advanced field',
+        required: false,
+        advanced: true,
+      }
+      const onChange = vi.fn()
+
+      render(<DynamicField schema={schema} value="" onChange={onChange} />)
+
+      expect(screen.getByText('Advanced Field').closest('label')).toHaveClass('text-sky-700')
+    })
+
     it('renders label with icon', () => {
       const schema: FieldSchema = {
         name: 'test_icon',

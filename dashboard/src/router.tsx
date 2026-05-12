@@ -9,6 +9,7 @@ import {
 import { TanStackRouterDevtools } from '@tanstack/router-devtools'
 import { NotFoundPage } from './routes/404'
 import { Layout } from './components/layout'
+import { RoutePendingFallback } from './components/route-pending-fallback'
 import { checkAuth } from './hooks/use-auth'
 import { RouteErrorBoundary } from './components/error-boundary'
 
@@ -325,6 +326,11 @@ export const router = createRouter({
   routeTree,
   defaultNotFoundComponent: NotFoundPage,
   defaultErrorComponent: ({ error }) => <RouteErrorBoundary error={error} />,
+  defaultPendingComponent: RoutePendingFallback,
+  defaultPendingMs: 120,
+  defaultPendingMinMs: 120,
+  defaultPreload: 'intent',
+  defaultPreloadDelay: 80,
 })
 
 // 类型声明
