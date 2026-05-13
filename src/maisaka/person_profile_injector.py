@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Sequence
 
 from src.chat.message_receive.message import SessionMessage
+from src.A_memorix.core.utils.profile_text import build_profile_injection_text
 from src.common.data_models.message_component_data_model import AtComponent, ReplyComponent
 from src.common.logger import get_logger
 from src.config.config import global_config
@@ -252,7 +253,7 @@ async def build_person_profile_injection_messages(
             logger.debug(f"人物画像注入跳过: person_id={candidate.person_id!r} error={error}")
             continue
 
-        profile_text = _extract_profile_text(payload)
+        profile_text = build_profile_injection_text(_extract_profile_text(payload))
         if not profile_text:
             logger.debug(f"人物画像注入跳过空画像: person_id={candidate.person_id!r}")
             continue
