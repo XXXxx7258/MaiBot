@@ -292,7 +292,7 @@ function MCPServersBlockEditor({
               <CardContent className="space-y-4 px-4 pb-4 pt-0">
                 <div className="grid gap-3 md:grid-cols-[12rem_1fr]">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">传输方式</label>
+                    <span className="text-xs font-medium text-muted-foreground">传输方式</span>
                     <Select
                       value={server.transport}
                       onValueChange={(transport) => updateServer(index, { transport: transport as MCPTransport })}
@@ -308,7 +308,7 @@ function MCPServersBlockEditor({
                   </div>
                   {server.transport === 'stdio' ? (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">启动命令</label>
+                      <span className="text-xs font-medium text-muted-foreground">启动命令</span>
                       <Input
                         value={server.command}
                         onChange={(event) => updateServer(index, { command: event.target.value })}
@@ -317,7 +317,7 @@ function MCPServersBlockEditor({
                     </div>
                   ) : (
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">服务 URL</label>
+                      <span className="text-xs font-medium text-muted-foreground">服务 URL</span>
                       <Input
                         value={server.url}
                         onChange={(event) => updateServer(index, { url: event.target.value })}
@@ -330,7 +330,7 @@ function MCPServersBlockEditor({
                 {server.transport === 'stdio' ? (
                   <div className="grid gap-3 lg:grid-cols-2">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">命令参数</label>
+                      <span className="text-xs font-medium text-muted-foreground">命令参数</span>
                       <Textarea
                         value={server.args.join('\n')}
                         onChange={(event) => updateServer(index, {
@@ -344,7 +344,7 @@ function MCPServersBlockEditor({
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">环境变量</label>
+                      <span className="text-xs font-medium text-muted-foreground">环境变量</span>
                       <KeyValueEditor
                         value={server.env}
                         onChange={(env) => updateServer(index, { env: asStringMap(env) })}
@@ -355,7 +355,7 @@ function MCPServersBlockEditor({
                   <div className="space-y-3">
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-muted-foreground">认证模式</label>
+                        <span className="text-xs font-medium text-muted-foreground">认证模式</span>
                         <Select
                           value={server.authorization.mode}
                           onValueChange={(mode) => updateAuthorization(index, { mode: mode as MCPAuthorization['mode'] })}
@@ -371,7 +371,7 @@ function MCPServersBlockEditor({
                       </div>
                       {server.authorization.mode === 'bearer' && (
                         <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">Bearer Token</label>
+                          <span className="text-xs font-medium text-muted-foreground">Bearer Token</span>
                           <Input
                             type="password"
                             value={server.authorization.bearer_token}
@@ -382,7 +382,7 @@ function MCPServersBlockEditor({
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">请求 Headers</label>
+                      <span className="text-xs font-medium text-muted-foreground">请求 Headers</span>
                       <KeyValueEditor
                         value={server.headers}
                         onChange={(headers) => updateServer(index, { headers: asStringMap(headers) })}
@@ -393,7 +393,7 @@ function MCPServersBlockEditor({
 
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">HTTP 请求超时（秒）</label>
+                    <span className="text-xs font-medium text-muted-foreground">HTTP 请求超时（秒）</span>
                     <Input
                       type="number"
                       min={0.1}
@@ -405,7 +405,7 @@ function MCPServersBlockEditor({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-muted-foreground">会话读取超时（秒）</label>
+                    <span className="text-xs font-medium text-muted-foreground">会话读取超时（秒）</span>
                     <Input
                       type="number"
                       min={0.1}

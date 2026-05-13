@@ -12,6 +12,7 @@ from src.chat.utils.statistic import OnlineTimeRecordTask, StatisticOutputTask
 from src.common.i18n import t
 from src.common.logger import get_logger
 from src.common.message_server.server import Server, get_global_server
+from src.common.runtime_loop import set_main_loop
 from src.config.config import config_manager, global_config
 from src.emoji_system.emoji_manager import emoji_manager
 from src.manager.async_task_manager import async_task_manager
@@ -32,7 +33,7 @@ logger = get_logger("main")
 
 if TYPE_CHECKING:
     from maim_message import MessageServer
-    from src.webui.webui_server import WebUIServer
+    from src.webui.webui_server import ThreadedWebUIServer
 
 
 class MainSystem:
@@ -42,11 +43,10 @@ class MainSystem:
 
         self.app: MessageServer = get_global_api()
         self.server: Server = get_global_server()
-        self.webui_task: asyncio.Task[None] | None = None
-        self.webui_server: WebUIServer | None = None  # 独立的 WebUI 服务器
+        self.webui_server: ThreadedWebUIServer | None = None  # 独立线程中的 WebUI 服务器
 
-    def _setup_webui_server(self) -> None:
-        """设置独立的 WebUI 服务器"""
+    def _start_webui_server(self) -> None:
+        """启动独立线程中的 WebUI 服务器。"""
         from src.config.config import global_config
 
         if not global_config.webui.enabled:
@@ -54,9 +54,10 @@ class MainSystem:
             return
 
         try:
-            from src.webui.webui_server import get_webui_server
+            from src.webui.webui_server import get_threaded_webui_server
 
-            self.webui_server = get_webui_server()
+            self.webui_server = get_threaded_webui_server()
+            self.webui_server.start()
 
         except Exception as e:
             logger.error(t("startup.webui_server_init_failed", error=e))
@@ -65,21 +66,15 @@ class MainSystem:
         """初始化系统组件"""
         logger.info(t("startup.waking_up", nickname=global_config.bot.nickname))
 
-        self.webui_task = asyncio.create_task(self._run_webui_startup_sequence(), name="webui_startup")
+        self._start_webui_server()
         try:
             await self._init_components()
         except Exception:
-            self.webui_task.cancel()
-            await asyncio.gather(self.webui_task, return_exceptions=True)
+            if self.webui_server:
+                await self.webui_server.shutdown()
             raise
 
         logger.info(t("startup.initialization_completed_banner", nickname=global_config.bot.nickname))
-
-    async def _run_webui_startup_sequence(self) -> None:
-        """启动 WebUI，同时允许主初始化并行执行。"""
-        self._setup_webui_server()
-        if self.webui_server:
-            await self.webui_server.start()
 
     async def _init_components(self) -> None:
         """初始化其他组件"""
@@ -150,32 +145,30 @@ class MainSystem:
                 self.server.run(),
             ]
 
-            # 如果 WebUI 服务器已初始化，添加到任务列表
-            if self.webui_task:
-                tasks.append(self.webui_task)
-            elif self.webui_server:
-                tasks.append(self.webui_server.start())
-
             await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             logger.info(t("startup.schedule_cancelled"))
             raise
 
+
 async def main() -> None:
     """主函数"""
+    set_main_loop(asyncio.get_running_loop())
     system = MainSystem()
     try:
         await system.initialize()
         await system.schedule_tasks()
     finally:
+        if system.webui_server:
+            await system.webui_server.shutdown()
         emoji_manager.shutdown()
         await memory_automation_service.shutdown()
         await a_memorix_host_service.stop()
         await get_plugin_runtime_manager().bridge_event("on_stop")
         await get_plugin_runtime_manager().stop()
         await async_task_manager.stop_and_wait_all_tasks()
-        emoji_manager.shutdown()
         await config_manager.stop_file_watcher()
+        set_main_loop(None)
 
 
 if __name__ == "__main__":

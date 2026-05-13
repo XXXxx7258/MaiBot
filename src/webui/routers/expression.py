@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import json
+import random
 import sqlite3
 import uuid
 
@@ -66,7 +67,7 @@ def is_current_account_session(chat_session: Optional[ChatSession]) -> bool:
 def get_visible_expression_chat_ids(db_session: Any, include_legacy: bool) -> set[str]:
     """返回表达方式页面默认可见的聊天流 ID。"""
 
-    chat_ids = {chat_id for chat_id in db_session.exec(select(Expression.session_id)).all() if chat_id}
+    chat_ids = {chat_id for chat_id in db_session.exec(select(Expression.session_id).distinct()).all() if chat_id}
     if include_legacy:
         return chat_ids
 
@@ -1029,7 +1030,7 @@ async def get_expression_list(
                 count_statement = count_statement.where(col(Expression.session_id).in_(chat_ids))
             elif not include_legacy:
                 count_statement = count_statement.where(col(Expression.session_id).in_(visible_chat_ids))
-            total = len(session.exec(count_statement).all())
+            total = count_expressions(session, count_statement)
             data = [expression_to_response(expr, session) for expr in expressions]
 
         return ExpressionListResponse(success=True, total=total, page=page, page_size=page_size, data=data)
@@ -1539,14 +1540,16 @@ async def get_expression_stats(
             total_statement = select(Expression.id)
             if not include_legacy:
                 total_statement = total_statement.where(col(Expression.session_id).in_(visible_chat_ids))
-            total = len(session.exec(total_statement).all())
+            total = count_expressions(session, total_statement)
 
-            chat_stats = {}
-            for chat_id in session.exec(select(Expression.session_id)).all():
-                if not include_legacy and chat_id not in visible_chat_ids:
-                    continue
-                if chat_id:
-                    chat_stats[chat_id] = chat_stats.get(chat_id, 0) + 1
+            chat_stats_statement = (
+                select(Expression.session_id, func.count())
+                .where(col(Expression.session_id).is_not(None))
+                .group_by(col(Expression.session_id))
+            )
+            if not include_legacy:
+                chat_stats_statement = chat_stats_statement.where(col(Expression.session_id).in_(visible_chat_ids))
+            chat_stats = {chat_id: count for chat_id, count in session.exec(chat_stats_statement).all() if chat_id}
 
             seven_days_ago = datetime.now() - timedelta(days=7)
             recent_statement = (
@@ -1601,7 +1604,7 @@ def apply_review_filter(statement: Any, filter_type: str) -> Any:
 
 def count_expressions(session: Any, statement: Any) -> int:
     """统计表达方式查询结果数量。"""
-    return len(session.exec(statement).all())
+    return int(session.exec(select(func.count()).select_from(statement.subquery())).one() or 0)
 
 
 @router.get("/review/stats", response_model=ReviewStatsResponse)
@@ -1697,21 +1700,14 @@ async def get_review_list(
         if exclude_ids:
             statement = statement.where(~col(Expression.id).in_(exclude_ids))
 
-        if order == "random":
-            statement = statement.order_by(func.random())
-        else:
+        if order != "random":
             # 排序：创建时间倒序
             statement = statement.order_by(
                 case((col(Expression.create_time).is_(None), 1), else_=0),
                 col(Expression.create_time).desc(),
             )
 
-        offset = (page - 1) * page_size
-        statement = statement.offset(offset).limit(page_size)
-
         with get_db_session() as session:
-            expressions = session.exec(statement).all()
-
             count_statement = apply_review_filter(select(Expression.id), filter_type)
             if search:
                 count_statement = count_statement.where(
@@ -1719,7 +1715,20 @@ async def get_review_list(
                 )
             if chat_id:
                 count_statement = count_statement.where(col(Expression.session_id) == chat_id)
-            total = len(session.exec(count_statement).all())
+            if exclude_ids:
+                count_statement = count_statement.where(~col(Expression.id).in_(exclude_ids))
+            total = count_expressions(session, count_statement)
+
+            offset = (
+                random.randint(0, max(total - page_size, 0))
+                if order == "random" and total > 0
+                else (page - 1) * page_size
+            )
+            if order == "random":
+                statement = statement.order_by(col(Expression.id))
+            statement = statement.offset(offset).limit(page_size)
+
+            expressions = session.exec(statement).all()
             data = [expression_to_response(expr, session) for expr in expressions]
 
         return ReviewListResponse(

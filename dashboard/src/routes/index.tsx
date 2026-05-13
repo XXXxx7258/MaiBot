@@ -54,7 +54,7 @@ import { Link } from '@tanstack/react-router'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
-import { getBotConfig, getModelConfig } from '@/lib/config-api'
+import { getBotConfigCached, getModelConfigCached } from '@/lib/config-api'
 import { getReviewStats } from '@/lib/expression-api'
 import { APP_VERSION } from '@/lib/version'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
@@ -131,6 +131,18 @@ interface FeatureStatus {
   visualEnabled: boolean
 }
 
+const DEFAULT_TIME_RANGE = 24
+const DASHBOARD_DATA_CACHE_TTL = 30_000
+const dashboardDataCache = new Map<number, { timestamp: number; data: DashboardData }>()
+
+function getCachedDashboardData(hours: number): DashboardData | null {
+  const cached = dashboardDataCache.get(hours)
+  if (!cached || Date.now() - cached.timestamp > DASHBOARD_DATA_CACHE_TTL) {
+    return null
+  }
+  return cached.data
+}
+
 // 为饼图生成更丰富的颜色方案 (HSL色相均匀分布)
 const generatePieColors = (count: number): string[] => {
   const colors: string[] = []
@@ -158,10 +170,11 @@ function FeatureStatusLight({ enabled, label }: { enabled: boolean; label: strin
 
 function IndexPageContent() {
   const { t } = useTranslation()
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const initialDashboardData = getCachedDashboardData(DEFAULT_TIME_RANGE)
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(initialDashboardData)
+  const [loading, setLoading] = useState(!initialDashboardData)
   const [loadingProgress, setLoadingProgress] = useState(0)
-  const [timeRange, setTimeRange] = useState(24) // 默认24小时
+  const [timeRange, setTimeRange] = useState(DEFAULT_TIME_RANGE) // 默认24小时
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [hitokoto, setHitokoto] = useState<{ hitokoto: string; from: string } | null>(null)
   const [hitokotoLoading, setHitokotoLoading] = useState(true)
@@ -302,8 +315,8 @@ function IndexPageContent() {
   const fetchFeatureStatus = useCallback(async () => {
     try {
       const [botConfigResult, modelConfigResult] = await Promise.all([
-        getBotConfig(),
-        getModelConfig(),
+        getBotConfigCached(),
+        getModelConfigCached(),
       ])
 
       if (!isMountedRef.current || !botConfigResult.success) return
@@ -343,10 +356,20 @@ function IndexPageContent() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
+      const cachedData = getCachedDashboardData(timeRange)
+      if (cachedData) {
+        setDashboardData(cachedData)
+        setLoading(false)
+        setLoadingProgress(100)
+        return
+      }
+
+      setLoading(true)
       const response = await fetchWithAuth(`/api/webui/statistics/dashboard?hours=${timeRange}`)
       if (!isMountedRef.current) return
       if (response.ok) {
         const data = await response.json()
+        dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
         setDashboardData(data)
       }
       setLoading(false)

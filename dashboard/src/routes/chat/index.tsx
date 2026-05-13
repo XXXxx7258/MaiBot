@@ -130,12 +130,10 @@ export function ChatPage() {
     setIsLoadingPlatforms(true)
     try {
       const response = await fetchWithAuth('/api/chat/platforms')
-      console.log('[Chat] 平台列表响应:', response.status, response.headers.get('content-type'))
       if (response.ok) {
         const contentType = response.headers.get('content-type')
         if (contentType && contentType.includes('application/json')) {
           const data = await response.json()
-          console.log('[Chat] 平台列表数据:', data)
           setPlatforms(data.platforms || [])
         } else {
           const text = await response.text()

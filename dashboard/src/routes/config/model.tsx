@@ -49,7 +49,14 @@ import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Trash2, Save, Search, Info, Power, Check, ChevronsUpDown, RefreshCw, Loader2, GraduationCap, Share2, AlertTriangle, Settings, Zap } from 'lucide-react'
-import { getModelConfig, getModelConfigSchema, testProviderConnection, updateModelConfig, updateModelConfigSection } from '@/lib/config-api'
+import {
+  getModelConfig,
+  getModelConfigCached,
+  getModelConfigSchema,
+  testProviderConnection,
+  updateModelConfig,
+  updateModelConfigSection,
+} from '@/lib/config-api'
 import type { TestConnectionResult } from '@/lib/config-api'
 import { resolveFieldLabel } from '@/lib/config-label'
 import type { ConfigSchema } from '@/types/config-schema'
@@ -221,7 +228,7 @@ function ModelConfigPageContent() {
   const loadConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [result, schemaResult] = await Promise.all([getModelConfig(), getModelConfigSchema()])
+      const [result, schemaResult] = await Promise.all([getModelConfigCached(), getModelConfigSchema()])
       if (!result.success) {
         toast({
           title: '加载失败',

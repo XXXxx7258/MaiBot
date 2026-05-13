@@ -20,7 +20,14 @@ import { CodeEditor } from '@/components/CodeEditor'
 import { DynamicConfigForm } from '@/components/dynamic-form'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
-import { getBotConfig, getBotConfigRaw, getBotConfigSchema, updateBotConfig, updateBotConfigRaw } from '@/lib/config-api'
+import {
+  getBotConfig,
+  getBotConfigCached,
+  getBotConfigRaw,
+  getBotConfigSchema,
+  updateBotConfig,
+  updateBotConfigRaw,
+} from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
@@ -385,7 +392,7 @@ function BotConfigPageContent() {
   const loadConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [result, schemaResult] = await Promise.all([getBotConfig(), getBotConfigSchema()])
+      const [result, schemaResult] = await Promise.all([getBotConfigCached(), getBotConfigSchema()])
       if (!result.success) {
         toast({
           title: '加载失败',

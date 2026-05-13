@@ -213,8 +213,7 @@ export function PluginDetailPage() {
                 return // 成功获取本地 README，直接返回
               }
             }
-          } catch (err) {
-            console.log('本地 README 获取失败，尝试远程获取:', err)
+          } catch {
             // 继续执行远程获取逻辑
           }
         }

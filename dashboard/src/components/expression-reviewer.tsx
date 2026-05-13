@@ -555,12 +555,16 @@ export function ExpressionReviewer({
 
   // 初始加载
   useEffect(() => {
-    if (open) {
-      loadStats()
+    if (!open) {
+      return
+    }
+
+    loadStats()
+    if (reviewMode === 'list') {
       loadList()
       loadChatNames()
     }
-  }, [open, loadStats, loadList, loadChatNames])
+  }, [open, reviewMode, loadStats, loadList, loadChatNames])
 
   // 切换筛选时重置页码
   useEffect(() => {

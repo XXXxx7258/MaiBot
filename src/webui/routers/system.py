@@ -263,7 +263,9 @@ async def _stop_runtime_before_restart() -> None:
 async def _delayed_restart() -> None:
     await asyncio.sleep(0.5)  # 延迟 0.5 秒，确保响应已发送
     logger.info("WebUI 请求重启，正在停止插件运行时")
-    await _stop_runtime_before_restart()
+    from src.common.runtime_loop import run_on_main_loop
+
+    await run_on_main_loop(_stop_runtime_before_restart())
     logger.info(f"WebUI 请求重启，退出代码 {_RESTART_EXIT_CODE}")
     os._exit(_RESTART_EXIT_CODE)
 
