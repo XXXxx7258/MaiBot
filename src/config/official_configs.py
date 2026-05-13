@@ -405,6 +405,21 @@ class ChatConfig(ConfigBase):
     )
     """私聊上下文长度"""
 
+    enable_context_optimization: bool = Field(
+        default=False,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "优化上下文",
+                "en_US": "Optimize context",
+                "ja_JP": "コンテキスト最適化",
+            },
+            "x-widget": "switch",
+            "x-icon": "scissors",
+            "x-row": "context-sizes",
+        },
+    )
+    """优化50%左右的Planner上下文消耗，但是可能影响缓存，轻微影响性能表现"""
+
     enable_at: bool = Field(
         default=True,
         json_schema_extra={

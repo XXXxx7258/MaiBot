@@ -3,11 +3,12 @@
 from dataclasses import dataclass
 from math import ceil
 
-from .context_messages import LLMContextMessage
+from .context_messages import AssistantMessage, LLMContextMessage
 from .history_utils import drop_leading_orphan_tool_results, drop_orphan_tool_results, normalize_tool_result_order
 
 TRIM_TARGET_RATIO = 1.0
 TRIM_THRESHOLD_RATIO = 2.0
+ASSISTANT_OPTIMIZATION_KEEP_COUNT = 3
 
 
 @dataclass(slots=True)
@@ -25,6 +26,7 @@ def process_chat_history_after_cycle(
     chat_history: list[LLMContextMessage],
     *,
     max_context_size: int,
+    enable_context_optimization: bool = False,
 ) -> HistoryPostProcessResult:
     """在每轮结束后统一执行历史裁切与清理。"""
 
@@ -33,6 +35,20 @@ def process_chat_history_after_cycle(
         processed_history
     )
     remaining_context_count = sum(1 for message in processed_history if message.count_in_context)
+
+    optimized_removed_count = 0
+    if enable_context_optimization:
+        optimized_removed_messages = _trim_assistant_history_to_latest(
+            processed_history,
+            keep_count=ASSISTANT_OPTIMIZATION_KEEP_COUNT,
+        )
+        if optimized_removed_messages:
+            processed_history, removed_after_optimize_count, moved_after_optimize_count = _normalize_history_structure(
+                processed_history
+            )
+            optimized_removed_count = len(optimized_removed_messages) + removed_after_optimize_count
+            moved_tool_result_count += moved_after_optimize_count
+            remaining_context_count = sum(1 for message in processed_history if message.count_in_context)
 
     compact_removed_count = 0
     removed_messages: list[LLMContextMessage] = []
@@ -50,7 +66,7 @@ def process_chat_history_after_cycle(
         moved_tool_result_count += moved_after_trim_count
 
     remaining_context_count = sum(1 for message in processed_history if message.count_in_context)
-    removed_count = normalized_removed_count + compact_removed_count
+    removed_count = normalized_removed_count + optimized_removed_count + compact_removed_count
     changed_count = removed_count + moved_tool_result_count
     return HistoryPostProcessResult(
         history=processed_history,
@@ -59,6 +75,37 @@ def process_chat_history_after_cycle(
         changed_count=changed_count,
         remaining_context_count=remaining_context_count,
     )
+
+
+def _trim_assistant_history_to_latest(
+    chat_history: list[LLMContextMessage],
+    *,
+    keep_count: int,
+) -> list[LLMContextMessage]:
+    """只保留最新的若干条 assistant 历史消息。"""
+
+    normalized_keep_count = max(0, keep_count)
+    assistant_indexes = [
+        index
+        for index, message in enumerate(chat_history)
+        if isinstance(message, AssistantMessage)
+    ]
+    remove_count = len(assistant_indexes) - normalized_keep_count
+    if remove_count <= 0:
+        return []
+
+    remove_indexes = set(assistant_indexes[:remove_count])
+    removed_messages = [
+        message
+        for index, message in enumerate(chat_history)
+        if index in remove_indexes
+    ]
+    chat_history[:] = [
+        message
+        for index, message in enumerate(chat_history)
+        if index not in remove_indexes
+    ]
+    return removed_messages
 
 
 def _normalize_history_structure(
