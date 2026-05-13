@@ -730,7 +730,7 @@ export function ExpressionEditDialog({
             <AlertDescription className="text-xs">
               <div className="space-y-1">
                 <p><strong>状态标记说明：</strong></p>
-                <p>• 已检查：表示该表达方式已通过审核（可由AI自动检查或人工审核）</p>
+                <p>• 已检查：表示该表达方式已通过人工审核</p>
                 <p className="text-muted-foreground mt-2">
                   根据配置中"仅使用已审核通过的表达方式"设置：<br/>
                   • 开启时：只有通过审核（已检查）的项目会被使用<br/>

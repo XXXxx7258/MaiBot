@@ -533,6 +533,55 @@ def build_statistical_candidates(messages: Sequence[BotMessage], min_support: in
     }
 
 
+def build_session_stats(messages: Sequence[BotMessage], limit: int = 0) -> List[Dict[str, Any]]:
+    session_rows: Dict[str, Dict[str, Any]] = {}
+    chat_counters: DefaultDict[str, Counter[str]] = defaultdict(Counter)
+    platform_counters: DefaultDict[str, Counter[str]] = defaultdict(Counter)
+    group_id_counters: DefaultDict[str, Counter[str]] = defaultdict(Counter)
+
+    for message in messages:
+        session_id = message.session_id
+        row = session_rows.setdefault(
+            session_id,
+            {
+                "session_id": session_id,
+                "message_count": 0,
+                "char_count": 0,
+                "first_message_time": message.timestamp,
+                "last_message_time": message.timestamp,
+            },
+        )
+        row["message_count"] += 1
+        row["char_count"] += len(message.text)
+        if message.timestamp < row["first_message_time"]:
+            row["first_message_time"] = message.timestamp
+        if message.timestamp > row["last_message_time"]:
+            row["last_message_time"] = message.timestamp
+
+        chat_counters[session_id][message.chat_label] += 1
+        platform_counters[session_id][message.platform] += 1
+        if message.group_id:
+            group_id_counters[session_id][message.group_id] += 1
+
+    rows: List[Dict[str, Any]] = []
+    for session_id, row in session_rows.items():
+        normalized_row = dict(row)
+        normalized_row["chat"] = chat_counters[session_id].most_common(1)[0][0] if chat_counters[session_id] else ""
+        normalized_row["platform"] = (
+            platform_counters[session_id].most_common(1)[0][0] if platform_counters[session_id] else ""
+        )
+        normalized_row["group_id"] = (
+            group_id_counters[session_id].most_common(1)[0][0] if group_id_counters[session_id] else ""
+        )
+        normalized_row["chat_type"] = "group" if normalized_row["group_id"] else "private"
+        rows.append(normalized_row)
+
+    rows.sort(key=lambda item: (-int(item["message_count"]), str(item["session_id"])))
+    if limit > 0:
+        return rows[:limit]
+    return rows
+
+
 def build_corpus_stats(messages: Sequence[BotMessage]) -> Dict[str, Any]:
     platform_counter = Counter(message.platform for message in messages)
     session_counter = Counter(message.session_id for message in messages)
@@ -545,6 +594,7 @@ def build_corpus_stats(messages: Sequence[BotMessage]) -> Dict[str, Any]:
         "unique_session_count": len(session_counter),
         "platforms": dict(sorted(platform_counter.items())),
         "top_chats": [{"chat": chat, "count": count} for chat, count in chat_counter.most_common(20)],
+        "top_sessions": build_session_stats(messages, limit=20),
     }
 
 
@@ -799,7 +849,7 @@ async def analyze(args: Namespace) -> Dict[str, Any]:
     if not accounts and not qq_fallback_account:
         raise ValueError("未能识别 bot 账号，请检查 bot_config.toml 或通过 --bot-account platform:user_id 指定")
 
-    messages = fetch_bot_messages(
+    source_messages = fetch_bot_messages(
         db_path=args.db.resolve(),
         since=since,
         until=until,
@@ -813,6 +863,16 @@ async def analyze(args: Namespace) -> Dict[str, Any]:
         min_text_length=max(1, args.min_text_length),
         limit=max(0, args.limit),
     )
+    source_stats = build_corpus_stats(source_messages)
+    top_session_limit = max(0, args.top_sessions)
+    should_select_top_sessions = top_session_limit > 0 and not args.session_id and not args.group_id
+    source_session_stats = build_session_stats(source_messages)
+    selected_session_stats: List[Dict[str, Any]] = []
+    messages = source_messages
+    if should_select_top_sessions:
+        selected_session_stats = source_session_stats[:top_session_limit]
+        selected_session_ids = {str(session["session_id"]) for session in selected_session_stats}
+        messages = [message for message in source_messages if message.session_id in selected_session_ids]
 
     stats = build_corpus_stats(messages)
     candidates = build_statistical_candidates(
@@ -833,11 +893,21 @@ async def analyze(args: Namespace) -> Dict[str, Any]:
             "group_id": args.group_id,
             "min_text_length": max(1, args.min_text_length),
             "limit": max(0, args.limit),
+            "top_sessions": top_session_limit,
         },
         "bot_accounts": [account.display() for account in accounts],
         "legacy_qq_fallback_account": qq_fallback_account if not args.no_legacy_qq_fallback else "",
+        "session_selection": {
+            "applied": should_select_top_sessions,
+            "top_session_limit": top_session_limit,
+            "source_message_count": len(source_messages),
+            "selected_message_count": len(messages),
+            "selected_sessions": selected_session_stats,
+        },
         "corpus_stats": stats,
     }
+    if should_select_top_sessions:
+        metadata["source_corpus_stats"] = source_stats
 
     if not messages:
         return {
@@ -873,6 +943,11 @@ async def analyze(args: Namespace) -> Dict[str, Any]:
         chunk_char_limit=max(1000, args.chunk_char_limit),
         max_text_chars=max(50, args.max_text_chars),
     )
+    if should_select_top_sessions:
+        progress(
+            f"已从 {len(source_messages)} 条 bot 发言中选择消息最多的 "
+            f"{len(selected_session_stats)} 个 session，共 {len(messages)} 条。"
+        )
     progress(f"已抽取 {len(messages)} 条 bot 发言，分为 {len(chunks)} 个 LLM 分块。")
 
     chunk_results: List[LLMJsonResult] = []
@@ -937,7 +1012,7 @@ def parse_args() -> Namespace:
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help=f"数据库路径，默认: {DEFAULT_DB_PATH}")
     parser.add_argument("--bot-config", type=Path, default=DEFAULT_BOT_CONFIG_PATH, help="bot_config.toml 路径")
     parser.add_argument("--model-config", type=Path, default=DEFAULT_MODEL_CONFIG_PATH, help="model_config.toml 路径")
-    parser.add_argument("--recent", default="7d", help="分析最近多久，例如 30m、24h、7d、2w；--since 优先于该参数")
+    parser.add_argument("--recent", default="30d", help="分析最近多久，例如 30m、24h、30d、2w；--since 优先于该参数")
     parser.add_argument("--since", help="起始时间，格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS")
     parser.add_argument("--until", help="结束时间，格式: YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS；默认当前时间")
     parser.add_argument("--session-id", help="只分析指定 session_id")
@@ -954,6 +1029,12 @@ def parse_args() -> Namespace:
     parser.add_argument("--min-text-length", type=int, default=1, help="忽略短于该长度的发言")
     parser.add_argument("--min-support", type=int, default=3, help="固定句式至少需要多少条消息支持")
     parser.add_argument("--limit", type=int, default=0, help="最多读取多少条 bot 发言，0 表示不限制")
+    parser.add_argument(
+        "--top-sessions",
+        type=int,
+        default=10,
+        help="默认只分析消息数最多的 N 个 session_id；0 表示不限制。指定 --session-id/--group-id 时不再自动截取",
+    )
     parser.add_argument("--task-name", default="learner", help="使用 model_task_config 下的哪个任务配置调用 LLM")
     parser.add_argument("--allow-thinking", action="store_true", help="允许使用 thinking enabled 的模型，默认会拒绝")
     parser.add_argument("--temperature", type=float, default=0.2, help="LLM 温度")

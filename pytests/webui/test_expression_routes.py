@@ -603,7 +603,7 @@ def test_approve_expression_review_log_restores_deleted_expression(
         style="使用 什么情况",
         passed=False,
         reason="AI 误判",
-        source="auto_check",
+        source="learn_before_upsert",
         expression_id=12345,
     )
 

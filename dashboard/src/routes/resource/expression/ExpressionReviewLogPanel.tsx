@@ -40,7 +40,6 @@ function formatTime(timestamp: number | null): string {
 }
 
 function getSourceLabel(source: string): string {
-  if (source === 'auto_check') return '自动复核'
   if (source === 'learn_before_upsert') return '学习写入前'
   return source || '未知来源'
 }
@@ -144,7 +143,7 @@ export function ExpressionReviewLogPanel({ onRescued }: ExpressionReviewLogPanel
       <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold">AI 审核记录</h2>
-          <p className="text-sm text-muted-foreground">最近 {entries.length} 条表达方式自动优化审核情况</p>
+          <p className="text-sm text-muted-foreground">最近 {entries.length} 条表达方式学习写入前审核情况</p>
         </div>
         <div className="flex items-center gap-2">
           <Select value={filter} onValueChange={(value) => setFilter(value as ReviewLogFilter)}>
