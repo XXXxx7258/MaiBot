@@ -4,14 +4,14 @@
 主链路：
 person_id -> 用户名/别名 -> 图谱关系 + 向量证据 -> 证据总结画像 -> 快照版本化存储
 """
-
+import json
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from json_repair import repair_json
 from sqlalchemy import or_
 from sqlmodel import select
-import json
-import time
+
 
 from src.common.database.database import get_db_session
 from src.common.database.database_model import PersonInfo
