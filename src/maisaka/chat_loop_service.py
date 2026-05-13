@@ -428,9 +428,17 @@ class MaisakaChatLoopService:
         """基于当前配置实时构造主聊天系统提示词。"""
 
         try:
-            return load_prompt("maisaka_chat", **self.build_prompt_template_context(tools_section))
+            return load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
         except Exception:
             return f"{self.personality_prompt}\n\nYou are a helpful AI assistant."
+
+    @staticmethod
+    def _get_chat_prompt_name() -> str:
+        """根据独立 Timing Gate 配置选择 Planner 模板。"""
+
+        if global_config.chat.enable_independent_timing_gate:
+            return "maisaka_chat"
+        return "maisaka_chat_merged_timing"
 
     def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
@@ -442,7 +450,6 @@ class MaisakaChatLoopService:
             "identity": self.personality_prompt,
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
         }
-
 
 
     @staticmethod
@@ -884,6 +891,9 @@ class MaisakaChatLoopService:
         ]
 
         if request_kind != "planner":
+            return selected_history
+
+        if not global_config.chat.enable_independent_timing_gate:
             return selected_history
 
         filtered_history: List[LLMContextMessage] = []

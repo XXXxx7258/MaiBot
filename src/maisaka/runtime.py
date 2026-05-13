@@ -624,12 +624,18 @@ class MaisakaHeartFlowChatting:
 
         trigger_reason = self._force_next_timing_reason or "@/提及消息"
         trigger_message_id = self._force_next_timing_message_id or "unknown"
-        reason = (
-            f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
-            "本轮直接跳过 Timing Gate 并视作 continue。"
-        )
+        if global_config.chat.enable_independent_timing_gate:
+            reason = (
+                f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
+                "本轮直接跳过 Timing Gate 并视作 continue。"
+            )
+        else:
+            reason = (
+                f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
+                "本轮直接交由 Planner 处理。"
+            )
         logger.info(
-            f"{self.log_prefix} 已结束本次强制 continue，恢复 Timing Gate；"
+            f"{self.log_prefix} 已结束本次强制 continue 状态；"
             f"触发原因={trigger_reason} "
             f"触发消息编号={trigger_message_id}"
         )

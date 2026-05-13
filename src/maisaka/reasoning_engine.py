@@ -25,6 +25,7 @@ from src.services.memory_service import memory_service
 
 from .builtin_tool import build_builtin_tool_handlers as build_split_builtin_tool_handlers
 from .builtin_tool import get_builtin_tool_visibility, is_builtin_tool_in_action_stage
+from .builtin_tool import is_builtin_tool_in_timing_stage
 from .builtin_tool import get_timing_tools
 from .chat_loop_service import ChatResponse
 from .chat_history_visual_refresher import has_pending_image_recognition, refresh_chat_history_visual_placeholders
@@ -60,7 +61,9 @@ logger = get_logger("maisaka_reasoning_engine")
 TIMING_GATE_CONTEXT_DROP_HEAD_RATIO = 0.7
 TIMING_GATE_MAX_ATTEMPTS = 3
 TIMING_GATE_TOOL_NAMES = {"continue", "no_action", "wait"}
+PLANNER_MERGED_TIMING_EXCLUDED_TOOL_NAMES = {"continue"}
 HISTORY_SILENT_TOOL_NAMES = {"finish"}
+HISTORY_DEFERRED_TOOL_RESULT_NAMES = {"wait"}
 TOOL_RESULT_MEDIA_SOURCE_KIND = "tool_result_media"
 TOOL_RESULT_MEDIA_TYPES = {"image", "audio", "resource_link", "resource", "binary"}
 
@@ -157,6 +160,12 @@ class MaisakaReasoningEngine:
             **self._runtime._chat_loop_service.build_prompt_template_context(),
         )
 
+    @staticmethod
+    def _is_independent_timing_gate_enabled() -> bool:
+        """判断是否启用独立 Timing Gate。"""
+
+        return bool(global_config.chat.enable_independent_timing_gate)
+
     async def _build_action_tool_definitions(self) -> tuple[list[dict[str, Any]], str]:
         """构造 Action Loop 阶段可见的工具定义与 deferred tools 提示。"""
 
@@ -167,11 +176,17 @@ class MaisakaReasoningEngine:
 
         availability_context = self._build_tool_availability_context()
         tool_specs = await self._runtime._tool_registry.list_tools(availability_context)
+        include_timing_tools = not self._is_independent_timing_gate_enabled()
         visible_builtin_tool_specs: list[ToolSpec] = []
         deferred_tool_specs: list[ToolSpec] = []
         for tool_spec in tool_specs:
             if tool_spec.provider_name == "maisaka_builtin":
-                if not is_builtin_tool_in_action_stage(tool_spec):
+                is_merged_timing_tool = (
+                    include_timing_tools and is_builtin_tool_in_timing_stage(tool_spec)
+                    and tool_spec.name not in PLANNER_MERGED_TIMING_EXCLUDED_TOOL_NAMES
+                )
+                is_planner_tool = is_builtin_tool_in_action_stage(tool_spec) or is_merged_timing_tool
+                if not is_planner_tool:
                     continue
                 visibility = get_builtin_tool_visibility(tool_spec)
                 if visibility == "visible":
@@ -484,7 +499,9 @@ class MaisakaReasoningEngine:
                         )
 
                 try:
-                    timing_gate_required = True
+                    timing_gate_required = self._is_independent_timing_gate_enabled()
+                    if not timing_gate_required:
+                        self._runtime._consume_force_next_timing_continue_reason()
                     round_index = 0
                     while round_index < self._runtime._max_internal_rounds:
                         cycle_detail = self._start_cycle()
@@ -564,9 +581,14 @@ class MaisakaReasoningEngine:
                                         f"回合={round_index + 1} 动作={timing_action}"
                                     )
                                     break
-                            else:
+                            elif self._is_independent_timing_gate_enabled():
                                 logger.info(
                                     f"{self._runtime.log_prefix} 跳过 Timing Gate，继续执行 Planner: "
+                                    f"回合={round_index + 1}"
+                                )
+                            else:
+                                logger.debug(
+                                    f"{self._runtime.log_prefix} 独立时间感知关闭，节奏控制交由 Planner 执行: "
                                     f"回合={round_index + 1}"
                                 )
 
@@ -620,6 +642,13 @@ class MaisakaReasoningEngine:
                                 )
                                 cycle_detail.time_records["tool_calls"] = time.time() - tool_started_at
                                 if should_pause:
+                                    if (
+                                        pause_tool_name == "no_action"
+                                        and not self._is_independent_timing_gate_enabled()
+                                    ):
+                                        await self._runtime._wait_for_timing_gate_non_continue_cooldown(
+                                            time.time() - planner_started_at
+                                        )
                                     if pause_tool_name == "finish":
                                         cycle_end_reason = "finish"
                                         cycle_end_detail = "Planner 调用 finish，结束本轮思考并等待新消息。"
@@ -1399,6 +1428,13 @@ class MaisakaReasoningEngine:
 
         if tool_call.func_name in HISTORY_SILENT_TOOL_NAMES:
             self._remove_tool_call_from_history(tool_call)
+            return
+
+        if (
+            tool_call.func_name in HISTORY_DEFERRED_TOOL_RESULT_NAMES
+            and result.success
+            and bool(result.metadata.get("pause_execution", False))
+        ):
             return
 
         history_content = self._build_tool_result_history_content(tool_call, result)

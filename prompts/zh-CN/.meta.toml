@@ -3,6 +3,11 @@ display_name = "规划器"
 advanced = false
 description = "Maisaka 主规划模板，负责整合身份、时间、工具说明和聊天上下文，驱动主循环进行思考、决策与工具调用。"
 
+[maisaka_chat_merged_timing]
+display_name = "规划器（合并时机）"
+advanced = false
+description = "独立时间感知关闭时使用的 Maisaka 主规划模板，将节奏控制判断合并到 Planner。"
+
 [maisaka_replyer]
 display_name = "回复"
 advanced = false

@@ -149,6 +149,12 @@ def is_builtin_tool_in_action_stage(tool_spec: ToolSpec) -> bool:
     return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "action"
 
 
+def is_builtin_tool_in_timing_stage(tool_spec: ToolSpec) -> bool:
+    """判断内置工具是否属于 Timing Gate 阶段。"""
+
+    return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "timing"
+
+
 def get_all_builtin_tool_specs(context: Optional[ToolAvailabilityContext] = None) -> List[ToolSpec]:
     """获取全部内置工具声明。"""
 
