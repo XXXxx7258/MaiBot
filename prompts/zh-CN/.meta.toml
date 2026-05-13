@@ -40,7 +40,7 @@ description = "用于从表达库中选择合适表达方式的模板。"
 
 [image_description]
 display_name = "图片描述"
-advanced = true
+advanced = false
 description = "用于将图片内容转换为文本描述的模板。"
 
 [jargon_compare_inference]

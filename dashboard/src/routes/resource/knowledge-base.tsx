@@ -110,6 +110,8 @@ import { KnowledgeGraphPage } from './knowledge-graph'
 const DATE_TIME_LOCAL_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/
 const MEMORY_QUICK_START_DISMISSED_KEY = 'memory-quick-start-dismissed'
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/
+type MemoryConsoleTab = 'graph' | 'import' | 'tuning' | 'episodes' | 'profiles' | 'maintenance' | 'delete' | 'feedback'
+type LoadableMemoryTab = Extract<MemoryConsoleTab, 'import' | 'tuning' | 'delete' | 'feedback'>
 
 function parseMaibotPositiveInt(input: string, fieldName: string): number | undefined {
   const value = input.trim()
@@ -166,16 +168,16 @@ export function KnowledgeBasePage() {
   const [vectorRebuildPreview, setVectorRebuildPreview] = useState<Record<string, number> | null>(null)
   const [creatingImport, setCreatingImport] = useState(false)
   const [creatingTuning, setCreatingTuning] = useState(false)
-  const [activeTab, setActiveTab] = useState<
-    'graph' | 'import' | 'tuning' | 'episodes' | 'profiles' | 'maintenance' | 'delete' | 'feedback'
-  >('graph')
+  const [activeTab, setActiveTab] = useState<MemoryConsoleTab>('graph')
   const [quickStartVisible, setQuickStartVisible] = useState(() => {
     if (typeof window === 'undefined') {
       return true
     }
     return window.localStorage.getItem(MEMORY_QUICK_START_DISMISSED_KEY) !== 'true'
   })
-  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<string>>(() => new Set())
+  const [visitedMemoryTabs, setVisitedMemoryTabs] = useState<Set<MemoryConsoleTab>>(() => new Set(['graph']))
+  const [tabLoading, setTabLoading] = useState<Partial<Record<LoadableMemoryTab, boolean>>>({})
+  const loadedPanelDataRef = useRef<Set<LoadableMemoryTab>>(new Set())
 
   const [runtimeConfig, setRuntimeConfig] = useState<MemoryRuntimeConfigPayload | null>(null)
   const [importSettings, setImportSettings] = useState<MemoryImportSettings>({})
@@ -300,41 +302,30 @@ export function KnowledgeBasePage() {
   const [tuningSampleSize, setTuningSampleSize] = useState('24')
   const [tuningTopKEval, setTuningTopKEval] = useState('20')
 
-  const loadPage = useCallback(async () => {
+  const setPanelLoading = useCallback((tab: LoadableMemoryTab, value: boolean) => {
+    setTabLoading((current) => ({ ...current, [tab]: value }))
+  }, [])
+
+  const loadRuntimeConfig = useCallback(async () => {
+    const runtimePayload = await getMemoryRuntimeConfig()
+    setRuntimeConfig(runtimePayload)
+  }, [])
+
+  const loadImportPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('import')) {
+      return
+    }
     try {
-      setLoading(true)
-      const [
-        runtimePayload,
-        importSettingsPayload,
-        pathAliasPayload,
-        importTaskPayload,
-        tuningProfilePayload,
-        tuningTaskPayload,
-        sourcePayload,
-        deleteOperationPayload,
-        feedbackCorrectionPayload,
-      ] = await Promise.all([
-        getMemoryRuntimeConfig(),
+      setPanelLoading('import', true)
+      const [importSettingsPayload, pathAliasPayload, importTaskPayload] = await Promise.all([
         getMemoryImportSettings(),
         getMemoryImportPathAliases(),
         getMemoryImportTasks(20),
-        getMemoryTuningProfile(),
-        getMemoryTuningTasks(20),
-        getMemorySources(),
-        getMemoryDeleteOperations(DELETE_OPERATION_FETCH_LIMIT),
-        getMemoryFeedbackCorrections({ limit: FEEDBACK_CORRECTION_FETCH_LIMIT }),
       ])
 
-      setRuntimeConfig(runtimePayload)
       setImportSettings(importSettingsPayload.settings ?? {})
       setImportPathAliases(pathAliasPayload.path_aliases ?? {})
       setImportTasks(importTaskPayload.items ?? [])
-      setTuningProfile(tuningProfilePayload.profile ?? {})
-      setTuningProfileToml(tuningProfilePayload.toml ?? '')
-      setTuningTasks(tuningTaskPayload.items ?? [])
-      setMemorySources(sourcePayload.items ?? [])
-      setDeleteOperations(deleteOperationPayload.items ?? [])
-      setFeedbackCorrections(feedbackCorrectionPayload.items ?? [])
       setSelectedImportTaskId((currentTaskId) => {
         if (currentTaskId || (importTaskPayload.items ?? []).length === 0) {
           return currentTaskId
@@ -349,6 +340,113 @@ export function KnowledgeBasePage() {
         const aliasKeys = Object.keys(pathAliasPayload.path_aliases ?? {})
         return aliasKeys[0] ?? currentAlias
       })
+      loadedPanelDataRef.current.add('import')
+    } catch (error) {
+      toast({
+        title: '加载导入数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('import', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadTuningPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('tuning')) {
+      return
+    }
+    try {
+      setPanelLoading('tuning', true)
+      const [tuningProfilePayload, tuningTaskPayload] = await Promise.all([
+        getMemoryTuningProfile(),
+        getMemoryTuningTasks(20),
+      ])
+      setTuningProfile(tuningProfilePayload.profile ?? {})
+      setTuningProfileToml(tuningProfilePayload.toml ?? '')
+      setTuningTasks(tuningTaskPayload.items ?? [])
+      loadedPanelDataRef.current.add('tuning')
+    } catch (error) {
+      toast({
+        title: '加载调优数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('tuning', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadDeletePanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('delete')) {
+      return
+    }
+    try {
+      setPanelLoading('delete', true)
+      const [sourcePayload, deleteOperationPayload] = await Promise.all([
+        getMemorySources(),
+        getMemoryDeleteOperations(DELETE_OPERATION_FETCH_LIMIT),
+      ])
+      setMemorySources(sourcePayload.items ?? [])
+      setDeleteOperations(deleteOperationPayload.items ?? [])
+      loadedPanelDataRef.current.add('delete')
+    } catch (error) {
+      toast({
+        title: '加载删除数据失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('delete', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadFeedbackPanel = useCallback(async (force = false) => {
+    if (!force && loadedPanelDataRef.current.has('feedback')) {
+      return
+    }
+    try {
+      setPanelLoading('feedback', true)
+      const feedbackCorrectionPayload = await getMemoryFeedbackCorrections({
+        limit: FEEDBACK_CORRECTION_FETCH_LIMIT,
+      })
+      setFeedbackCorrections(feedbackCorrectionPayload.items ?? [])
+      loadedPanelDataRef.current.add('feedback')
+    } catch (error) {
+      toast({
+        title: '加载纠错历史失败',
+        description: error instanceof Error ? error.message : '未知错误',
+        variant: 'destructive',
+      })
+    } finally {
+      setPanelLoading('feedback', false)
+    }
+  }, [setPanelLoading, toast])
+
+  const loadActiveTabData = useCallback(async (tab: MemoryConsoleTab, force = false) => {
+    switch (tab) {
+      case 'import':
+        await loadImportPanel(force)
+        break
+      case 'tuning':
+        await loadTuningPanel(force)
+        break
+      case 'delete':
+        await loadDeletePanel(force)
+        break
+      case 'feedback':
+        await loadFeedbackPanel(force)
+        break
+      default:
+        break
+    }
+  }, [loadDeletePanel, loadFeedbackPanel, loadImportPanel, loadTuningPanel])
+
+  const loadPage = useCallback(async () => {
+    try {
+      setLoading(true)
+      await loadRuntimeConfig()
+      await loadActiveTabData(activeTab, true)
     } catch (error) {
       toast({
         title: '加载长期记忆控制台失败',
@@ -358,16 +456,35 @@ export function KnowledgeBasePage() {
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [activeTab, loadActiveTabData, loadRuntimeConfig, toast])
 
   useEffect(() => {
-    void loadPage()
-  }, [loadPage])
-
-  useEffect(() => {
-    if (!['episodes', 'profiles', 'maintenance'].includes(activeTab)) {
-      return
+    let cancelled = false
+    const loadInitialRuntime = async () => {
+      try {
+        setLoading(true)
+        await loadRuntimeConfig()
+      } catch (error) {
+        if (!cancelled) {
+          toast({
+            title: '加载长期记忆运行状态失败',
+            description: error instanceof Error ? error.message : '未知错误',
+            variant: 'destructive',
+          })
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
     }
+    void loadInitialRuntime()
+    return () => {
+      cancelled = true
+    }
+  }, [loadRuntimeConfig, toast])
+
+  useEffect(() => {
     setVisitedMemoryTabs((current) => {
       if (current.has(activeTab)) {
         return current
@@ -376,7 +493,8 @@ export function KnowledgeBasePage() {
       next.add(activeTab)
       return next
     })
-  }, [activeTab])
+    void loadActiveTabData(activeTab)
+  }, [activeTab, loadActiveTabData])
 
   const runtimeBadges = useMemo(() => {
     if (!runtimeConfig) {
@@ -505,6 +623,7 @@ export function KnowledgeBasePage() {
       setImportSettings(settingsPayload.settings ?? {})
       setImportPathAliases(pathAliasPayload.path_aliases ?? {})
       setImportErrorText('')
+      loadedPanelDataRef.current.add('import')
 
       if (nextTasks.length <= 0) {
         setSelectedImportTaskId('')
@@ -1097,12 +1216,18 @@ export function KnowledgeBasePage() {
   }, [importSettings.maibot_source_db_default])
 
   useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     if (!selectedImportTaskId && importTasks.length > 0) {
       void selectImportTask(importTasks[0].task_id)
     }
-  }, [importTasks, selectImportTask, selectedImportTaskId])
+  }, [activeTab, importTasks, selectImportTask, selectedImportTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     if (!selectedImportTaskId) {
       setSelectedImportTask(null)
       setSelectedImportFileId('')
@@ -1114,10 +1239,10 @@ export function KnowledgeBasePage() {
       return
     }
     void loadImportTaskDetail(selectedImportTaskId, true)
-  }, [importTasks, loadImportTaskDetail, selectImportTask, selectedImportTaskId])
+  }, [activeTab, importTasks, loadImportTaskDetail, selectImportTask, selectedImportTaskId])
 
   useEffect(() => {
-    if (!importAutoPolling) {
+    if (activeTab !== 'import' || !importAutoPolling) {
       return
     }
     const timerId = window.setInterval(() => {
@@ -1129,7 +1254,7 @@ export function KnowledgeBasePage() {
     return () => {
       window.clearInterval(timerId)
     }
-  }, [importAutoPolling, importPollInterval, loadImportTaskDetail, refreshImportQueue, selectedImportTaskId])
+  }, [activeTab, importAutoPolling, importPollInterval, loadImportTaskDetail, refreshImportQueue, selectedImportTaskId])
 
   // 统一 WebSocket 推送：作为轮询的实时增强；后端未广播时由轮询兜底
   const selectedImportTaskIdRef = useRef<string>('')
@@ -1138,6 +1263,9 @@ export function KnowledgeBasePage() {
   }, [selectedImportTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'import') {
+      return
+    }
     let cancelled = false
     let unsubscribe: (() => Promise<void>) | undefined
     const handleEvent = (event: MemoryProgressEvent) => {
@@ -1167,7 +1295,7 @@ export function KnowledgeBasePage() {
         void unsubscribe()
       }
     }
-  }, [loadImportTaskDetail, refreshImportQueue])
+  }, [activeTab, loadImportTaskDetail, refreshImportQueue])
 
   const filteredSources = useMemo(() => {
     const keyword = sourceSearch.trim().toLowerCase()
@@ -1244,6 +1372,9 @@ export function KnowledgeBasePage() {
   }, [selectedDeleteOperation, selectedOperationId])
 
   useEffect(() => {
+    if (activeTab !== 'delete') {
+      return
+    }
     const operationId = selectedDeleteOperation?.operation_id
     if (!operationId) {
       setSelectedOperationDetail(null)
@@ -1283,7 +1414,7 @@ export function KnowledgeBasePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedDeleteOperation?.operation_id])
+  }, [activeTab, selectedDeleteOperation?.operation_id])
 
   const toggleSourceSelection = useCallback((source: string, checked: boolean) => {
     setSelectedSources((current) => {
@@ -1465,6 +1596,9 @@ export function KnowledgeBasePage() {
   }, [selectedFeedbackCorrection, selectedFeedbackTaskId])
 
   useEffect(() => {
+    if (activeTab !== 'feedback') {
+      return
+    }
     const taskId = selectedFeedbackCorrection?.task_id
     if (!taskId) {
       setSelectedFeedbackTaskDetail(null)
@@ -1504,7 +1638,7 @@ export function KnowledgeBasePage() {
     return () => {
       cancelled = true
     }
-  }, [selectedFeedbackCorrection?.task_id])
+  }, [activeTab, selectedFeedbackCorrection?.task_id])
 
   const selectedFeedbackResolved = useMemo<MemoryFeedbackCorrectionDetailTaskPayload | null>(() => {
     if (!selectedFeedbackCorrection) {
@@ -1821,6 +1955,17 @@ export function KnowledgeBasePage() {
     setQuickStartVisible(false)
   }, [])
 
+  const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
+  const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
+  const renderPanelFallback = (tab: LoadableMemoryTab, label: string) => (
+    <TabsContent value={tab} className="space-y-4">
+      <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
+        <Loader2 className={cn('mr-2 h-4 w-4', tabLoading[tab] ? 'animate-spin' : '')} />
+        正在加载{label}...
+      </div>
+    </TabsContent>
+  )
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -2057,6 +2202,7 @@ export function KnowledgeBasePage() {
               <KnowledgeGraphPage embedded onOpenConsole={() => setActiveTab('graph')} />
             </TabsContent>
 
+            {shouldRenderMemoryTab('import') && (shouldShowPanelFallback('import') ? renderPanelFallback('import', '导入数据') : (
             <ImportTab
               importCreateMode={importCreateMode}
               setImportCreateMode={setImportCreateMode}
@@ -2196,7 +2342,9 @@ export function KnowledgeBasePage() {
               importChunksLoading={importChunksLoading}
               selectedImportChunks={selectedImportChunks}
             />
+            ))}
 
+            {shouldRenderMemoryTab('tuning') && (shouldShowPanelFallback('tuning') ? renderPanelFallback('tuning', '调优数据') : (
             <TuningTab
               tuningObjective={tuningObjective}
               setTuningObjective={setTuningObjective}
@@ -2213,19 +2361,21 @@ export function KnowledgeBasePage() {
               tuningTasks={tuningTasks}
               applyBestTask={applyBestTask}
             />
+            ))}
 
             <TabsContent value="episodes" className="space-y-4">
-              {visitedMemoryTabs.has('episodes') ? <MemoryEpisodeManager /> : null}
+              {shouldRenderMemoryTab('episodes') ? <MemoryEpisodeManager /> : null}
             </TabsContent>
 
             <TabsContent value="profiles" className="space-y-4">
-              {visitedMemoryTabs.has('profiles') ? <MemoryProfileManager /> : null}
+              {shouldRenderMemoryTab('profiles') ? <MemoryProfileManager /> : null}
             </TabsContent>
 
             <TabsContent value="maintenance" className="space-y-4">
-              {visitedMemoryTabs.has('maintenance') ? <MemoryMaintenanceManager /> : null}
+              {shouldRenderMemoryTab('maintenance') ? <MemoryMaintenanceManager /> : null}
             </TabsContent>
 
+            {shouldRenderMemoryTab('delete') && (shouldShowPanelFallback('delete') ? renderPanelFallback('delete', '删除数据') : (
             <DeleteTab
               sourceSearch={sourceSearch}
               setSourceSearch={setSourceSearch}
@@ -2263,7 +2413,9 @@ export function KnowledgeBasePage() {
               selectedOperationItemPageCount={selectedOperationItemPageCount}
               pagedSelectedOperationItems={pagedSelectedOperationItems}
             />
+            ))}
 
+            {shouldRenderMemoryTab('feedback') && (shouldShowPanelFallback('feedback') ? renderPanelFallback('feedback', '纠错历史') : (
             <FeedbackTab
               feedbackSearch={feedbackSearch}
               setFeedbackSearch={setFeedbackSearch}
@@ -2294,6 +2446,7 @@ export function KnowledgeBasePage() {
               pagedFeedbackActionLogs={pagedFeedbackActionLogs}
               selectedFeedbackActionLogs={selectedFeedbackActionLogs}
             />
+            ))}
           </Tabs>
         </div>
       </div>

@@ -9,7 +9,7 @@ from sqlmodel import select
 
 from src.chat.message_receive.message import SessionMessage
 from src.common.database.database import get_db_session
-from src.common.database.database_model import Expression
+from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
 from src.config.config import global_config
@@ -80,7 +80,7 @@ class MaisakaExpressionSelector:
         related_session_ids, has_global_share = self._resolve_expression_group_scope(session_id)
 
         with get_db_session(auto_commit=False) as session:
-            base_query = select(Expression).where(Expression.rejected.is_(False))  # type: ignore[attr-defined]
+            base_query = select(Expression)
             if has_global_share:
                 scoped_query = base_query
             else:
@@ -88,7 +88,10 @@ class MaisakaExpressionSelector:
                     (Expression.session_id.in_(related_session_ids)) | (Expression.session_id.is_(None))  # type: ignore[attr-defined]
                 )
             if global_config.expression.expression_checked_only:
-                scoped_query = scoped_query.where(Expression.checked.is_(True))  # type: ignore[attr-defined]
+                scoped_query = scoped_query.where(
+                    Expression.checked.is_(True),  # type: ignore[attr-defined]
+                    Expression.modified_by == ModifiedBy.USER,
+                )
             expressions = session.exec(scoped_query).all()
 
         all_candidates = [

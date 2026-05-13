@@ -550,157 +550,71 @@ export const ExpressionSection = React.memo(function ExpressionSection({
         </div>
       </div>
 
-      {/* 表达反思配置 */}
+      {/* 表达审核配置 */}
       <div className="rounded-lg border bg-card p-4 sm:p-6 space-y-6">
         <div className="space-y-6">
           <div>
-            <h3 className="text-lg font-semibold">表达优化配置</h3>
+            <h3 className="text-lg font-semibold">表达审核配置</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              配置麦麦如何优化和改进表达方式
+              配置表达学习后的审核和并发控制
             </p>
           </div>
-          
-          {/* 自动表达优化 */}
+
+          {/* 优化表达方式学习 */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
                 <Label htmlFor="expression_self_reflect" className="cursor-pointer font-medium">
-                  自动表达优化
+                  优化表达方式学习
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  启用后，麦麦会自动检查并优化表达方式，无需管理员手动干预
+                  开启后，学习到的表达方式会先由 AI 审核，只有通过的项目会被写入。
                 </p>
               </div>
               <Switch
                 id="expression_self_reflect"
-                checked={config.expression_self_reflect ?? false}
+                checked={config.expression_self_reflect ?? true}
                 onCheckedChange={(checked) =>
                   onChange({ ...config, expression_self_reflect: checked })
                 }
               />
             </div>
-
-            {config.expression_self_reflect && (
-              <div className="space-y-4 pl-4 border-l-2 border-primary/20">
-                {/* 自动检查间隔 */}
-                <div className="space-y-2">
-                  <Label htmlFor="expression_auto_check_interval">
-                    自动检查间隔（秒）
-                  </Label>
-                  <Input
-                    id="expression_auto_check_interval"
-                    type="number"
-                    min="60"
-                    value={config.expression_auto_check_interval ?? 900}
-                    onChange={(e) =>
-                      onChange({
-                        ...config,
-                        expression_auto_check_interval: parseInt(e.target.value) || 900,
-                      })
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    表达方式自动检查的间隔时间（单位：秒），默认值：900秒（15分钟）
-                  </p>
-                </div>
-
-                {/* 每次检查数量 */}
-                <div className="space-y-2">
-                  <Label htmlFor="expression_auto_check_count">
-                    每次检查数量
-                  </Label>
-                  <Input
-                    id="expression_auto_check_count"
-                    type="number"
-                    min="1"
-                    max="100"
-                    value={config.expression_auto_check_count ?? 5}
-                    onChange={(e) =>
-                      onChange({
-                        ...config,
-                        expression_auto_check_count: parseInt(e.target.value) || 5,
-                      })
-                    }
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    每次自动检查时随机选取的表达方式数量，默认值：5条
-                  </p>
-                </div>
-
-                {/* 自定义评估标准 */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label>自定义评估标准</Label>
-                    <Button
-                      onClick={() => {
-                        onChange({
-                          ...config,
-                          expression_auto_check_custom_criteria: [
-                            ...(config.expression_auto_check_custom_criteria || []),
-                            '',
-                          ],
-                        })
-                      }}
-                      size="sm"
-                      variant="outline"
-                    >
-                      <Plus className="h-4 w-4 mr-1" />
-                      添加标准
-                    </Button>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    {(config.expression_auto_check_custom_criteria || []).map((criterion, index) => (
-                      <div key={index} className="flex gap-2">
-                        <Input
-                          value={criterion}
-                          onChange={(e) => {
-                            const newCriteria = [...(config.expression_auto_check_custom_criteria || [])]
-                            newCriteria[index] = e.target.value
-                            onChange({ ...config, expression_auto_check_custom_criteria: newCriteria })
-                          }}
-                          placeholder="输入评估标准，例如：是否符合角色人设"
-                          className="flex-1"
-                        />
-                        <Button
-                          onClick={() => {
-                            onChange({
-                              ...config,
-                              expression_auto_check_custom_criteria: (config.expression_auto_check_custom_criteria || []).filter((_, i) => i !== index),
-                            })
-                          }}
-                          size="icon"
-                          variant="ghost"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
-                    
-                    {(!config.expression_auto_check_custom_criteria || config.expression_auto_check_custom_criteria.length === 0) && (
-                      <div className="text-center py-4 text-muted-foreground text-sm">
-                        暂无自定义标准，点击"添加标准"开始配置
-                      </div>
-                    )}
-                  </div>
-                  
-                  <p className="text-xs text-muted-foreground">
-                    这些标准会被添加到评估提示词中，作为额外的评估要求
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* 仅使用已检查的表达方式 */}
+          {/* 表达学习最大并发 */}
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="max_expression_learner">
+                表达学习最大并发
+              </Label>
+              <Input
+                id="max_expression_learner"
+                type="number"
+                min="1"
+                max="20"
+                value={config.max_expression_learner ?? 3}
+                onChange={(e) =>
+                  onChange({
+                    ...config,
+                    max_expression_learner: parseInt(e.target.value) || 3,
+                  })
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                所有聊天流合计允许同时运行的表达学习批次数；同一聊天流正在学习时，新批次会被丢弃。
+              </p>
+            </div>
+          </div>
+
+          {/* 仅使用人工检查的表达方式 */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
                 <Label htmlFor="expression_checked_only" className="cursor-pointer font-medium">
-                  仅使用已审核通过的表达方式
+                  仅使用人工审核通过的表达方式
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  开启后，只有通过审核（已检查）的项目会被使用；关闭时，未审核的项目也会被使用。无论开关状态，被拒绝的项目永远不会被使用。
+                  开启后，只有被人类用户审核通过的表达会被使用；AI 自动审核通过的表达不会被此开关放行。
                 </p>
               </div>
               <Switch

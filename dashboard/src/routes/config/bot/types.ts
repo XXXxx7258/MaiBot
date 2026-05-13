@@ -24,6 +24,7 @@ export interface ChatConfig {
   talk_value: number
   mentioned_bot_reply: boolean
   max_context_size: number
+  enable_context_optimization: boolean
   planner_smooth: number
   think_mode: 'classic' | 'deep' | 'dynamic'
   plan_reply_log_max_per_chat: number
@@ -68,11 +69,9 @@ export interface ExpressionConfig {
   expression_manual_reflect: boolean
   manual_reflect_operator_id: TargetItem | null
   allow_reflect: TargetItem[]
-  expression_self_reflect: boolean
-  expression_auto_check_interval: number
-  expression_auto_check_count: number
-  expression_auto_check_custom_criteria: string[]
   expression_checked_only: boolean
+  expression_self_reflect: boolean
+  max_expression_learner: number
   all_global_jargon?: boolean
   enable_jargon_explanation?: boolean
   jargon_mode?: string

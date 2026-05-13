@@ -258,9 +258,8 @@ export const DynamicConfigForm: React.FC<DynamicConfigFormProps> = ({
       .map((field) => field.name),
   )
   const normalFields = inlineFields.filter((field) => !field.advanced)
-  const advancedFields = inlineFields.filter((field) => field.advanced)
   const visibleFields = resolvedAdvancedVisible
-    ? [...normalFields, ...advancedFields]
+    ? inlineFields
     : normalFields
 
   const groupFieldsByRow = (fields: FieldSchema[]) => {
