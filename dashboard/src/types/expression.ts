@@ -14,7 +14,6 @@ export interface Expression {
   chat_name?: string | null
   create_date: number | null
   checked: boolean
-  rejected: boolean
   modified_by: 'ai' | 'user' | null  // 最后修改来源
 }
 
@@ -59,7 +58,6 @@ export interface ExpressionExportItem {
   last_active_time: string | null
   create_time: string | null
   checked: boolean
-  rejected: boolean
   modified_by: 'ai' | 'user' | null
 }
 
@@ -157,9 +155,6 @@ export interface ExpressionUpdateRequest {
   situation?: string
   style?: string
   chat_id?: string
-  checked?: boolean
-  rejected?: boolean
-  require_unchecked?: boolean  // 用于人工审核时的冲突检测
 }
 
 /**
@@ -215,7 +210,6 @@ export interface ReviewStats {
   total: number
   unchecked: number
   passed: number
-  rejected: number
   ai_checked: number
   user_checked: number
 }
@@ -236,7 +230,7 @@ export interface ReviewListResponse {
  */
 export interface BatchReviewItem {
   id: number
-  rejected: boolean
+  approved: boolean
   require_unchecked?: boolean
 }
 

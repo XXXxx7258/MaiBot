@@ -261,6 +261,38 @@ describe('DynamicField', () => {
       expect(screen.getByRole('textbox')).toHaveValue('a\nb')
     })
 
+    it('keeps draft newlines while editing primitive arrays', async () => {
+      const schema: FieldSchema = {
+        name: 'test_array_draft',
+        type: 'array',
+        label: 'Test Array Draft',
+        description: 'A test array with draft editing',
+        required: false,
+        items: {
+          type: 'string',
+        },
+      }
+      let controlledValue: unknown = ['a']
+      let rerender!: ReturnType<typeof render>['rerender']
+      const onChange = vi.fn((nextValue: unknown) => {
+        controlledValue = nextValue
+        rerender(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />)
+      })
+      const user = userEvent.setup()
+
+      rerender = render(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />).rerender
+      const textbox = screen.getByRole('textbox')
+      await user.click(textbox)
+      await user.keyboard('{End}{Enter}')
+
+      expect(onChange).toHaveBeenLastCalledWith(['a'])
+      expect(screen.getByRole('textbox')).toHaveValue('a\n')
+
+      await user.keyboard('b')
+      expect(onChange).toHaveBeenLastCalledWith(['a', 'b'])
+      expect(screen.getByRole('textbox')).toHaveValue('a\nb')
+    })
+
     it('renders key-value editor for object type', () => {
       const schema: FieldSchema = {
         name: 'test_object',

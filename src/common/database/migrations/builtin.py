@@ -11,6 +11,8 @@ from .v2_to_v3 import migrate_v2_to_v3
 from .v3_to_v4 import migrate_v3_to_v4
 from .v4_to_v5 import migrate_v4_to_v5
 from .v5_to_v6 import migrate_v5_to_v6
+from .v6_to_v7 import migrate_v6_to_v7
+from .v7_to_v8 import migrate_v7_to_v8
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -19,7 +21,9 @@ V2_SCHEMA_VERSION = 2
 V3_SCHEMA_VERSION = 3
 V4_SCHEMA_VERSION = 4
 V5_SCHEMA_VERSION = 5
-LATEST_SCHEMA_VERSION = 6
+V6_SCHEMA_VERSION = 6
+V7_SCHEMA_VERSION = 7
+LATEST_SCHEMA_VERSION = 8
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -88,9 +92,52 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
             return None
         if not snapshot.has_column("chat_sessions", "scope"):
             return None
+        if snapshot.has_column("expressions", "rejected"):
+            return None
         if snapshot.has_column("mai_messages", "display_message"):
             return None
         return LATEST_SCHEMA_VERSION
+
+
+class V6SchemaVersionDetector(BaseSchemaVersionDetector):
+    """v6 schema 缁撴瀯鎺㈡祴鍣ㄣ€?"""
+
+    @property
+    def name(self) -> str:
+        return "v6_schema_detector"
+
+    def detect_version(self, snapshot: DatabaseSchemaSnapshot) -> Optional[int]:
+        """妫€娴嬫暟鎹簱鏄惁涓?v6 缁撴瀯銆?"""
+
+        if any(snapshot.has_table(table_name) for table_name in _LEGACY_V1_EXCLUSIVE_TABLES):
+            return None
+        if not all(snapshot.has_table(table_name) for table_name in _COMMON_MARKER_TABLES):
+            return None
+        if snapshot.has_table("action_records"):
+            return None
+        if snapshot.has_table("thinking_questions"):
+            return None
+        if snapshot.has_column("images", "emotion"):
+            return None
+        if not snapshot.has_column("images", "image_hash"):
+            return None
+        if not snapshot.has_column("images", "full_path"):
+            return None
+        if not snapshot.has_column("images", "image_type"):
+            return None
+        if not snapshot.has_column("chat_history", "session_id"):
+            return None
+        if not snapshot.has_column("person_info", "user_nickname"):
+            return None
+        if not snapshot.has_column("chat_sessions", "account_id"):
+            return None
+        if not snapshot.has_column("chat_sessions", "scope"):
+            return None
+        if not snapshot.has_column("expressions", "rejected"):
+            return None
+        if snapshot.has_column("mai_messages", "display_message"):
+            return None
+        return V6_SCHEMA_VERSION
 
 
 class V5SchemaVersionDetector(BaseSchemaVersionDetector):
@@ -258,6 +305,7 @@ def build_default_schema_version_detectors() -> List[BaseSchemaVersionDetector]:
 
     return [
         LatestSchemaVersionDetector(),
+        V6SchemaVersionDetector(),
         V5SchemaVersionDetector(),
         V3SchemaVersionDetector(),
         V2SchemaVersionDetector(),
@@ -318,10 +366,24 @@ def build_default_migration_registry() -> MigrationRegistry:
             ),
             MigrationStep(
                 version_from=V5_SCHEMA_VERSION,
-                version_to=LATEST_SCHEMA_VERSION,
+                version_to=V6_SCHEMA_VERSION,
                 name="v5_to_v6",
                 description="为 chat_sessions 增加 account_id/scope 路由归属字段。",
                 handler=migrate_v5_to_v6,
+            ),
+            MigrationStep(
+                version_from=V6_SCHEMA_VERSION,
+                version_to=V7_SCHEMA_VERSION,
+                name="v6_to_v7",
+                description="移除 expressions.rejected 列，并删除已审核拒绝的表达方式。",
+                handler=migrate_v6_to_v7,
+            ),
+            MigrationStep(
+                version_from=V7_SCHEMA_VERSION,
+                version_to=LATEST_SCHEMA_VERSION,
+                name="v7_to_v8",
+                description="将 AI 标记的已审核表达方式改回待人工审核。",
+                handler=migrate_v7_to_v8,
             ),
         ]
     )

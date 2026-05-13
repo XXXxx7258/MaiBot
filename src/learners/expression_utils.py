@@ -6,7 +6,6 @@ from json_repair import repair_json
 
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
 from src.common.logger import get_logger
-from src.config.config import global_config
 from src.prompt.prompt_manager import prompt_manager
 from src.services.llm_service import LLMServiceClient
 
@@ -145,9 +144,6 @@ async def check_expression_suitability(situation: str, style: str) -> Tuple[bool
         "表达方式不能太过特指，需要具有泛用性",
         "一般不涉及具体的人名或名称",
     ]
-
-    if custom_criteria := global_config.expression.expression_auto_check_custom_criteria:
-        base_criteria.extend(custom_criteria)
 
     criteria_list = "\n".join([f"{i + 1}. {criterion}" for i, criterion in enumerate(base_criteria)])
 

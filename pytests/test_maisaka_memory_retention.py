@@ -5,7 +5,6 @@ import time
 
 from src.chat.heart_flow import heartflow_manager as heartflow_manager_module
 from src.chat.heart_flow.heartflow_manager import HEARTFLOW_ACTIVE_RETENTION_SECONDS, HeartflowManager
-from src.learners.expression_learner import ExpressionLearner
 from src.maisaka.runtime import MAX_RETAINED_MESSAGE_CACHE_SIZE, MaisakaHeartFlowChatting
 
 
@@ -14,8 +13,6 @@ def _build_runtime_with_messages(message_count: int) -> MaisakaHeartFlowChatting
     runtime.log_prefix = "[test]"
     runtime.message_cache = [SimpleNamespace(message_id=f"msg-{index}") for index in range(message_count)]
     runtime._last_processed_index = message_count
-    runtime._expression_learner = ExpressionLearner("session-1")
-    runtime._expression_learner.mark_all_processed(runtime.message_cache)
     return runtime
 
 
@@ -27,18 +24,17 @@ def test_prune_processed_message_cache_keeps_bounded_recent_window() -> None:
     assert len(runtime.message_cache) == MAX_RETAINED_MESSAGE_CACHE_SIZE
     assert runtime.message_cache[0].message_id == "msg-25"
     assert runtime._last_processed_index == MAX_RETAINED_MESSAGE_CACHE_SIZE
-    assert runtime._expression_learner.last_processed_index == MAX_RETAINED_MESSAGE_CACHE_SIZE
 
 
-def test_prune_processed_message_cache_keeps_unlearned_messages() -> None:
+def test_prune_processed_message_cache_keeps_pending_messages() -> None:
     runtime = _build_runtime_with_messages(MAX_RETAINED_MESSAGE_CACHE_SIZE + 25)
-    runtime._expression_learner.discard_processed_prefix(MAX_RETAINED_MESSAGE_CACHE_SIZE + 5)
+    runtime._last_processed_index = 20
 
     runtime._prune_processed_message_cache()
 
     assert len(runtime.message_cache) == MAX_RETAINED_MESSAGE_CACHE_SIZE + 5
     assert runtime.message_cache[0].message_id == "msg-20"
-    assert runtime._expression_learner.last_processed_index == 0
+    assert runtime._last_processed_index == 0
 
 
 def test_collect_pending_messages_uses_single_pending_received_time() -> None:

@@ -1789,54 +1789,51 @@ function ModelConfigPageContent() {
                     <PopoverContent className="p-0" align="start" style={{ width: 'var(--radix-popover-trigger-width)' }}>
                       <Command>
                         <CommandInput placeholder="搜索模型..." />
-                        <ScrollArea className="h-[300px]">
-                          <CommandList className="max-h-none overflow-visible">
-                            <CommandEmpty>
-                              {modelFetchError ? (
-                                <div className="py-4 px-2 text-center space-y-2">
-                                  <p className="text-sm text-destructive">{modelFetchError}</p>
-                                  {!modelFetchError.includes('API Key') && (
-                                    <Button
-                                      variant="link"
-                                      size="sm"
-                                      onClick={() => editingModel?.api_provider && fetchModelsForProvider(editingModel.api_provider, true)}
-                                    >
-                                      重试
-                                    </Button>
+                        <CommandList className="max-h-[300px]">
+                          <CommandEmpty>
+                            {modelFetchError ? (
+                              <div className="py-4 px-2 text-center space-y-2">
+                                <p className="text-sm text-destructive">{modelFetchError}</p>
+                                {!modelFetchError.includes('API Key') && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    onClick={() => editingModel?.api_provider && fetchModelsForProvider(editingModel.api_provider, true)}
+                                  >
+                                    重试
+                                  </Button>
+                                )}
+                              </div>
+                            ) : (
+                              '未找到匹配的模型'
+                            )}
+                          </CommandEmpty>
+                          <CommandGroup heading="可用模型">
+                            {availableModels.map((model) => (
+                              <CommandItem
+                                key={model.id}
+                                value={model.id}
+                                className="pr-8"
+                                onSelect={() => {
+                                  setEditingModel((prev) =>
+                                    prev ? { ...prev, model_identifier: model.id } : null
+                                  )
+                                  setModelComboboxOpen(false)
+                                }}
+                              >
+                                {editingModel?.model_identifier === model.id && (
+                                  <Check className="absolute right-2 h-4 w-4" />
+                                )}
+                                <div className="flex min-w-0 flex-col">
+                                  <span className="truncate">{model.id}</span>
+                                  {model.name !== model.id && (
+                                    <span className="truncate text-xs text-muted-foreground">{model.name}</span>
                                   )}
                                 </div>
-                              ) : (
-                                '未找到匹配的模型'
-                              )}
-                            </CommandEmpty>
-                            <CommandGroup heading="可用模型">
-                              {availableModels.map((model) => (
-                                <CommandItem
-                                  key={model.id}
-                                  value={model.id}
-                                  onSelect={() => {
-                                    setEditingModel((prev) =>
-                                      prev ? { ...prev, model_identifier: model.id } : null
-                                    )
-                                    setModelComboboxOpen(false)
-                                  }}
-                                >
-                                  <Check
-                                    className={`mr-2 h-4 w-4 ${
-                                      editingModel?.model_identifier === model.id ? 'opacity-100' : 'opacity-0'
-                                    }`}
-                                  />
-                                  <div className="flex flex-col">
-                                    <span>{model.id}</span>
-                                    {model.name !== model.id && (
-                                      <span className="text-xs text-muted-foreground">{model.name}</span>
-                                    )}
-                                  </div>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          </CommandList>
-                        </ScrollArea>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
                       </Command>
                     </PopoverContent>
                   </Popover>

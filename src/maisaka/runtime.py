@@ -1119,22 +1119,6 @@ class MaisakaHeartFlowChatting:
             if self._wait_timeout_task is not None and self._pending_wait_tool_call_id == tool_call_id:
                 self._wait_timeout_task = None
 
-    async def _trigger_batch_learning(self, messages: list[SessionMessage]) -> None:
-        """按同一批消息触发表达方式和黑话学习。"""
-        processed_end_index = len(self.message_cache)
-        if not self._enable_expression_learning:
-            self._expression_learner.mark_all_processed(self.message_cache)
-            self._prune_processed_message_cache()
-            return
-
-        try:
-            await self._trigger_expression_learning(messages)
-        except Exception as exc:
-            logger.error(f"{self.log_prefix} 表达学习任务异常退出: {exc}")
-            self._expression_learner.mark_processed_until(processed_end_index)
-        finally:
-            self._prune_processed_message_cache()
-
     async def _trigger_trimmed_history_learning(self, context_messages: Sequence[LLMContextMessage]) -> None:
         """对 Maisaka 裁切掉的真实聊天历史触发表达学习。"""
 
@@ -1206,36 +1190,6 @@ class MaisakaHeartFlowChatting:
             return False
 
         return True
-
-    async def _trigger_expression_learning(self, messages: list[SessionMessage]) -> None:
-        """触发表达方式学习"""
-        pending_count = self._expression_learner.get_pending_count(self.message_cache)
-        if not self._should_trigger_learning(
-            enabled=self._enable_expression_learning,
-            feature_name="表达学习",
-            last_extraction_time=self._last_expression_extraction_time,
-            pending_count=pending_count,
-            min_messages_for_extraction=self._expression_learner.min_messages_for_extraction,
-        ):
-            return
-
-        self._last_expression_extraction_time = time.time()
-        logger.info(
-            f"{self.log_prefix} 触发表达方式学习: "
-            f"消息数量={len(messages)} 待处理消息数量={pending_count} "
-            f"缓存总量={len(self.message_cache)} "
-            f"是否启用黑话学习={self._enable_jargon_learning}"
-        )
-
-        try:
-            jargon_miner = self._jargon_miner if self._enable_jargon_learning else None
-            learnt_style = await self._expression_learner.learn(self.message_cache, jargon_miner)
-            if learnt_style:
-                logger.info(f"{self.log_prefix} 表达方式学习成功")
-            else:
-                logger.debug(f"{self.log_prefix} 表达方式学习失败")
-        except Exception:
-            logger.exception(f"{self.log_prefix} 表达方式学习异常")
 
     async def _init_mcp(self) -> None:
         """初始化 MCP 工具并注册到统一工具层。"""

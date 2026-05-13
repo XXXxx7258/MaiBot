@@ -68,14 +68,20 @@ export default function MessageReceiveSection({
 
   // === 禁用正则表达式管理 ===
   const handleAddBanRegex = () => {
-    const trimmed = newBanRegex.trim()
-    if (trimmed && !config.ban_msgs_regex.includes(trimmed)) {
-      // 验证正则表达式语法
+    const nextPatterns = newBanRegex
+      .split(/\r\n|\n|\r/)
+      .map((pattern) => pattern.trim())
+      .filter((pattern) => pattern && !config.ban_msgs_regex.includes(pattern))
+
+    if (nextPatterns.length > 0) {
       try {
-        new RegExp(trimmed)
+        // 验证正则表达式语法
+        for (const pattern of nextPatterns) {
+          new RegExp(pattern)
+        }
         onChange({
           ...config,
-          ban_msgs_regex: [...config.ban_msgs_regex, trimmed],
+          ban_msgs_regex: [...config.ban_msgs_regex, ...nextPatterns],
         })
         setNewBanRegex('')
       } catch (err) {

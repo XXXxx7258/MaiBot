@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Clock, Database, Hash, Info, XCircle } from 'lucide-react'
+import { CheckCircle2, Circle, Clock, Database, Hash, Info } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 
@@ -33,7 +33,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
@@ -92,7 +91,7 @@ export function ExpressionDetailDialog({
 
         <DialogBody>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4">
             <InfoItem label="情境" value={expression.situation} />
             <InfoItem label="风格" value={expression.style} />
             <InfoItem 
@@ -109,7 +108,7 @@ export function ExpressionDetailDialog({
           {/* 状态标记 */}
           <div className="rounded-lg border bg-muted/50 p-4">
             <Label className="text-xs text-muted-foreground mb-3 block">状态标记</Label>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-4">
               <div className="flex items-center gap-2">
                 <div className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-full",
@@ -125,24 +124,6 @@ export function ExpressionDetailDialog({
                   <p className="text-sm font-medium">已检查</p>
                   <p className="text-xs text-muted-foreground">
                     {expression.checked ? "已通过审核" : "未审核"}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-full",
-                  expression.rejected ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-600"
-                )}>
-                  {expression.rejected ? (
-                    <XCircle className="h-5 w-5" />
-                  ) : (
-                    <Circle className="h-5 w-5" />
-                  )}
-                </div>
-                <div>
-                  <p className="text-sm font-medium">已拒绝</p>
-                  <p className="text-xs text-muted-foreground">
-                    {expression.rejected ? "不会被使用" : "正常"}
                   </p>
                 </div>
               </div>
@@ -652,8 +633,6 @@ export function ExpressionEditDialog({
         situation: expression.situation,
         style: expression.style,
         chat_id: expression.chat_id,
-        checked: expression.checked,
-        rejected: expression.rejected,
       })
     }
   }, [expression])
@@ -752,7 +731,6 @@ export function ExpressionEditDialog({
               <div className="space-y-1">
                 <p><strong>状态标记说明：</strong></p>
                 <p>• 已检查：表示该表达方式已通过审核（可由AI自动检查或人工审核）</p>
-                <p>• 已拒绝：表示该表达方式被标记为不合适，将永远不会被使用</p>
                 <p className="text-muted-foreground mt-2">
                   根据配置中"仅使用已审核通过的表达方式"设置：<br/>
                   • 开启时：只有通过审核（已检查）的项目会被使用<br/>
@@ -765,35 +743,15 @@ export function ExpressionEditDialog({
           <div className="grid grid-cols-2 gap-4">
             <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
               <div className="space-y-0.5">
-                <Label htmlFor="edit_checked" className="text-sm font-medium">
+                <Label className="text-sm font-medium">
                   已检查
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   已通过审核
                 </p>
               </div>
-              <Switch
-                id="edit_checked"
-                checked={formData.checked ?? false}
-                onCheckedChange={(checked) => setFormData({ ...formData, checked })}
-              />
             </div>
 
-            <div className="flex items-center justify-between space-x-2 rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <Label htmlFor="edit_rejected" className="text-sm font-medium">
-                  已拒绝
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  不会被使用
-                </p>
-              </div>
-              <Switch
-                id="edit_rejected"
-                checked={formData.rejected ?? false}
-                onCheckedChange={(rejected) => setFormData({ ...formData, rejected })}
-              />
-            </div>
           </div>
         </div>
         </DialogBody>

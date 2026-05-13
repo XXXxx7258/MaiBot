@@ -35,7 +35,6 @@ def test_expression_insert_assigns_auto_increment_id(expression_engine) -> None:
             count=1,
             session_id="session-a",
             checked=False,
-            rejected=False,
         )
         session.add(expression)
         session.commit()
@@ -55,7 +54,6 @@ def test_expression_insert_allows_same_situation_style(expression_engine) -> Non
             count=1,
             session_id="session-a",
             checked=False,
-            rejected=False,
         )
         second_expression = Expression(
             situation="对重复行为的默契响应",
@@ -64,7 +62,6 @@ def test_expression_insert_allows_same_situation_style(expression_engine) -> Non
             count=2,
             session_id="session-b",
             checked=False,
-            rejected=False,
         )
 
         session.add(first_expression)

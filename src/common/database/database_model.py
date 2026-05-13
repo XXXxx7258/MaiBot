@@ -185,11 +185,10 @@ class Expression(SQLModel, table=True):
     create_time: datetime = Field(default_factory=datetime.now, sa_column=Column(DateTime))  # 创建时间
     session_id: Optional[str] = Field(default=None, max_length=255, nullable=True)  # 会话ID，区分是否为全局表达方式
 
-    checked: bool = Field(default=False)  # 是否已经被检查过
-    rejected: bool = Field(default=False)  # 是否被拒绝但是未更新
+    checked: bool = Field(default=False)  # 是否已经通过人工审核
     modified_by: Optional[ModifiedBy] = Field(
         default=None, sa_column=Column(SQLEnum(ModifiedBy), nullable=True)
-    )  # 最后修改者，标记用户或AI，为空表示未检查
+    )  # 最后修改者，标记用户或AI，为空表示暂无修改来源
 
 
 class Jargon(SQLModel, table=True):

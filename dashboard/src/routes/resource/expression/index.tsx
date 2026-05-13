@@ -1,4 +1,4 @@
-import { ClipboardCheck, Download, MessageSquare, Plus, Search, Trash2, Upload } from 'lucide-react'
+import { ClipboardCheck, Download, MessageSquare, Plus, Search, Trash2, Upload, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 
@@ -79,7 +79,7 @@ export function ExpressionManagementPage() {
   const [chatList, setChatList] = useState<ChatInfo[]>([])
   const [expressionGroups, setExpressionGroups] = useState<ExpressionGroupInfo[]>([])
   const [chatNameMap, setChatNameMap] = useState<Map<string, string>>(new Map())
-  const [isReviewerOpen, setIsReviewerOpen] = useState(false)
+  const [activeView, setActiveView] = useState<'list' | 'review' | 'quick'>('list')
   const [uncheckedCount, setUncheckedCount] = useState(0)
   const { toast } = useToast()
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -162,6 +162,15 @@ export function ExpressionManagementPage() {
   }
 
   // 加载聚天列表
+  const handleActiveViewChange = (view: 'list' | 'review' | 'quick') => {
+    setActiveView(view)
+    if (view === 'list') {
+      loadExpressions()
+      loadStats()
+    }
+    loadReviewStats()
+  }
+
   const loadChatList = async () => {
     try {
       const result = await getChatList({ include_legacy: showLegacyExpressions })
@@ -567,19 +576,6 @@ export function ExpressionManagementPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setIsReviewerOpen(true)} 
-              className="gap-2"
-            >
-              <ClipboardCheck className="h-4 w-4" />
-              人工审核
-              {uncheckedCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white">
-                  {uncheckedCount > 99 ? '99+' : uncheckedCount}
-                </span>
-              )}
-            </Button>
             <Button onClick={() => setIsCreateDialogOpen(true)} className="gap-2">
               <Plus className="h-4 w-4" />
               新增表达方式
@@ -592,22 +588,66 @@ export function ExpressionManagementPage() {
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <div className="mb-3 inline-flex w-full rounded-lg border bg-muted p-1 sm:w-fit">
+        <button
+          type="button"
+          onClick={() => handleActiveViewChange('list')}
+          className={`inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:flex-none ${
+            activeView === 'list'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span>浏览表达</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => handleActiveViewChange('review')}
+          className={`inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:flex-none ${
+            activeView === 'review'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <ClipboardCheck className="h-4 w-4" />
+          <span>表达审核</span>
+          {uncheckedCount > 0 && (
+            <span className="ml-0.5 rounded-full bg-orange-500 px-1.5 py-0.5 text-xs leading-none text-white">
+              {uncheckedCount > 99 ? '99+' : uncheckedCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleActiveViewChange('quick')}
+          className={`inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:flex-none ${
+            activeView === 'quick'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Zap className="h-4 w-4" />
+          <span>快速审核</span>
+        </button>
+      </div>
+
+      <ScrollArea className={activeView === 'list' ? 'flex-1' : 'hidden'}>
         <div className="space-y-4 sm:space-y-6 pr-4">
 
       {/* 统计卡片 */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border bg-card px-4 py-3">
+      <div className="flex flex-wrap gap-2">
+        <div className="inline-flex h-9 w-full items-center justify-between gap-3 rounded-md border bg-card/80 px-3 sm:w-auto sm:min-w-[8.5rem]">
           <div className="text-xs text-muted-foreground">总数量</div>
-          <div className="text-xl font-bold mt-0.5">{stats.total}</div>
+          <div className="text-lg font-semibold leading-none">{stats.total}</div>
         </div>
-        <div className="rounded-lg border bg-card px-4 py-3">
+        <div className="inline-flex h-9 w-full items-center justify-between gap-3 rounded-md border bg-card/80 px-3 sm:w-auto sm:min-w-[8.5rem]">
           <div className="text-xs text-muted-foreground">近7天新增</div>
-          <div className="text-xl font-bold mt-0.5 text-green-600">{stats.recent_7days}</div>
+          <div className="text-lg font-semibold leading-none text-green-600">{stats.recent_7days}</div>
         </div>
-        <div className="rounded-lg border bg-card px-4 py-3">
+        <div className="inline-flex h-9 w-full items-center justify-between gap-3 rounded-md border bg-card/80 px-3 sm:w-auto sm:min-w-[8.5rem]">
           <div className="text-xs text-muted-foreground">关联聊天数</div>
-          <div className="text-xl font-bold mt-0.5 text-blue-600">{stats.chat_count}</div>
+          <div className="text-lg font-semibold leading-none text-blue-600">{stats.chat_count}</div>
         </div>
       </div>
 
@@ -615,11 +655,11 @@ export function ExpressionManagementPage() {
       <div className="rounded-lg border bg-card p-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="flex-1">
-            <Label htmlFor="search">搜索</Label>
-            <div className="relative mt-1">
+            <div className="relative">
               <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
               <Input
                 id="search"
+                aria-label="搜索"
                 placeholder="搜索情境、风格或上下文..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -878,6 +918,22 @@ export function ExpressionManagementPage() {
         </div>
       </ScrollArea>
 
+      {(activeView === 'review' || activeView === 'quick') && (
+        <div className="min-h-0 flex-1 pr-4">
+          <ExpressionReviewer
+            embedded
+            open
+            mode={activeView === 'quick' ? 'quick' : 'list'}
+            className="h-full"
+            onReviewed={() => {
+              loadExpressions()
+              loadStats()
+              loadReviewStats()
+            }}
+          />
+        </div>
+      )}
+
       {/* 详情对话框 */}
       <ExpressionDetailDialog
         expression={selectedExpression}
@@ -947,18 +1003,6 @@ export function ExpressionManagementPage() {
         onConfirm={handleClearCurrentChat}
       />
 
-      {/* 表达方式审核器 */}
-      <ExpressionReviewer
-        open={isReviewerOpen}
-        onOpenChange={(open) => {
-          setIsReviewerOpen(open)
-          if (!open) {
-            loadExpressions()
-            loadStats()
-            loadReviewStats()
-          }
-        }}
-      />
     </div>
   )
 }

@@ -40,13 +40,28 @@ try:
     except ImportError:
         from mcp import StdioServerParameters  # type: ignore[attr-defined]
 
-    from mcp.client.streamable_http import streamable_http_client
     from mcp.shared.exceptions import McpError
 
     try:
         from .stdio_filter import tolerant_stdio_client
     except ImportError:
         tolerant_stdio_client = None  # type: ignore[assignment]
+
+    try:
+        from mcp.client.streamable_http import streamable_http_client
+
+        STREAMABLE_HTTP_AVAILABLE = True
+        STREAMABLE_HTTP_USES_LEGACY_CLIENT = False
+    except ImportError:
+        try:
+            from mcp.client.streamable_http import streamablehttp_client as streamable_http_client
+
+            STREAMABLE_HTTP_AVAILABLE = True
+            STREAMABLE_HTTP_USES_LEGACY_CLIENT = True
+        except ImportError:
+            STREAMABLE_HTTP_AVAILABLE = False
+            STREAMABLE_HTTP_USES_LEGACY_CLIENT = False
+            streamable_http_client = None  # type: ignore[assignment]
 
     try:
         from mcp.client.sse import sse_client
@@ -57,10 +72,10 @@ try:
         sse_client = None  # type: ignore[assignment]
 
     MCP_AVAILABLE = True
-    STREAMABLE_HTTP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
     STREAMABLE_HTTP_AVAILABLE = False
+    STREAMABLE_HTTP_USES_LEGACY_CLIENT = False
     SSE_AVAILABLE = False
     ClientSession = None  # type: ignore[assignment,misc]
     StdioServerParameters = None  # type: ignore[assignment,misc]
@@ -192,14 +207,26 @@ class MCPConnection:
         if not self.config.url:
             raise ValueError(f"MCP 服务器 '{self.config.name}' 缺少 Streamable HTTP url 配置")
 
-        self._http_client = await self._exit_stack.enter_async_context(self._build_http_client())
-        read_stream, write_stream, session_id_getter = await self._exit_stack.enter_async_context(
-            streamable_http_client(
-                url=self.config.url,
-                http_client=self._http_client,
-                terminate_on_close=True,
+        if STREAMABLE_HTTP_USES_LEGACY_CLIENT:
+            read_stream, write_stream, session_id_getter = await self._exit_stack.enter_async_context(
+                streamable_http_client(
+                    url=self.config.url,
+                    headers=self.config.build_http_headers(),
+                    timeout=self.config.http_timeout_seconds,
+                    sse_read_timeout=self.config.read_timeout_seconds,
+                    terminate_on_close=True,
+                    httpx_client_factory=self._build_http_client,
+                )
             )
-        )
+        else:
+            self._http_client = await self._exit_stack.enter_async_context(self._build_http_client())
+            read_stream, write_stream, session_id_getter = await self._exit_stack.enter_async_context(
+                streamable_http_client(
+                    url=self.config.url,
+                    http_client=self._http_client,
+                    terminate_on_close=True,
+                )
+            )
         self._session_id_getter = session_id_getter
         return read_stream, write_stream
 

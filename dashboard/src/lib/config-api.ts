@@ -8,29 +8,44 @@ import type { ApiResponse } from '@/types/api'
 import type { ConfigSchema } from '@/types/config-schema'
 
 const API_BASE = '/api/webui/config'
+const schemaRequestCache = new Map<string, Promise<ApiResponse<ConfigSchema>>>()
+
+function getCachedSchema(key: string, url: string): Promise<ApiResponse<ConfigSchema>> {
+  const cachedRequest = schemaRequestCache.get(key)
+  if (cachedRequest) {
+    return cachedRequest
+  }
+
+  const request = fetchWithAuth(url, { cache: 'no-store' })
+    .then((response) => parseResponse<ConfigSchema>(response))
+    .catch((error) => {
+      schemaRequestCache.delete(key)
+      throw error
+    })
+
+  schemaRequestCache.set(key, request)
+  return request
+}
 
 /**
  * 获取麦麦主程序配置架构
  */
 export async function getBotConfigSchema(): Promise<ApiResponse<ConfigSchema>> {
-  const response = await fetchWithAuth(`${API_BASE}/schema/bot`, { cache: 'no-store' })
-  return parseResponse<ConfigSchema>(response)
+  return getCachedSchema('bot', `${API_BASE}/schema/bot`)
 }
 
 /**
  * 获取模型配置架构
  */
 export async function getModelConfigSchema(): Promise<ApiResponse<ConfigSchema>> {
-  const response = await fetchWithAuth(`${API_BASE}/schema/model`, { cache: 'no-store' })
-  return parseResponse<ConfigSchema>(response)
+  return getCachedSchema('model', `${API_BASE}/schema/model`)
 }
 
 /**
  * 获取指定配置节的架构
  */
 export async function getConfigSectionSchema(sectionName: string): Promise<ApiResponse<ConfigSchema>> {
-  const response = await fetchWithAuth(`${API_BASE}/schema/section/${sectionName}`, { cache: 'no-store' })
-  return parseResponse<ConfigSchema>(response)
+  return getCachedSchema(`section:${sectionName}`, `${API_BASE}/schema/section/${sectionName}`)
 }
 
 /**
