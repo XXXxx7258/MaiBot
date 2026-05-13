@@ -584,6 +584,8 @@ class BaseMaisakaReplyGenerator:
         replyer_prompt_section: RenderableType | None = None
         retry_constraints: List[str] = []
         retry_reasons: List[str] = []
+        retry_events: List[Dict[str, Any]] = []
+        hook_rewrite_events: List[Dict[str, str]] = []
         retry_count = 0
         aggregate_prompt_tokens = 0
         aggregate_completion_tokens = 0
@@ -681,6 +683,7 @@ class BaseMaisakaReplyGenerator:
             aggregate_prompt_tokens += generation_result.prompt_tokens
             aggregate_completion_tokens += generation_result.completion_tokens
             aggregate_total_tokens += generation_result.total_tokens
+            hook_original_response = response_text
 
             try:
                 after_response_result = await self._get_runtime_manager().invoke_hook(
@@ -702,33 +705,70 @@ class BaseMaisakaReplyGenerator:
                 logger.warning(f"Maisaka 回复器 after_response Hook 调用失败，将继续使用当前回复: {exc}")
                 after_response_kwargs = {}
             if "response" in after_response_kwargs:
-                response_text = str(after_response_kwargs.get("response") or "").strip()
+                hook_modified_response = str(after_response_kwargs.get("response") or "").strip()
+                if hook_modified_response != response_text:
+                    rewrite_event = {
+                        "attempt": str(retry_count + 1),
+                        "before": hook_original_response,
+                        "after": hook_modified_response,
+                    }
+                    hook_rewrite_events.append(rewrite_event)
+                    logger.warning(
+                        "Maisaka 回复器回复被 Hook 改写: "
+                        f"session={preview_chat_id} attempt={retry_count + 1} "
+                        f"before={self._normalize_content(hook_original_response, limit=300)!r} "
+                        f"after={self._normalize_content(hook_modified_response, limit=300)!r}"
+                    )
+                response_text = hook_modified_response
             retry_requested = self._coerce_hook_bool(after_response_kwargs.get("retry"), default=False)
+            matched_regex = str(after_response_kwargs.get("matched_regex") or "").strip()
+            matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
+            matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
+            retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
             if retry_requested and retry_count < REPLYER_MAX_HOOK_RETRIES:
-                matched_regex = str(after_response_kwargs.get("matched_regex") or "").strip()
-                retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
                 reason_parts = []
                 if matched_regex:
                     reason_parts.append(f"命中规则: {matched_regex}")
+                if matched_regex_description:
+                    reason_parts.append(f"规则说明: {matched_regex_description}")
                 if retry_reason:
                     reason_parts.append(retry_reason)
                 if response_text:
                     reason_parts.append(f"被拦截回复: {response_text!r}")
                 retry_log_reason = "；".join(reason_parts) or "Hook 请求重生成"
+                retry_events.append(
+                    {
+                        "attempt": retry_count + 1,
+                        "matched_regex": matched_regex,
+                        "matched_regex_pattern": matched_regex_pattern,
+                        "matched_regex_description": matched_regex_description,
+                        "retry_reason": retry_reason,
+                        "rejected_response": response_text,
+                    }
+                )
                 retry_reasons.append(retry_log_reason)
                 retry_constraint = self._build_retry_constraint_sentence(retry_reason, response_text)
                 if retry_constraint:
                     retry_constraints.append(retry_constraint)
                 retry_count += 1
                 logger.warning(
-                    f"Maisaka 回复器回复被 Hook 要求重生成: session={preview_chat_id} "
-                    f"retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} reason={retry_log_reason}"
+                    "Maisaka 回复器触发重生成: "
+                    f"session={preview_chat_id} attempt={retry_count} "
+                    f"retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
+                    f"constraint={'有' if retry_reason else '无'} "
+                    f"rule={matched_regex or 'unknown'} "
+                    f"pattern={matched_regex_pattern or 'unknown'} "
+                    f"reason={retry_log_reason} "
+                    f"rejected={self._normalize_content(response_text, limit=300)!r}"
                 )
                 continue
             if retry_requested:
                 logger.warning(
                     f"Maisaka 回复器已达到重生成上限，将使用最后一次回复: "
-                    f"session={preview_chat_id} retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES}"
+                    f"session={preview_chat_id} retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
+                    f"rule={matched_regex or 'unknown'} "
+                    f"pattern={matched_regex_pattern or 'unknown'} "
+                    f"response={self._normalize_content(response_text, limit=300)!r}"
                 )
             break
 
@@ -786,8 +826,12 @@ class BaseMaisakaReplyGenerator:
         result.metrics.extra["replyer_aggregate_total_tokens"] = aggregate_total_tokens
         if retry_reasons:
             result.metrics.extra["replyer_retry_reasons"] = list(retry_reasons)
+        if retry_events:
+            result.metrics.extra["replyer_retry_events"] = list(retry_events)
         if retry_constraints:
             result.metrics.extra["replyer_retry_constraints"] = list(retry_constraints)
+        if hook_rewrite_events:
+            result.metrics.extra["replyer_hook_rewrite_events"] = list(hook_rewrite_events)
         logger.info(
             "Replyer KV cache usage - "
             f"hit_tokens={prompt_cache_hit_tokens}, "
@@ -809,6 +853,12 @@ class BaseMaisakaReplyGenerator:
             f"总耗时ms={result.metrics.overall_ms} 重生成次数={retry_count} "
             f"已选表达={result.selected_expression_ids!r}"
         )
+        if retry_count > 0:
+            logger.info(
+                "Maisaka 回复器重生成完成: "
+                f"session={preview_chat_id} attempts={retry_count + 1} "
+                f"retry_count={retry_count} final={self._normalize_content(response_text, limit=300)!r}"
+            )
         if show_replyer_prompt or show_replyer_reasoning:
             summary_lines = [
                 f"流ID: {preview_chat_id or 'unknown'}",

@@ -318,6 +318,8 @@ class ComponentQueryService:
         self,
         component_type: ComponentType,
         name: str,
+        *,
+        context: Optional[ToolAvailabilityContext] = None,
     ) -> Optional[tuple["PluginSupervisor", "ComponentEntry"]]:
         """按组件短名解析唯一条目。
 
@@ -331,7 +333,7 @@ class ComponentQueryService:
 
         matched_entries = [
             (supervisor, entry)
-            for supervisor, entry in self._iter_component_entries(component_type)
+            for supervisor, entry in self._iter_component_entries(component_type, context=context)
             if entry.name == name
         ]
         if not matched_entries:
@@ -712,18 +714,45 @@ class ComponentQueryService:
             payload["stream_id"] = stream_id
             payload["chat_id"] = stream_id
 
+        group_id = str(context.group_id or "").strip()
+        user_id = str(context.user_id or "").strip()
+        platform = str(context.platform or "").strip()
+        if group_id:
+            payload["group_id"] = group_id
+        if user_id:
+            payload["user_id"] = user_id
+        if platform:
+            payload["platform"] = platform
+
         anchor_message = context.metadata.get("anchor_message")
         message_info = getattr(anchor_message, "message_info", None)
         group_info = getattr(message_info, "group_info", None)
         user_info = getattr(message_info, "user_info", None)
 
-        group_id = str(getattr(group_info, "group_id", "") or "").strip()
-        user_id = str(getattr(user_info, "user_id", "") or "").strip()
-        if group_id:
-            payload["group_id"] = group_id
-        if user_id:
-            payload["user_id"] = user_id
+        anchor_group_id = str(getattr(group_info, "group_id", "") or "").strip()
+        anchor_user_id = str(getattr(user_info, "user_id", "") or "").strip()
+        if anchor_group_id:
+            payload["group_id"] = anchor_group_id
+        if anchor_user_id:
+            payload["user_id"] = anchor_user_id
         return payload
+
+    @staticmethod
+    def _build_tool_availability_context(
+        context: Optional[ToolExecutionContext],
+    ) -> Optional[ToolAvailabilityContext]:
+        """从执行上下文还原工具可用性判断所需字段。"""
+
+        if context is None:
+            return None
+        return ToolAvailabilityContext(
+            session_id=context.session_id,
+            stream_id=context.stream_id,
+            is_group_chat=context.is_group_chat,
+            group_id=context.group_id,
+            user_id=context.user_id,
+            platform=context.platform,
+        )
 
     @staticmethod
     def _build_tool_invocation_payload(
@@ -866,7 +895,12 @@ class ComponentQueryService:
             ToolExecutionResult: 统一工具执行结果。
         """
 
-        matched_entry = self._get_unique_component_entry(ComponentType.TOOL, invocation.tool_name)
+        availability_context = self._build_tool_availability_context(context)
+        matched_entry = self._get_unique_component_entry(
+            ComponentType.TOOL,
+            invocation.tool_name,
+            context=availability_context,
+        )
         if matched_entry is None:
             return ToolExecutionResult(
                 tool_name=invocation.tool_name,

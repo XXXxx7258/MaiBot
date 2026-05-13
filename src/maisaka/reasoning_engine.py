@@ -262,7 +262,8 @@ class MaisakaReasoningEngine:
             return invocation, result, None
 
         execution_context = self._build_tool_execution_context(latest_thought, anchor_message)
-        tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name)
+        availability_context = self._build_tool_availability_context()
+        tool_spec = await self._runtime._tool_registry.get_tool_spec(invocation.tool_name, availability_context)
         result = await self._runtime._tool_registry.invoke(invocation, execution_context)
         if store_record:
             await self._store_tool_execution_record(invocation, result, tool_spec)
@@ -1161,10 +1162,15 @@ class MaisakaReasoningEngine:
             ToolExecutionContext: 统一工具执行上下文。
         """
 
+        chat_stream = self._runtime.chat_stream
         return ToolExecutionContext(
             session_id=self._runtime.session_id,
             stream_id=self._runtime.session_id,
             reasoning=latest_thought,
+            is_group_chat=chat_stream.is_group_session,
+            group_id=str(getattr(chat_stream, "group_id", "") or "").strip(),
+            user_id=str(getattr(chat_stream, "user_id", "") or "").strip(),
+            platform=str(getattr(chat_stream, "platform", "") or "").strip(),
             metadata={"anchor_message": anchor_message},
         )
 
