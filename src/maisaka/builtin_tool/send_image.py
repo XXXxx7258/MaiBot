@@ -18,7 +18,7 @@ def get_tool_spec() -> ToolSpec:
     """获取图片发送工具声明。"""
 
     return ToolSpec(
-        name="better_image_send_context",
+        name="send_image",
         description=(
             "发送聊天上下文或工具返回结果中的图片。按 msg_id 和 index 发送指定消息里的原图；"
             "也可以把工具返回媒体索引 tool_result:<call_id>:<item_index> 填入 msg_id、media_index 或 tool_result_index。"
@@ -172,7 +172,7 @@ async def handle_tool(
         image_base64=image_base64,
         stream_id=tool_ctx.runtime.session_id,
         sync_to_maisaka_history=True,
-        maisaka_source_kind="better_image_send_context",
+        maisaka_source_kind="send_image",
     )
     if not success:
         return tool_ctx.build_failure_result(
