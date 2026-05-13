@@ -56,7 +56,6 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
 import { getBotConfig, getModelConfig } from '@/lib/config-api'
 import { getReviewStats } from '@/lib/expression-api'
-import { getDashboardVersionStatus, type DashboardVersionStatus } from '@/lib/system-api'
 import { APP_VERSION } from '@/lib/version'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
 
@@ -169,7 +168,6 @@ function IndexPageContent() {
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null)
   const [maibotStableRelease, setMaibotStableRelease] = useState<ReleaseStatus | null>(null)
   const [maibotTestRelease, setMaibotTestRelease] = useState<ReleaseStatus | null>(null)
-  const [dashboardVersionStatus, setDashboardVersionStatus] = useState<DashboardVersionStatus | null>(null)
   const [featureStatus, setFeatureStatus] = useState<FeatureStatus>({
     memoryEnabled: false,
     visualEnabled: false,
@@ -234,14 +232,6 @@ function IndexPageContent() {
         console.debug('检查 MaiBot 最新版本失败:', error)
       }
 
-      try {
-        const status = await getDashboardVersionStatus(APP_VERSION)
-        if (mounted) {
-          setDashboardVersionStatus(status)
-        }
-      } catch (error) {
-        console.debug('妫€鏌?WebUI 鐗堟湰鏇存柊澶辫触:', error)
-      }
     }
 
     void loadLatestVersions()
@@ -627,9 +617,6 @@ function IndexPageContent() {
                 </Badge>
               </div>
               <div className="hidden">
-                最新版本 v{dashboardVersionStatus?.latest_version || APP_VERSION}
-              </div>
-              <div className="hidden">
                 <a
                   href={maibotTestRelease?.url || 'https://github.com/Mai-with-u/MaiBot/releases'}
                   target="_blank"
@@ -665,18 +652,7 @@ function IndexPageContent() {
                     <ExternalLink className="h-3 w-3" />
                   </span>
                 </a>
-                <a
-                  href={dashboardVersionStatus?.pypi_url || 'https://pypi.org/project/maibot-dashboard/'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between gap-2 transition-colors hover:text-muted-foreground"
-                >
-                  <span>WebUI 最新</span>
-                  <span className="inline-flex items-center gap-1">
-                    v{dashboardVersionStatus?.latest_version || APP_VERSION}
-                    <ExternalLink className="h-3 w-3" />
-                  </span>
-                </a>
+
               </div>
             </div>
           </CardContent>

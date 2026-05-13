@@ -18,7 +18,6 @@ from src.manager.async_task_manager import async_task_manager
 from src.plugin_runtime.integration import get_plugin_runtime_manager
 from src.prompt.prompt_manager import prompt_manager
 from src.services.memory_flow_service import memory_automation_service
-from src.webui.dashboard_update import auto_update_dashboard_if_needed
 
 # from src.api.main import start_api_server
 
@@ -77,25 +76,10 @@ class MainSystem:
         logger.info(t("startup.initialization_completed_banner", nickname=global_config.bot.nickname))
 
     async def _run_webui_startup_sequence(self) -> None:
-        """按顺序检查 WebUI 更新并启动 WebUI，同时允许主初始化并行执行。"""
-        await self._auto_update_webui_dashboard()
+        """启动 WebUI，同时允许主初始化并行执行。"""
         self._setup_webui_server()
         if self.webui_server:
             await self.webui_server.start()
-
-    async def _auto_update_webui_dashboard(self) -> None:
-        """启动时自动检查并更新 WebUI dashboard。"""
-        if not global_config.webui.enabled:
-            return
-        if not global_config.webui.auto_update_dashboard:
-            logger.info("WebUI dashboard 自动更新已关闭")
-            return
-
-        result = await auto_update_dashboard_if_needed()
-        if result.updated:
-            logger.info(result.message)
-        elif result.checked:
-            logger.info(result.message)
 
     async def _init_components(self) -> None:
         """初始化其他组件"""

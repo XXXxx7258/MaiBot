@@ -19,6 +19,11 @@ from src.common.database.database_model import ChatSession, Expression, Messages
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils
 from src.config.config import global_config
+from src.learners.expression_review_store import (
+    append_manual_rescue_log,
+    get_ai_review_log,
+    get_recent_ai_review_logs,
+)
 from src.webui.dependencies import require_auth
 
 logger = get_logger("webui.expression")
@@ -208,6 +213,41 @@ class ExpressionClearResponse(BaseModel):
     deleted_count: int = 0
 
 
+class ExpressionReviewLogResponse(BaseModel):
+    """表达方式 AI 审核日志响应。"""
+
+    id: str
+    created_at: float
+    expression_id: Optional[int] = None
+    session_id: str
+    chat_name: Optional[str] = None
+    passed: bool
+    reason: str
+    situation: str
+    style: str
+    source: str
+    error: Optional[str] = None
+    rescued: bool = False
+    rescued_expression_id: Optional[int] = None
+    rescued_at: Optional[float] = None
+
+
+class ExpressionReviewLogListResponse(BaseModel):
+    """表达方式 AI 审核日志列表响应。"""
+
+    success: bool = True
+    total: int
+    data: List[ExpressionReviewLogResponse]
+
+
+class ExpressionReviewLogApproveResponse(BaseModel):
+    """从 AI 审核日志人工恢复表达方式的响应。"""
+
+    success: bool = True
+    message: str
+    data: ExpressionResponse
+
+
 class LegacyExpressionImportPreviewRequest(BaseModel):
     """旧版表达方式导入预览请求。"""
 
@@ -366,6 +406,50 @@ def expression_to_response(expression: Expression, db_session: Optional[Any] = N
         create_date=create_date,
         checked=expression.checked,
         modified_by=expression.modified_by.value.lower() if expression.modified_by else None,
+    )
+
+
+def parse_review_log_datetime(value: Any) -> float:
+    """将审核日志中的 ISO 时间转换为前端使用的 Unix 时间戳。"""
+
+    if not value:
+        return 0.0
+    try:
+        return datetime.fromisoformat(str(value)).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def parse_optional_int(value: Any) -> Optional[int]:
+    """宽松解析日志中的整数 ID。"""
+
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def review_log_to_response(entry: Dict[str, Any], db_session: Optional[Any] = None) -> ExpressionReviewLogResponse:
+    """将表达方式审核日志转换为 WebUI 响应对象。"""
+
+    session_id = str(entry.get("session_id") or "").strip()
+    return ExpressionReviewLogResponse(
+        id=str(entry.get("id") or ""),
+        created_at=parse_review_log_datetime(entry.get("created_at")),
+        expression_id=parse_optional_int(entry.get("expression_id")),
+        session_id=session_id,
+        chat_name=get_chat_name(session_id, db_session) if session_id else None,
+        passed=bool(entry.get("passed", False)),
+        reason=str(entry.get("reason") or ""),
+        situation=str(entry.get("situation") or ""),
+        style=str(entry.get("style") or ""),
+        source=str(entry.get("source") or ""),
+        error=str(entry.get("error")) if entry.get("error") else None,
+        rescued=bool(entry.get("rescued", False)),
+        rescued_expression_id=parse_optional_int(entry.get("rescued_expression_id")),
+        rescued_at=parse_review_log_datetime(entry.get("rescued_at")) if entry.get("rescued_at") else None,
     )
 
 
@@ -1683,6 +1767,103 @@ class BatchReviewResponse(BaseModel):
     succeeded: int
     failed: int
     results: List[BatchReviewResultItem]
+
+
+@router.get("/review/logs", response_model=ExpressionReviewLogListResponse)
+async def get_expression_review_logs(
+    limit: int = Query(50, ge=1, le=200, description="返回最近多少条 AI 审核记录"),
+    passed: Optional[bool] = Query(None, description="按 AI 审核是否通过筛选"),
+) -> ExpressionReviewLogListResponse:
+    """查看最近的表达方式 AI 审核记录。"""
+
+    try:
+        log_entries = get_recent_ai_review_logs(limit=limit, passed=passed)
+        with get_db_session() as session:
+            data = [review_log_to_response(entry, session) for entry in log_entries]
+        return ExpressionReviewLogListResponse(total=len(data), data=data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"获取表达方式 AI 审核日志失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取表达方式 AI 审核日志失败: {str(e)}") from e
+
+
+@router.post("/review/logs/{review_log_id}/approve", response_model=ExpressionReviewLogApproveResponse)
+async def approve_expression_review_log(review_log_id: str) -> ExpressionReviewLogApproveResponse:
+    """将 AI 审核日志中的表达方式设为人工审核通过，必要时从日志恢复记录。"""
+
+    try:
+        review_log = get_ai_review_log(review_log_id)
+        if not review_log:
+            raise HTTPException(status_code=404, detail=f"未找到审核日志: {review_log_id}")
+
+        session_id = require_non_empty_chat_id(review_log.get("session_id"))
+        situation = str(review_log.get("situation") or "").strip()
+        style = str(review_log.get("style") or "").strip()
+        if not situation or not style:
+            raise HTTPException(status_code=400, detail="审核日志缺少表达方式内容，无法恢复")
+
+        current_time = datetime.now()
+        expression_id = parse_optional_int(review_log.get("expression_id"))
+        created = False
+
+        with get_db_session() as session:
+            db_expression = None
+            if expression_id is not None:
+                db_expression = session.exec(select(Expression).where(col(Expression.id) == expression_id).limit(1)).first()
+
+            if db_expression is None:
+                db_expression = session.exec(
+                    select(Expression)
+                    .where(
+                        col(Expression.session_id) == session_id,
+                        col(Expression.situation) == situation,
+                        col(Expression.style) == style,
+                    )
+                    .limit(1)
+                ).first()
+
+            if db_expression is None:
+                db_expression = Expression(
+                    situation=situation,
+                    style=style,
+                    content_list=json.dumps([situation], ensure_ascii=False),
+                    count=1,
+                    last_active_time=current_time,
+                    create_time=current_time,
+                    session_id=session_id,
+                    checked=True,
+                    modified_by=ModifiedBy.USER,
+                )
+                created = True
+            else:
+                db_expression.checked = True
+                db_expression.modified_by = ModifiedBy.USER
+                db_expression.last_active_time = current_time
+
+            session.add(db_expression)
+            session.flush()
+            session.refresh(db_expression)
+            restored_expression_id = db_expression.id
+            data = expression_to_response(db_expression, session)
+
+        if restored_expression_id is None:
+            raise HTTPException(status_code=500, detail="表达方式恢复后缺少 ID")
+
+        append_manual_rescue_log(review_log_id=review_log_id, expression_id=restored_expression_id)
+        message = "已从 AI 审核日志救回表达方式并设为人工通过" if created else "已设为人工审核通过"
+        logger.info(
+            f"表达方式审核日志已人工通过: review_log_id={review_log_id}, "
+            f"expression_id={restored_expression_id}, session_id={session_id}"
+        )
+        return ExpressionReviewLogApproveResponse(message=message, data=data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"从表达方式 AI 审核日志恢复失败: {e}")
+        raise HTTPException(status_code=500, detail=f"从表达方式 AI 审核日志恢复失败: {str(e)}") from e
 
 
 @router.post("/review/batch", response_model=BatchReviewResponse)

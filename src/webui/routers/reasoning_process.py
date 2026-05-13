@@ -1,11 +1,15 @@
 """推理过程日志浏览接口。"""
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlmodel import Session, col, select
 
+from src.common.database.database import get_db_session
+from src.common.database.database_model import ChatSession, Messages
 from src.webui.dependencies import require_auth
 
 router = APIRouter(prefix="/reasoning-process", tags=["reasoning-process"], dependencies=[Depends(require_auth)])
@@ -13,6 +17,28 @@ router = APIRouter(prefix="/reasoning-process", tags=["reasoning-process"], depe
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROMPT_LOG_ROOT = (PROJECT_ROOT / "logs" / "maisaka_prompt").resolve()
 ALLOWED_SUFFIXES = {".txt", ".html"}
+SESSION_CHAT_TYPES = ("group", "private")
+
+
+class ReasoningPromptStageInfo(BaseModel):
+    """推理过程类型概要。"""
+
+    name: str
+    session_count: int = 0
+    latest_modified_at: float = 0
+
+
+class ReasoningPromptSessionInfo(BaseModel):
+    """推理过程日志目录对应的聊天流信息。"""
+
+    name: str
+    platform: str = ""
+    chat_type: str = ""
+    target_id: str = ""
+    resolved_session_id: str | None = None
+    display_name: str = ""
+    account_id: str | None = None
+    matched_current_account: bool = False
 
 
 class ReasoningPromptFile(BaseModel):
@@ -20,10 +46,16 @@ class ReasoningPromptFile(BaseModel):
 
     stage: str
     session_id: str
+    resolved_session_id: str | None = None
+    session_display_name: str | None = None
+    platform: str | None = None
+    chat_type: str | None = None
+    target_id: str | None = None
     stem: str
     timestamp: int | None = None
     text_path: str | None = None
     html_path: str | None = None
+    output_preview: str | None = None
     size: int = 0
     modified_at: float = 0
 
@@ -36,7 +68,9 @@ class ReasoningPromptListResponse(BaseModel):
     page: int
     page_size: int
     stages: list[str] = Field(default_factory=list)
+    stage_infos: list[ReasoningPromptStageInfo] = Field(default_factory=list)
     sessions: list[str] = Field(default_factory=list)
+    session_infos: list[ReasoningPromptSessionInfo] = Field(default_factory=list)
     selected_session: str = ""
 
 
@@ -89,6 +123,35 @@ def _list_stage_names() -> list[str]:
     return sorted(path.name for path in PROMPT_LOG_ROOT.iterdir() if path.is_dir() and _is_safe_name(path.name))
 
 
+def _list_stage_infos() -> list[ReasoningPromptStageInfo]:
+    if not PROMPT_LOG_ROOT.is_dir():
+        return []
+
+    stage_infos: list[ReasoningPromptStageInfo] = []
+    for stage_dir in PROMPT_LOG_ROOT.iterdir():
+        if not stage_dir.is_dir() or not _is_safe_name(stage_dir.name):
+            continue
+
+        session_dirs = [path for path in stage_dir.iterdir() if path.is_dir() and _is_safe_name(path.name)]
+        latest_modified_at = 0.0
+        for session_dir in session_dirs:
+            try:
+                latest_modified_at = max(latest_modified_at, session_dir.stat().st_mtime)
+            except OSError:
+                continue
+
+        stage_infos.append(
+            ReasoningPromptStageInfo(
+                name=stage_dir.name,
+                session_count=len(session_dirs),
+                latest_modified_at=latest_modified_at,
+            )
+        )
+
+    stage_infos.sort(key=lambda item: item.name)
+    return stage_infos
+
+
 def _resolve_stage_name(stage: str) -> str:
     normalized_stage = str(stage or "").strip()
     if not normalized_stage or normalized_stage == "all":
@@ -117,7 +180,209 @@ def _resolve_session_name(session: str, sessions: list[str]) -> str:
     return normalized_session if normalized_session in sessions else ""
 
 
-def _collect_prompt_files(stage: str, session: str) -> list[ReasoningPromptFile]:
+def _get_configured_platform_accounts() -> set[tuple[str, str]]:
+    """读取当前配置中的平台账号对。"""
+
+    from src.config.config import global_config
+
+    pairs: set[tuple[str, str]] = set()
+    base_platform = str(global_config.bot.platform or "").strip()
+    base_account = str(global_config.bot.qq_account or "").strip()
+    if base_platform and base_account:
+        pairs.add((base_platform, base_account))
+
+    for item in global_config.bot.platforms:
+        platform, separator, account_id = str(item or "").partition(":")
+        platform = platform.strip()
+        account_id = account_id.strip()
+        if separator and platform and account_id:
+            pairs.add((platform, account_id))
+
+    return pairs
+
+
+def _parse_session_directory_name(name: str) -> tuple[str, str, str] | None:
+    """解析 ``platform_type_id`` 形式的日志目录名。"""
+
+    normalized_name = str(name or "").strip()
+    for chat_type in SESSION_CHAT_TYPES:
+        marker = f"_{chat_type}_"
+        if marker not in normalized_name:
+            continue
+
+        platform, target_id = normalized_name.split(marker, 1)
+        platform = platform.strip()
+        target_id = target_id.strip()
+        if platform and target_id:
+            return platform, chat_type, target_id
+
+    return None
+
+
+def _get_chat_manager() -> Any:
+    from src.chat.message_receive.chat_manager import chat_manager
+
+    return chat_manager
+
+
+def _session_sort_key(session: Any) -> float:
+    timestamp = session.last_active_timestamp or session.created_timestamp
+    return timestamp.timestamp() if timestamp else 0.0
+
+
+def _select_current_account_session(
+    sessions: list[Any],
+    configured_accounts: set[tuple[str, str]],
+) -> tuple[Any | None, bool]:
+    configured_matches = [
+        session
+        for session in sessions
+        if (
+            str(session.platform or "").strip(),
+            str(session.account_id or "").strip(),
+        )
+        in configured_accounts
+    ]
+    if configured_matches:
+        return max(configured_matches, key=_session_sort_key), True
+
+    legacy_sessions = [session for session in sessions if not str(session.account_id or "").strip()]
+    if len(sessions) == 1:
+        return sessions[0], False
+    if len(legacy_sessions) == 1:
+        return legacy_sessions[0], False
+    return None, False
+
+
+def _get_chat_name_from_latest_message(session_id: str, db_session: Session) -> str | None:
+    statement = (
+        select(Messages).where(col(Messages.session_id) == session_id).order_by(col(Messages.timestamp).desc()).limit(1)
+    )
+    message = db_session.exec(statement).first()
+    if not message:
+        return None
+    if message.group_id:
+        return message.group_name or f"群聊{message.group_id}"
+
+    private_name = message.user_cardname or message.user_nickname or (f"用户{message.user_id}" if message.user_id else None)
+    return f"{private_name}的私聊" if private_name else None
+
+
+def _get_chat_name_from_session_record(chat_session: Any | ChatSession) -> str:
+    if chat_session.group_id:
+        return f"群聊{chat_session.group_id}"
+    if chat_session.user_id:
+        return f"用户{chat_session.user_id}的私聊"
+    return chat_session.session_id
+
+
+def _get_chat_display_name(chat_session: Any, db_session: Session) -> str:
+    chat_manager = _get_chat_manager()
+    if name := chat_manager.get_session_name(chat_session.session_id):
+        return name
+    if name := _get_chat_name_from_latest_message(chat_session.session_id, db_session):
+        return name
+    return _get_chat_name_from_session_record(chat_session)
+
+
+def _fallback_session_display_name(name: str, parsed: tuple[str, str, str] | None) -> str:
+    if parsed is None:
+        return name
+
+    platform, chat_type, target_id = parsed
+    chat_type_label = "群聊" if chat_type == "group" else "私聊"
+    return f"{platform} {chat_type_label} {target_id}"
+
+
+def _extract_output_preview(file_path: Path, max_chars: int = 160) -> str | None:
+    """从新版 prompt 预览 txt 中提取输出结果摘要。"""
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    marker = "[输出结果]"
+    marker_index = content.find(marker)
+    if marker_index < 0:
+        return None
+
+    output_text = content[marker_index + len(marker) :]
+    separator_index = output_text.find("================================================================================")
+    if separator_index >= 0:
+        output_text = output_text[:separator_index]
+
+    normalized_output = " ".join(line.strip() for line in output_text.splitlines() if line.strip())
+    if not normalized_output:
+        return None
+
+    if len(normalized_output) <= max_chars:
+        return normalized_output
+    return f"{normalized_output[:max_chars].rstrip()}..."
+
+
+def _resolve_reasoning_session_info(
+    name: str,
+    *,
+    configured_accounts: set[tuple[str, str]],
+    db_session: Session,
+) -> ReasoningPromptSessionInfo:
+    parsed = _parse_session_directory_name(name)
+    if parsed is None:
+        return ReasoningPromptSessionInfo(name=name, display_name=name)
+
+    platform, chat_type, target_id = parsed
+    chat_manager = _get_chat_manager()
+    matched_sessions = chat_manager.resolve_sessions_by_target(
+        platform=platform,
+        target_id=target_id,
+        chat_type=chat_type,
+    )
+    matched_session, matched_current_account = _select_current_account_session(matched_sessions, configured_accounts)
+
+    if matched_session is None:
+        return ReasoningPromptSessionInfo(
+            name=name,
+            platform=platform,
+            chat_type=chat_type,
+            target_id=target_id,
+            display_name=_fallback_session_display_name(name, parsed),
+        )
+
+    return ReasoningPromptSessionInfo(
+        name=name,
+        platform=platform,
+        chat_type=chat_type,
+        target_id=target_id,
+        resolved_session_id=matched_session.session_id,
+        display_name=_get_chat_display_name(matched_session, db_session),
+        account_id=matched_session.account_id,
+        matched_current_account=matched_current_account,
+    )
+
+
+def _list_session_infos(stage: str) -> list[ReasoningPromptSessionInfo]:
+    session_names = _list_session_names(stage)
+    if not session_names:
+        return []
+
+    configured_accounts = _get_configured_platform_accounts()
+    with get_db_session(auto_commit=False) as db_session:
+        return [
+            _resolve_reasoning_session_info(
+                name,
+                configured_accounts=configured_accounts,
+                db_session=db_session,
+            )
+            for name in session_names
+        ]
+
+
+def _collect_prompt_files(
+    stage: str,
+    session: str,
+    session_info_map: dict[str, ReasoningPromptSessionInfo],
+) -> list[ReasoningPromptFile]:
     session_dir = PROMPT_LOG_ROOT / stage / session
     if not session or not session_dir.is_dir():
         return []
@@ -141,16 +406,23 @@ def _collect_prompt_files(stage: str, session: str) -> list[ReasoningPromptFile]
         stem = file_path.stem
         key = (stage_name, session_id, stem)
         stat = file_path.stat()
+        session_info = session_info_map.get(session_id)
 
         record = records.setdefault(
             key,
             {
                 "stage": stage_name,
                 "session_id": session_id,
+                "resolved_session_id": session_info.resolved_session_id if session_info else None,
+                "session_display_name": session_info.display_name if session_info else None,
+                "platform": session_info.platform if session_info else None,
+                "chat_type": session_info.chat_type if session_info else None,
+                "target_id": session_info.target_id if session_info else None,
                 "stem": stem,
                 "timestamp": int(stem) if stem.isdigit() else None,
                 "text_path": None,
                 "html_path": None,
+                "output_preview": None,
                 "size": 0,
                 "modified_at": 0.0,
             },
@@ -160,6 +432,8 @@ def _collect_prompt_files(stage: str, session: str) -> list[ReasoningPromptFile]
 
         if file_path.suffix.lower() == ".txt":
             record["text_path"] = _relative_posix_path(file_path)
+            if stage_name == "replyer":
+                record["output_preview"] = _extract_output_preview(file_path)
         elif file_path.suffix.lower() == ".html":
             record["html_path"] = _relative_posix_path(file_path)
 
@@ -178,11 +452,14 @@ async def list_reasoning_prompt_files(
 ):
     """列出 logs/maisaka_prompt 下的推理过程日志。"""
 
-    stages = _list_stage_names()
+    stage_infos = _list_stage_infos()
+    stages = [item.name for item in stage_infos]
     selected_stage = _resolve_stage_name(stage)
-    sessions = _list_session_names(selected_stage)
+    session_infos = _list_session_infos(selected_stage)
+    sessions = [item.name for item in session_infos]
+    session_info_map = {item.name: item for item in session_infos}
     selected_session = _resolve_session_name(session, sessions)
-    items = _collect_prompt_files(selected_stage, selected_session)
+    items = _collect_prompt_files(selected_stage, selected_session, session_info_map)
     normalized_search = search.strip().lower()
 
     if normalized_search:
@@ -191,6 +468,9 @@ async def list_reasoning_prompt_files(
             for item in items
             if normalized_search in item.stage.lower()
             or normalized_search in item.session_id.lower()
+            or normalized_search in (item.session_display_name or "").lower()
+            or normalized_search in (item.resolved_session_id or "").lower()
+            or normalized_search in (item.output_preview or "").lower()
             or normalized_search in item.stem.lower()
         ]
 
@@ -204,7 +484,9 @@ async def list_reasoning_prompt_files(
         page=page,
         page_size=page_size,
         stages=stages,
+        stage_infos=stage_infos,
         sessions=sessions,
+        session_infos=session_infos,
         selected_session=selected_session,
     )
 

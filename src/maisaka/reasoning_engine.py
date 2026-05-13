@@ -194,6 +194,9 @@ class MaisakaReasoningEngine:
                 elif visibility == "deferred":
                     deferred_tool_specs.append(tool_spec)
                 continue
+            if str(tool_spec.metadata.get("visibility") or "").strip().lower() == "visible":
+                visible_builtin_tool_specs.append(tool_spec)
+                continue
             deferred_tool_specs.append(tool_spec)
 
         self._runtime.update_deferred_tool_specs(deferred_tool_specs)

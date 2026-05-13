@@ -253,3 +253,32 @@ export interface BatchReviewResponse {
   failed: number
   results: BatchReviewResultItem[]
 }
+
+export interface ExpressionReviewLogEntry {
+  id: string
+  created_at: number
+  expression_id: number | null
+  session_id: string
+  chat_name?: string | null
+  passed: boolean
+  reason: string
+  situation: string
+  style: string
+  source: string
+  error?: string | null
+  rescued: boolean
+  rescued_expression_id: number | null
+  rescued_at: number | null
+}
+
+export interface ExpressionReviewLogListResponse {
+  success: boolean
+  total: number
+  data: ExpressionReviewLogEntry[]
+}
+
+export interface ExpressionReviewLogApproveResponse {
+  success: boolean
+  message: string
+  data: Expression
+}

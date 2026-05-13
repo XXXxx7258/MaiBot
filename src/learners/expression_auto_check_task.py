@@ -19,6 +19,7 @@ from src.common.database.database import get_db_session
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.logger import get_logger
 from src.config.config import global_config
+from src.learners.expression_review_store import append_ai_review_log
 from src.learners.expression_utils import check_expression_suitability
 from src.manager.async_task_manager import AsyncTask
 
@@ -84,8 +85,28 @@ class ExpressionAutoCheckTask(AsyncTask):
         )
 
         if error:
+            append_ai_review_log(
+                session_id=expression.session_id or "",
+                situation=expression.situation,
+                style=expression.style,
+                passed=False,
+                reason=reason or error,
+                source="auto_check",
+                expression_id=expression.id,
+                error=error,
+            )
             logger.warning(f"表达方式评估时出现错误 [ID: {expression.id}]: {error}")
             return False
+
+        append_ai_review_log(
+            session_id=expression.session_id or "",
+            situation=expression.situation,
+            style=expression.style,
+            passed=suitable,
+            reason=reason,
+            source="auto_check",
+            expression_id=expression.id,
+        )
 
         try:
             with get_db_session() as session:
@@ -99,15 +120,11 @@ class ExpressionAutoCheckTask(AsyncTask):
                         session.delete(expr)
 
             status = "通过" if suitable else "不通过"
-            # 保留这段注释，方便后续需要时恢复更详细的审核日志。
-            # logger.info(
-            #     f"表达方式评估完成 [ID: {expression.id}] - {status} | "
-            #     f"Situation: {expression.situation}... | "
-            #     f"Style: {expression.style}... | "
-            #     f"Reason: {reason[:50]}..."
-            # )
-
-            logger.debug(f"表达方式 [ID: {expression.id}] 评估完成: {status}, reason={reason}")
+            logger.info(
+                f"表达方式 [ID: {expression.id}] AI 评估完成: {status}, "
+                f"session_id={expression.session_id or ''}, situation={expression.situation}, "
+                f"style={expression.style}, reason={reason}"
+            )
             return suitable
 
         except Exception as e:

@@ -559,3 +559,65 @@ def test_batch_review_expressions_no_unchecked_check(client: TestClient, mock_au
     assert data["success"] is True
     assert data["succeeded"] == 1
     assert data["results"][0]["success"] is True
+
+
+def test_get_expression_review_logs_reads_json_file(client: TestClient, mock_auth, tmp_path, monkeypatch):
+    """Test GET /expression/review/logs returns recent AI review records from JSON."""
+    import src.learners.expression_review_store as review_store
+
+    monkeypatch.setattr(review_store, "REVIEW_LOG_PATH", tmp_path / "expression_review" / "review_logs.json")
+    review_store.append_ai_review_log(
+        session_id="chat_json",
+        situation="表示惊讶",
+        style="使用 好家伙",
+        passed=False,
+        reason="表达方式过于特定",
+        source="learn_before_upsert",
+    )
+
+    response = client.get("/api/webui/expression/review/logs")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["total"] == 1
+    assert data["data"][0]["session_id"] == "chat_json"
+    assert data["data"][0]["passed"] is False
+    assert data["data"][0]["reason"] == "表达方式过于特定"
+
+
+def test_approve_expression_review_log_restores_deleted_expression(
+    client: TestClient,
+    mock_auth,
+    test_session: Session,
+    tmp_path,
+    monkeypatch,
+):
+    """Test POST /expression/review/logs/{id}/approve restores a rejected expression as user-approved."""
+    import src.learners.expression_review_store as review_store
+
+    monkeypatch.setattr(review_store, "REVIEW_LOG_PATH", tmp_path / "expression_review" / "review_logs.json")
+    review_entry = review_store.append_ai_review_log(
+        session_id="chat_restore",
+        situation="想吐槽时",
+        style="使用 什么情况",
+        passed=False,
+        reason="AI 误判",
+        source="auto_check",
+        expression_id=12345,
+    )
+
+    response = client.post(f"/api/webui/expression/review/logs/{review_entry['id']}/approve")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["data"]["checked"] is True
+    assert data["data"]["modified_by"] == "user"
+    assert data["data"]["chat_id"] == "chat_restore"
+
+    test_session.expire_all()
+    restored_expression = test_session.exec(select(Expression).where(Expression.session_id == "chat_restore")).first()
+    assert restored_expression is not None
+    assert restored_expression.checked is True
+    assert restored_expression.modified_by == ModifiedBy.USER

@@ -17,6 +17,8 @@ import type {
   ExpressionImportResponse,
   ExpressionGroupListResponse,
   ExpressionListResponse,
+  ExpressionReviewLogApproveResponse,
+  ExpressionReviewLogListResponse,
   ExpressionStatsResponse,
   ExpressionUpdateRequest,
   ExpressionUpdateResponse,
@@ -888,6 +890,81 @@ export async function batchReviewExpressions(
     return {
       success: false,
       error: '无法解析批量审核响应',
+    }
+  }
+}
+
+export async function getExpressionReviewLogs(params: {
+  limit?: number
+  passed?: boolean
+} = {}): Promise<ApiResponse<ExpressionReviewLogListResponse>> {
+  const queryParams = new URLSearchParams()
+  if (params.limit) queryParams.append('limit', params.limit.toString())
+  if (params.passed !== undefined) queryParams.append('passed', params.passed ? 'true' : 'false')
+
+  const response = await fetchWithAuth(`${API_BASE}/review/logs?${queryParams}`)
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '获取 AI 审核记录失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '获取 AI 审核记录失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionReviewLogListResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析 AI 审核记录响应',
+    }
+  }
+}
+
+export async function approveExpressionReviewLog(
+  reviewLogId: string
+): Promise<ApiResponse<ExpressionReviewLogApproveResponse>> {
+  const response = await fetchWithAuth(`${API_BASE}/review/logs/${reviewLogId}/approve`, {
+    method: 'POST',
+  })
+
+  if (!response.ok) {
+    try {
+      const errorData = await response.json()
+      return {
+        success: false,
+        error: errorData.detail || errorData.message || '恢复表达方式失败',
+      }
+    } catch {
+      return {
+        success: false,
+        error: response.statusText || '恢复表达方式失败',
+      }
+    }
+  }
+
+  try {
+    const data: ExpressionReviewLogApproveResponse = await response.json()
+    return {
+      success: true,
+      data,
+    }
+  } catch {
+    return {
+      success: false,
+      error: '无法解析恢复表达方式响应',
     }
   }
 }

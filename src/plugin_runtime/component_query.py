@@ -265,6 +265,17 @@ class ComponentQueryService:
         )
 
     @staticmethod
+    def _get_tool_visibility(entry: "ToolEntry") -> str:
+        """读取插件工具面向 LLM 的可见性声明。"""
+
+        raw_visibility = str(entry.metadata.get("visibility") or "").strip().lower()
+        if raw_visibility in {"visible", "deferred", "hidden"}:
+            return raw_visibility
+        if bool(entry.metadata.get("core_tool", False)):
+            return "visible"
+        return "deferred"
+
+    @staticmethod
     def _build_tool_spec(entry: "ToolEntry") -> ToolSpec:
         """将运行时 Tool 条目转换为统一工具声明。
 
@@ -276,16 +287,19 @@ class ComponentQueryService:
         """
 
         parameters_schema = ComponentQueryService._build_tool_parameters_schema(entry)
+        visibility = ComponentQueryService._get_tool_visibility(entry)
         return ToolSpec(
             name=entry.name,
             description=entry.description or f"工具 {entry.name}",
             parameters_schema=parameters_schema,
             provider_name=entry.plugin_id,
             provider_type="plugin",
+            enabled=visibility != "hidden",
             metadata={
                 "plugin_id": entry.plugin_id,
                 "invoke_method": entry.invoke_method,
                 "legacy_component_type": entry.legacy_component_type,
+                "visibility": visibility,
             },
         )
 

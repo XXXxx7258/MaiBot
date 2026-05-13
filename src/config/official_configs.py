@@ -3303,15 +3303,6 @@ class WebUIConfig(ConfigBase):
     )
     """是否启用WebUI"""
 
-    auto_update_dashboard: bool = Field(
-        default=True,
-        json_schema_extra={
-            "x-widget": "switch",
-            "x-icon": "refresh-cw",
-        },
-    )
-    """启动时是否自动检查并更新 WebUI dashboard"""
-
     host: str = Field(
         default="127.0.0.1",
         json_schema_extra={
