@@ -1691,6 +1691,24 @@ class MaisakaReasoningEngine:
         normalized_content = self._truncate_tool_record_text(history_content, max_length=200)
         return f"- {tool_call.func_name} {summary_prefix}: {normalized_content}"
 
+    @staticmethod
+    def _append_deferred_tool_parameter_hint(result: ToolExecutionResult) -> ToolExecutionResult:
+        """给未展开工具的失败结果补充参数查看提示。"""
+
+        hint = "请通过 tool_search 查看具体的工具参数后再重试。"
+        if result.success:
+            return result
+        if result.error_message:
+            if hint not in result.error_message:
+                result.error_message = f"{result.error_message}\n{hint}"
+            return result
+        if result.content:
+            if hint not in result.content:
+                result.content = f"{result.content}\n{hint}"
+            return result
+        result.error_message = hint
+        return result
+
     def _build_tool_monitor_result(
         self,
         tool_call: ToolCall,
@@ -1782,17 +1800,10 @@ class MaisakaReasoningEngine:
                 f"第 {tool_index}/{total_tool_count} 个工具",
             )
             tool_started_at = time.time()
-            if not self._runtime.is_action_tool_currently_available(invocation.tool_name):
-                result = ToolExecutionResult(
-                    tool_name=invocation.tool_name,
-                    success=False,
-                    error_message=(
-                        f"工具 {invocation.tool_name} 当前未直接暴露给 planner。"
-                        "如果它在 deferred tools 提示中，请先调用 tool_search。"
-                    ),
-                )
-            else:
-                result = await self._runtime._tool_registry.invoke(invocation, execution_context)
+            is_unexpanded_tool = not self._runtime.is_action_tool_currently_available(invocation.tool_name)
+            result = await self._runtime._tool_registry.invoke(invocation, execution_context)
+            if is_unexpanded_tool and not result.success:
+                result = self._append_deferred_tool_parameter_hint(result)
             tool_duration_ms = (time.time() - tool_started_at) * 1000
             await self._store_tool_execution_record(
                 invocation,
