@@ -6,8 +6,8 @@ type HSL = {
   l: number
 }
 
-export const DEFAULT_ACCENT_COLOR_HSL = '188.5 100% 45.5%'
-export const DEFAULT_ACCENT_COLOR_HEX = '#00c7e8'
+export const DEFAULT_ACCENT_COLOR_HSL = '35 100% 45.1%'
+export const DEFAULT_ACCENT_COLOR_HEX = '#e68600'
 
 const clamp = (value: number, min: number, max: number): number => {
   if (value < min) return min

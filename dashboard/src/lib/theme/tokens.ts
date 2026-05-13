@@ -154,7 +154,7 @@ export type UserThemeConfig = {
 
 export const defaultLightTokens: ThemeTokens = {
   color: {
-    primary: '188.5 100% 45.5%',
+    primary: '35 100% 45.1%',
     'primary-foreground': '210 40% 98%',
     'primary-gradient': 'none',
     secondary: '188.5 35% 96%',
@@ -173,8 +173,8 @@ export const defaultLightTokens: ThemeTokens = {
     'popover-foreground': '222.2 84% 4.9%',
     border: '188.5 20% 91.4%',
     input: '188.5 20% 91.4%',
-    ring: '188.5 100% 45.5%',
-    'chart-1': '188.5 100% 45.5%',
+    ring: '35 100% 45.1%',
+    'chart-1': '35 100% 45.1%',
     'chart-2': '160 60% 45%',
     'chart-3': '30 80% 55%',
     'chart-4': '280 65% 60%',
@@ -249,7 +249,7 @@ export const defaultLightTokens: ThemeTokens = {
 
 export const defaultDarkTokens: ThemeTokens = {
   color: {
-    primary: '188.5 100% 45.5%',
+    primary: '35 100% 45.1%',
     'primary-foreground': '210 40% 98%',
     'primary-gradient': 'none',
     secondary: '188.5 35% 17.5%',
@@ -268,8 +268,8 @@ export const defaultDarkTokens: ThemeTokens = {
     'popover-foreground': '210 40% 98%',
     border: '188.5 20% 17.5%',
     input: '188.5 20% 17.5%',
-    ring: '188.5 100% 45.5%',
-    'chart-1': '188.5 100% 45.5%',
+    ring: '35 100% 45.1%',
+    'chart-1': '35 100% 45.1%',
     'chart-2': '160 60% 50%',
     'chart-3': '30 80% 60%',
     'chart-4': '280 65% 65%',

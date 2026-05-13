@@ -136,7 +136,7 @@
 @layer base {
   :root {
     /* Color Tokens */
-    --color-primary: 188.5 100% 45.5%;
+    --color-primary: 35 100% 45.1%;
     --color-primary-foreground: 210 40% 98%;
     --color-primary-gradient: none;
     --color-secondary: 188.5 35% 96%;
@@ -155,8 +155,8 @@
     --color-popover-foreground: 222.2 84% 4.9%;
     --color-border: 188.5 20% 91.4%;
     --color-input: 188.5 20% 91.4%;
-    --color-ring: 188.5 100% 45.5%;
-    --color-chart-1: 188.5 100% 45.5%;
+    --color-ring: 35 100% 45.1%;
+    --color-chart-1: 35 100% 45.1%;
     --color-chart-2: 160 60% 45%;
     --color-chart-3: 30 80% 55%;
     --color-chart-4: 280 65% 60%;
@@ -254,7 +254,7 @@
 
   .dark {
     /* Color Tokens */
-    --color-primary: 188.5 100% 45.5%;
+    --color-primary: 35 100% 45.1%;
     --color-primary-foreground: 210 40% 98%;
     --color-primary-gradient: none;
     --color-secondary: 188.5 35% 17.5%;
@@ -273,8 +273,8 @@
     --color-popover-foreground: 210 40% 98%;
     --color-border: 188.5 20% 17.5%;
     --color-input: 188.5 20% 17.5%;
-    --color-ring: 188.5 100% 45.5%;
-    --color-chart-1: 188.5 100% 45.5%;
+    --color-ring: 35 100% 45.1%;
+    --color-chart-1: 35 100% 45.1%;
     --color-chart-2: 160 60% 50%;
     --color-chart-3: 30 80% 60%;
     --color-chart-4: 280 65% 65%;
