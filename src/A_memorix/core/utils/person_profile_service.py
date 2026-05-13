@@ -4,18 +4,20 @@
 主链路：
 person_id -> 用户名/别名 -> 图谱关系 + 向量证据 -> 证据总结画像 -> 快照版本化存储
 """
-
 import json
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from json_repair import repair_json
 from sqlalchemy import or_
 from sqlmodel import select
 
-from src.common.logger import get_logger
+
 from src.common.database.database import get_db_session
 from src.common.database.database_model import PersonInfo
+from src.common.logger import get_logger
 from src.config.config import global_config
+from src.services import llm_service as llm_api
 
 from ..embedding import EmbeddingAPIAdapter
 from ..retrieval import (
@@ -28,8 +30,17 @@ from ..retrieval import (
 )
 from ..storage import MetadataStore, GraphStore, VectorStore
 from .metadata import coerce_metadata_dict
+from .model_routing import (
+    ResolvedLLMModel,
+    generate_with_resolved_model,
+    get_text_generation_model_tasks,
+    pick_text_generation_task,
+)
+from .profile_text import build_profile_injection_text, build_structured_profile_text
 
 logger = get_logger("A_Memorix.PersonProfileService")
+
+PROFILE_CLASSIFICATION_REQUEST_TYPE = "A_Memorix.PersonProfileEvidenceClassify"
 
 
 class PersonProfileService:
@@ -589,47 +600,289 @@ class PersonProfileService:
         relation_edges: List[Dict[str, Any]],
         vector_evidence: List[Dict[str, Any]],
         memory_traits: List[str],
+        classified_buckets: Optional[Dict[str, List[str]]] = None,
     ) -> str:
         """基于证据构建画像文本（供 LLM 上下文注入）。"""
-        lines: List[str] = []
-        lines.append(f"人物ID: {person_id}")
-        if primary_name:
-            lines.append(f"主称呼: {primary_name}")
-        if aliases:
-            lines.append(f"别名: {', '.join(aliases[:8])}")
-        if memory_traits:
-            lines.append(f"记忆特征: {'; '.join(memory_traits[:6])}")
+        buckets = classified_buckets or self._classify_profile_evidence_rule_based(
+            relation_edges=relation_edges,
+            vector_evidence=vector_evidence,
+            memory_traits=memory_traits,
+        )
+        return build_structured_profile_text(
+            person_id=person_id,
+            primary_name=primary_name,
+            aliases=aliases[:8],
+            identity_settings=buckets.get("identity_settings", []),
+            relationship_settings=buckets.get("relationship_settings", []),
+            stable_facts=buckets.get("stable_facts", []),
+            interaction_preferences=buckets.get("interaction_preferences", []),
+            recent_interactions=buckets.get("recent_interactions", []),
+            uncertain_notes=buckets.get("uncertain_notes", []),
+        )
 
-        if relation_edges:
-            lines.append("稳定关系证据:")
-            for rel in relation_edges[:6]:
-                s = rel.get("subject", "")
-                p = rel.get("predicate", "")
-                o = rel.get("object", "")
-                conf = float(rel.get("confidence", 0.0))
-                lines.append(f"- {s} {p} {o} (conf={conf:.2f})")
+    def _classify_profile_evidence_rule_based(
+        self,
+        *,
+        relation_edges: List[Dict[str, Any]],
+        vector_evidence: List[Dict[str, Any]],
+        memory_traits: List[str],
+    ) -> Dict[str, List[str]]:
+        """规则分桶画像证据，作为 LLM 不可用时的稳定回退。"""
+        buckets: Dict[str, List[str]] = {
+            "identity_settings": [],
+            "relationship_settings": [],
+            "stable_facts": [],
+            "interaction_preferences": [],
+            "recent_interactions": [],
+            "uncertain_notes": [],
+        }
+        for trait in memory_traits[:6]:
+            text = str(trait or "").strip()
+            if text:
+                self._append_profile_bucket(buckets, self._guess_profile_bucket(text), text)
 
-        stable_evidence = [item for item in vector_evidence if not self._is_chat_summary_evidence(item)]
-        recent_interactions = [item for item in vector_evidence if self._is_chat_summary_evidence(item)]
+        for rel in relation_edges[:8]:
+            text = self._format_relation_evidence_text(rel)
+            if not text:
+                continue
+            bucket = self._guess_profile_bucket(text)
+            if bucket == "stable_facts":
+                bucket = "relationship_settings"
+            self._append_profile_bucket(buckets, bucket, text)
 
-        if stable_evidence:
-            lines.append("稳定人物事实:")
-            for item in stable_evidence[:4]:
-                content = str(item.get("content", "")).strip()
-                if content:
-                    lines.append(f"- {content}")
+        for item in vector_evidence:
+            content = str(item.get("content", "") or "").strip()
+            if not content:
+                continue
+            if self._is_chat_summary_evidence(item):
+                self._append_profile_bucket(buckets, "recent_interactions", content)
+                continue
+            self._append_profile_bucket(buckets, self._guess_profile_bucket(content), content)
+        return buckets
 
-        if recent_interactions:
-            lines.append("近期相关互动:")
-            for item in recent_interactions[:2]:
-                content = str(item.get("content", "")).strip()
-                if content:
-                    lines.append(f"- {content}")
+    async def _classify_profile_evidence(
+        self,
+        *,
+        person_id: str,
+        primary_name: str,
+        aliases: List[str],
+        relation_edges: List[Dict[str, Any]],
+        vector_evidence: List[Dict[str, Any]],
+        memory_traits: List[str],
+    ) -> Dict[str, List[str]]:
+        """用 LLM 辅助证据分桶，失败时返回规则结果。"""
+        fallback = self._classify_profile_evidence_rule_based(
+            relation_edges=relation_edges,
+            vector_evidence=vector_evidence,
+            memory_traits=memory_traits,
+        )
+        candidates = self._build_profile_classification_candidates(
+            relation_edges=relation_edges,
+            vector_evidence=vector_evidence,
+            memory_traits=memory_traits,
+        )
+        if not candidates:
+            return fallback
 
-        if len(lines) <= 2:
-            lines.append("暂无足够证据形成稳定画像。")
+        model = self._resolve_profile_classification_model()
+        if model is None:
+            return fallback
 
-        return "\n".join(lines)
+        prompt = self._build_profile_classification_prompt(
+            person_id=person_id,
+            primary_name=primary_name,
+            aliases=aliases,
+            candidates=candidates,
+        )
+        try:
+            result = await generate_with_resolved_model(
+                model,
+                PROFILE_CLASSIFICATION_REQUEST_TYPE,
+                prompt,
+                temperature=0.1,
+                max_tokens=1200,
+            )
+        except Exception as exc:
+            logger.debug(f"人物画像证据分类模型调用失败: person_id={person_id}, err={exc}")
+            return fallback
+        if not bool(getattr(result, "success", False)):
+            return fallback
+        response = str(getattr(getattr(result, "completion", None), "response", "") or "").strip()
+        parsed = self._parse_profile_classification_response(response)
+        if not parsed:
+            return fallback
+        return self._merge_profile_classification(fallback, parsed)
+
+    def _resolve_profile_classification_model(self) -> Optional[ResolvedLLMModel]:
+        try:
+            available_tasks = get_text_generation_model_tasks(llm_api)
+            task_name, task_config = pick_text_generation_task(
+                available_tasks,
+                preferred=("memory", "utils", "planner", "tool_use", "replyer"),
+            )
+            if not task_name or task_config is None:
+                return None
+            return ResolvedLLMModel(task_name=task_name, task_config=task_config)
+        except Exception as exc:
+            logger.debug(f"解析人物画像分类模型失败: {exc}")
+            return None
+
+    @staticmethod
+    def _build_profile_classification_prompt(
+        *,
+        person_id: str,
+        primary_name: str,
+        aliases: List[str],
+        candidates: List[Dict[str, str]],
+    ) -> str:
+        return (
+            "你要把人物画像证据归类到固定段落。只根据证据归类，不要编造。\n"
+            f"人物ID: {person_id}\n"
+            f"主称呼: {primary_name}\n"
+            f"别名: {json.dumps(aliases, ensure_ascii=False)}\n\n"
+            "分类定义：\n"
+            "- identity_settings: 稳定身份、角色、长期自我描述、重要背景。\n"
+            "- relationship_settings: 与麦麦、群友、组织、作品角色等长期关系或称呼关系。\n"
+            "- stable_facts: 长期稳定、证据明确的人物事实。\n"
+            "- interaction_preferences: 互动偏好、雷点、沟通习惯、喜欢/讨厌的相处方式。\n"
+            "- recent_interactions: 最近发生、对当前聊天有帮助但不应上升为长期事实的内容。\n"
+            "- uncertain_notes: 证据不足、推测、玩笑、自嘲、临时状态或疑似偏好。\n\n"
+            "要求：\n"
+            "1. 每条内容必须是简短中文陈述句。\n"
+            "2. 不要输出证据编号、hash 或置信度。\n"
+            "3. chat_summary 来源通常只能归入 recent_interactions 或 uncertain_notes。\n"
+            "4. 临时状态、计划、可能、似乎、玩笑类内容不能归入 stable_facts。\n"
+            "5. 只输出 JSON 对象，键为上述六类，值为字符串数组。\n\n"
+            f"证据列表：\n{json.dumps(candidates, ensure_ascii=False, indent=2)}"
+        )
+
+    @staticmethod
+    def _parse_profile_classification_response(raw: str) -> Dict[str, List[str]]:
+        text = str(raw or "").strip()
+        if not text:
+            return {}
+        try:
+            repaired = repair_json(text)
+            payload = json.loads(repaired) if isinstance(repaired, str) else repaired
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        allowed_keys = (
+            "identity_settings",
+            "relationship_settings",
+            "stable_facts",
+            "interaction_preferences",
+            "recent_interactions",
+            "uncertain_notes",
+        )
+        parsed: Dict[str, List[str]] = {key: [] for key in allowed_keys}
+        for key in allowed_keys:
+            values = payload.get(key)
+            if not isinstance(values, list):
+                continue
+            parsed[key] = [str(item or "").strip() for item in values if str(item or "").strip()]
+        return parsed
+
+    def _merge_profile_classification(
+        self,
+        fallback: Dict[str, List[str]],
+        llm_result: Dict[str, List[str]],
+    ) -> Dict[str, List[str]]:
+        buckets: Dict[str, List[str]] = {key: [] for key in fallback}
+        for key in buckets:
+            source_values = llm_result.get(key) or fallback.get(key) or []
+            for value in source_values:
+                target_key = key
+                if key == "stable_facts" and self._looks_uncertain_or_temporary(value):
+                    target_key = "uncertain_notes"
+                self._append_profile_bucket(buckets, target_key, value)
+        return buckets
+
+    def _build_profile_classification_candidates(
+        self,
+        *,
+        relation_edges: List[Dict[str, Any]],
+        vector_evidence: List[Dict[str, Any]],
+        memory_traits: List[str],
+    ) -> List[Dict[str, str]]:
+        candidates: List[Dict[str, str]] = []
+        for index, trait in enumerate(memory_traits[:8], start=1):
+            text = str(trait or "").strip()
+            if text:
+                candidates.append({"id": f"trait-{index}", "source_type": "memory_trait", "text": text})
+        for index, rel in enumerate(relation_edges[:12], start=1):
+            text = self._format_relation_evidence_text(rel)
+            if text:
+                candidates.append({"id": f"relation-{index}", "source_type": "relation", "text": text})
+        for index, item in enumerate(vector_evidence[:16], start=1):
+            content = str(item.get("content", "") or "").strip()
+            if not content:
+                continue
+            metadata = coerce_metadata_dict(item.get("metadata"))
+            source_type = str(metadata.get("source_type", "") or "").strip()
+            if not source_type:
+                source_type = "chat_summary" if self._is_chat_summary_evidence(item) else "person_fact"
+            candidates.append({"id": f"evidence-{index}", "source_type": source_type, "text": content[:260]})
+        return candidates
+
+    @staticmethod
+    def _append_profile_bucket(buckets: Dict[str, List[str]], bucket: str, text: str) -> None:
+        clean = str(text or "").strip().strip("- ")
+        if not clean:
+            return
+        values = buckets.setdefault(bucket, [])
+        if clean not in values:
+            values.append(clean)
+
+    @staticmethod
+    def _format_relation_evidence_text(rel: Dict[str, Any]) -> str:
+        subject = str(rel.get("subject", "") or "").strip()
+        predicate = str(rel.get("predicate", "") or "").strip()
+        obj = str(rel.get("object", "") or "").strip()
+        if not (subject and predicate and obj):
+            return ""
+        return f"{subject}{predicate}{obj}。"
+
+    @classmethod
+    def _guess_profile_bucket(cls, text: str) -> str:
+        content = str(text or "").strip()
+        if not content:
+            return "stable_facts"
+        if cls._looks_uncertain_or_temporary(content):
+            return "uncertain_notes"
+        if any(token in content for token in ("身份", "职业", "工作", "学生", "老师", "作者", "画师", "设定", "角色", "来自")):
+            return "identity_settings"
+        if any(token in content for token in ("关系", "朋友", "同事", "群友", "主人", "搭档", "称呼", "叫", "认识")):
+            return "relationship_settings"
+        if any(token in content for token in ("喜欢", "讨厌", "偏好", "习惯", "不喜欢", "希望", "雷点", "介意", "更愿意")):
+            return "interaction_preferences"
+        return "stable_facts"
+
+    @staticmethod
+    def _looks_uncertain_or_temporary(text: str) -> bool:
+        content = str(text or "").strip()
+        if not content:
+            return False
+        markers = (
+            "可能",
+            "似乎",
+            "好像",
+            "大概",
+            "也许",
+            "疑似",
+            "暂时",
+            "今天",
+            "现在",
+            "刚刚",
+            "最近",
+            "计划",
+            "打算",
+            "玩笑",
+            "自嘲",
+            "临时",
+        )
+        return any(marker in content for marker in markers)
 
     @staticmethod
     def _is_snapshot_stale(snapshot: Optional[Dict[str, Any]], ttl_seconds: float) -> bool:
@@ -722,6 +975,14 @@ class PersonProfileService:
             primary_name = person_keyword.strip()
         relation_edges = self._collect_relation_evidence(aliases, limit=max(10, top_k * 2), person_id=pid)
         vector_evidence = await self._collect_vector_evidence(aliases, top_k=max(4, top_k), person_id=pid)
+        classified_buckets = await self._classify_profile_evidence(
+            person_id=pid,
+            primary_name=primary_name,
+            aliases=aliases,
+            relation_edges=relation_edges,
+            vector_evidence=vector_evidence,
+            memory_traits=memory_traits,
+        )
 
         evidence_ids = [
             str(item.get("hash", ""))
@@ -743,6 +1004,7 @@ class PersonProfileService:
             relation_edges=relation_edges,
             vector_evidence=vector_evidence,
             memory_traits=memory_traits,
+            classified_buckets=classified_buckets,
         )
 
         expires_at = time.time() + float(ttl_seconds) if ttl_seconds > 0 else None
@@ -773,6 +1035,9 @@ class PersonProfileService:
         if not profile or not profile.get("success"):
             return ""
         text = str(profile.get("profile_text", "") or "").strip()
+        if not text:
+            return ""
+        text = build_profile_injection_text(text)
         if not text:
             return ""
         return (

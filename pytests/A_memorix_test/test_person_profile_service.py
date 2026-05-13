@@ -1,8 +1,11 @@
 from types import SimpleNamespace
+import json
 
 import pytest
 
-from src.A_memorix.core.utils.person_profile_service import PersonProfileService
+from src.A_memorix.core.utils import person_profile_service as profile_service_module
+from src.A_memorix.core.utils.person_profile_service import PROFILE_CLASSIFICATION_REQUEST_TYPE, PersonProfileService
+from src.A_memorix.core.utils.profile_text import parse_profile_sections
 
 
 class FakeMetadataStore:
@@ -41,7 +44,7 @@ class FakeMetadataStore:
                 "hash": hash_value,
                 "content": "机器人建议测试用户以后叫星灯。",
                 "source": "chat_summary:session-1",
-                "metadata": {"source_type": "chat_summary"},
+                "metadata": {"source_type": "chat_summary", "person_id": "person-1"},
                 "word_count": 1,
             }
         if hash_value == "person-fact-1":
@@ -93,7 +96,7 @@ class FakeRetriever:
                 result_type="paragraph",
                 score=0.95,
                 content="机器人建议测试用户以后叫星灯。",
-                metadata={"source_type": "chat_summary"},
+                metadata={"source_type": "chat_summary", "person_id": "person-1"},
             )
         ]
 
@@ -103,13 +106,79 @@ async def test_person_profile_keeps_chat_summary_as_recent_interaction_not_stabl
     metadata_store = FakeMetadataStore()
     service = PersonProfileService(metadata_store=metadata_store, retriever=FakeRetriever())
     service.get_person_aliases = lambda person_id: (["测试用户"], "测试用户", [])
+    service._resolve_profile_classification_model = lambda: None
 
     payload = await service.query_person_profile(person_id="person-1", top_k=6, force_refresh=True)
 
     assert payload["success"] is True
     profile_text = payload["profile_text"]
-    stable_section = profile_text.split("近期相关互动:", 1)[0]
-    assert "测试用户喜欢猫" in stable_section
-    assert "星灯" not in stable_section
-    assert "近期相关互动:" in profile_text
-    assert "星灯" in profile_text
+    sections = parse_profile_sections(profile_text)
+    stable_sections = "\n".join(
+        sections["身份设定"]
+        + sections["关系设定"]
+        + sections["稳定了解"]
+        + sections["相处偏好"]
+    )
+
+    assert profile_text.startswith("# 人物画像")
+    assert "测试用户喜欢猫" in "\n".join(sections["相处偏好"])
+    assert "星灯" not in stable_sections
+    assert "星灯" in "\n".join(sections["近期互动"])
+    assert sections["维护备注"]
+
+
+@pytest.mark.asyncio
+async def test_profile_classification_uses_llm_buckets_and_guards_uncertain_stable_facts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = PersonProfileService(metadata_store=FakeMetadataStore(), retriever=FakeRetriever())
+    service._resolve_profile_classification_model = lambda: SimpleNamespace(
+        is_single_model=False,
+        task_name="memory",
+        task_config=SimpleNamespace(),
+    )
+
+    async def fake_generate_with_resolved_model(*args, **kwargs):
+        model, request_type, prompt = args
+        assert model.task_name == "memory"
+        assert request_type == PROFILE_CLASSIFICATION_REQUEST_TYPE
+        assert "测试用户喜欢直接沟通" in prompt
+        assert kwargs["temperature"] == 0.1
+        return SimpleNamespace(
+            success=True,
+            completion=SimpleNamespace(
+                response=json.dumps(
+                    {
+                        "identity_settings": ["测试用户是画师。"],
+                        "relationship_settings": ["测试用户把麦麦当搭档。"],
+                        "stable_facts": ["测试用户可能长期熬夜。"],
+                        "interaction_preferences": ["测试用户喜欢直接沟通。"],
+                        "recent_interactions": ["测试用户刚聊过记忆优化。"],
+                        "uncertain_notes": ["测试用户似乎偏好蓝色。"],
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+        )
+
+    monkeypatch.setattr(profile_service_module, "generate_with_resolved_model", fake_generate_with_resolved_model)
+
+    buckets = await service._classify_profile_evidence(
+        person_id="person-1",
+        primary_name="测试用户",
+        aliases=["测试用户"],
+        relation_edges=[],
+        vector_evidence=[
+            {
+                "content": "测试用户喜欢直接沟通。",
+                "metadata": {"source_type": "person_fact"},
+            }
+        ],
+        memory_traits=[],
+    )
+
+    assert buckets["identity_settings"] == ["测试用户是画师。"]
+    assert buckets["relationship_settings"] == ["测试用户把麦麦当搭档。"]
+    assert "测试用户可能长期熬夜。" not in buckets["stable_facts"]
+    assert "测试用户可能长期熬夜。" in buckets["uncertain_notes"]
+    assert "测试用户似乎偏好蓝色。" in buckets["uncertain_notes"]
