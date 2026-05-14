@@ -3,6 +3,7 @@
 from base64 import b64decode
 from binascii import Error as BinasciiError
 from datetime import datetime
+from html import escape
 from typing import TYPE_CHECKING, Any, Literal, Optional
 
 import asyncio
@@ -1486,25 +1487,53 @@ class MaisakaReasoningEngine:
         return f"tool_result:{call_id}:{item_index}"
 
     @staticmethod
-    def _format_tool_result_media_metadata(item: Any) -> list[str]:
-        """把工具媒体项的 metadata 翻译成模型可读的参数行。"""
+    def _get_tool_result_media_metadata_value(item: Any, key: str) -> str:
+        """读取工具媒体 metadata 中适合展示的简单字符串值。"""
 
         metadata = getattr(item, "metadata", None)
         if not isinstance(metadata, dict):
-            return []
+            return ""
+        value = metadata.get(key)
+        if isinstance(value, (dict, list, tuple, set)):
+            return ""
+        return str(value or "").strip()
 
-        metadata_parts: list[str] = []
-        for key, value in metadata.items():
+    @staticmethod
+    def _build_xml_attrs(attrs: list[tuple[str, str]]) -> str:
+        """构造 XML 标签属性串。"""
+
+        attr_parts: list[str] = []
+        for key, value in attrs:
             normalized_key = str(key or "").strip()
-            if not normalized_key:
-                continue
-            if isinstance(value, (dict, list, tuple, set)):
-                continue
             normalized_value = str(value or "").strip()
-            if not normalized_value:
+            if not normalized_key or not normalized_value:
                 continue
-            metadata_parts.append(f"{normalized_key}={normalized_value}")
-        return metadata_parts
+            attr_parts.append(f'{normalized_key}="{escape(normalized_value, quote=True)}"')
+        return " ".join(attr_parts)
+
+    @classmethod
+    def _build_tool_result_media_xml_attrs(
+        cls,
+        tool_call: ToolCall,
+        item_index: int,
+        item: Any,
+    ) -> str:
+        """构造工具返回媒体的精简 XML 属性。"""
+
+        media_index = cls._build_tool_result_media_index(tool_call, item_index)
+        content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
+        mime_type = str(getattr(item, "mime_type", "") or "").strip()
+        name = str(getattr(item, "name", "") or "").strip()
+        context_key = cls._get_tool_result_media_metadata_value(item, "context_key")
+        return cls._build_xml_attrs(
+            [
+                ("msg_id", media_index),
+                ("type", content_type),
+                ("mime", mime_type),
+                ("name", name),
+                ("context_key", context_key),
+            ]
+        )
 
     @classmethod
     def _describe_tool_result_media_item(cls, item: Any) -> str:
@@ -1513,17 +1542,14 @@ class MaisakaReasoningEngine:
         content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
         mime_type = str(getattr(item, "mime_type", "") or "").strip()
         name = str(getattr(item, "name", "") or "").strip()
-        description = str(getattr(item, "description", "") or "").strip()
-        metadata_parts = cls._format_tool_result_media_metadata(item)
+        context_key = cls._get_tool_result_media_metadata_value(item, "context_key")
         label_parts = [content_type]
         if mime_type:
             label_parts.append(mime_type)
-        if metadata_parts:
-            label_parts.append("参数 " + ", ".join(metadata_parts))
         if name:
             label_parts.append(name)
-        if description:
-            label_parts.append(description)
+        if context_key:
+            label_parts.append(f"context_key={context_key}")
         return " / ".join(label_parts)
 
     def _build_tool_result_history_content(self, tool_call: ToolCall, result: ToolExecutionResult) -> str:
@@ -1534,11 +1560,11 @@ class MaisakaReasoningEngine:
         if not media_items:
             return history_content
 
-        media_lines = ["[工具返回媒体索引]"]
+        media_lines = ["<tool_result_media_list>"]
         for item_index, item in media_items:
-            media_index = self._build_tool_result_media_index(tool_call, item_index)
-            media_description = self._describe_tool_result_media_item(item)
-            media_lines.append(f"- {media_index}: {media_description}，媒体本体已作为随后的用户消息提供。")
+            attrs = self._build_tool_result_media_xml_attrs(tool_call, item_index, item)
+            media_lines.append(f"  <media {attrs} />" if attrs else "  <media />")
+        media_lines.append("</tool_result_media_list>")
 
         if not history_content.strip():
             return "\n".join(media_lines).strip()
@@ -1570,35 +1596,21 @@ class MaisakaReasoningEngine:
     ) -> MessageSequence:
         """将单个 tool result 媒体项转成普通 user message 的组件序列。"""
 
-        media_index = self._build_tool_result_media_index(tool_call, item_index)
         content_type = str(getattr(item, "content_type", "") or "unknown").strip() or "unknown"
         mime_type = str(getattr(item, "mime_type", "") or "").strip()
-        name = str(getattr(item, "name", "") or "").strip()
-        description = str(getattr(item, "description", "") or "").strip()
         uri = str(getattr(item, "uri", "") or "").strip()
         raw_data = str(getattr(item, "data", "") or "").strip()
         if not raw_data and uri.startswith("data:"):
             raw_data = uri
 
-        header_parts = [f"[工具返回媒体]索引={media_index}", f"类型={content_type}"]
-        metadata_parts = self._format_tool_result_media_metadata(item)
-        if metadata_parts:
-            header_parts.extend(f"参数 {part}" for part in metadata_parts)
-        if mime_type:
-            header_parts.append(f"MIME={mime_type}")
-        if name:
-            header_parts.append(f"名称={name}")
-        if description:
-            header_parts.append(f"说明={description}")
-        if uri:
-            header_parts.append(f"URI={uri}")
-        header_text = "\n".join(header_parts)
+        attrs = self._build_tool_result_media_xml_attrs(tool_call, item_index, item)
+        header_text = f"<tool_result_media {attrs} />" if attrs else "<tool_result_media />"
 
         message_sequence = MessageSequence([TextComponent(header_text)])
         if content_type == "image" or (content_type == "binary" and mime_type.startswith("image/")):
             image_binary = self._decode_tool_result_base64_data(raw_data)
             if image_binary:
-                message_sequence.image(image_binary, content=header_text)
+                message_sequence.image(image_binary, content="")
         return message_sequence
 
     def _build_tool_result_media_visible_text(
@@ -1611,12 +1623,12 @@ class MaisakaReasoningEngine:
         """构造媒体 user message 在历史/监控中的可读文本。"""
 
         media_index = self._build_tool_result_media_index(tool_call, item_index)
-        visible_parts = [f"[工具返回媒体]索引={media_index}", self._describe_tool_result_media_item(item)]
+        visible_parts = [f"<tool_result_media msg_id=\"{escape(media_index, quote=True)}\" />"]
+        media_description = self._describe_tool_result_media_item(item)
+        if media_description:
+            visible_parts.append(media_description)
         if any(isinstance(component, ImageComponent) for component in media_sequence.components):
-            visible_parts.append("[图片内容]")
-        uri = str(getattr(item, "uri", "") or "").strip()
-        if uri:
-            visible_parts.append(f"URI={uri}")
+            visible_parts.append("[图片]")
         return "\n".join(part for part in visible_parts if part).strip()
 
     def _append_tool_result_media_messages(self, tool_call: ToolCall, result: ToolExecutionResult) -> None:
