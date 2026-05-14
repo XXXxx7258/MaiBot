@@ -1118,7 +1118,7 @@ requires-dist = [
     { name = "json-repair", specifier = ">=0.47.6" },
     { name = "maibot-dashboard", specifier = ">=1.1.1" },
     { name = "maibot-plugin-sdk", specifier = ">=2.4.0" },
-    { name = "maim-message", specifier = ">=0.6.8" },
+    { name = "maim-message", specifier = "==0.6.8" },
     { name = "matplotlib", specifier = ">=3.10.5" },
     { name = "mcp" },
     { name = "msgpack", specifier = ">=1.1.2" },
