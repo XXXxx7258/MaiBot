@@ -1,9 +1,12 @@
 """Maisaka 历史消息轮次结束后处理。"""
 
 from dataclasses import dataclass
+from json import dumps
 from math import ceil
 
-from .context_messages import AssistantMessage, LLMContextMessage
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
+
+from .context_messages import AssistantMessage, LLMContextMessage, SessionBackedMessage, ToolResultMessage
 from .history_utils import drop_leading_orphan_tool_results, drop_orphan_tool_results, normalize_tool_result_order
 
 TRIM_TARGET_RATIO = 1.0
@@ -100,12 +103,75 @@ def _trim_assistant_history_to_latest(
         for index, message in enumerate(chat_history)
         if index in remove_indexes
     ]
-    chat_history[:] = [
-        message
-        for index, message in enumerate(chat_history)
-        if index not in remove_indexes
-    ]
+    tool_result_by_call_id = {
+        message.tool_call_id: message
+        for message in chat_history
+        if isinstance(message, ToolResultMessage) and message.tool_call_id
+    }
+    preserved_tool_result_ids = {
+        tool_call.call_id
+        for message in removed_messages
+        if isinstance(message, AssistantMessage)
+        for tool_call in message.tool_calls
+        if tool_call.call_id in tool_result_by_call_id
+    }
+
+    optimized_history: list[LLMContextMessage] = []
+    for index, message in enumerate(chat_history):
+        if index in remove_indexes:
+            if isinstance(message, AssistantMessage):
+                preserved_message = _build_trimmed_assistant_tool_user_message(
+                    message,
+                    tool_result_by_call_id=tool_result_by_call_id,
+                )
+                if preserved_message is not None:
+                    optimized_history.append(preserved_message)
+            continue
+        if isinstance(message, ToolResultMessage) and message.tool_call_id in preserved_tool_result_ids:
+            continue
+        optimized_history.append(message)
+
+    chat_history[:] = optimized_history
     return removed_messages
+
+
+def _build_trimmed_assistant_tool_user_message(
+    assistant_message: AssistantMessage,
+    *,
+    tool_result_by_call_id: dict[str, ToolResultMessage],
+) -> SessionBackedMessage | None:
+    """将被优化裁掉的 assistant 工具链折叠成普通 user 消息，避免破坏 tool 协议配对。"""
+
+    if not assistant_message.tool_calls:
+        return None
+
+    tool_sections: list[str] = []
+    for tool_call in assistant_message.tool_calls:
+        args_text = dumps(tool_call.args or {}, ensure_ascii=False, sort_keys=True)
+        section_lines = [
+            f"- tool_call_id: {tool_call.call_id}",
+            f"  tool_name: {tool_call.func_name}",
+            f"  args: {args_text}",
+        ]
+        tool_result = tool_result_by_call_id.get(tool_call.call_id)
+        if tool_result is not None:
+            result_status = "success" if tool_result.success else "failed"
+            section_lines.extend(
+                [
+                    f"  result_status: {result_status}",
+                    f"  result: {tool_result.content}",
+                ]
+            )
+        tool_sections.append("\n".join(section_lines))
+
+    folded_text = "[已折叠的历史工具调用]\n" + "\n".join(tool_sections)
+    return SessionBackedMessage(
+        raw_message=MessageSequence([TextComponent(folded_text)]),
+        visible_text=folded_text,
+        timestamp=assistant_message.timestamp,
+        message_id=f"optimized_tool_history:{assistant_message.timestamp.timestamp()}",
+        source_kind="optimized_tool_history",
+    )
 
 
 def _normalize_history_structure(

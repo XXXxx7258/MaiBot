@@ -70,8 +70,8 @@ def test_context_optimization_disabled_keeps_assistant_messages() -> None:
     assert result.removed_count == 0
 
 
-def test_context_optimization_removes_orphan_tool_result_after_assistant_trim() -> None:
-    removed_tool_call = ToolCall(call_id="removed-call", func_name="query_memory", args={})
+def test_context_optimization_preserves_trimmed_assistant_tool_content_as_user_message() -> None:
+    removed_tool_call = ToolCall(call_id="removed-call", func_name="query_memory", args={"query": "旧记忆"})
     kept_tool_call = ToolCall(call_id="kept-call", func_name="reply", args={})
     chat_history = [
         _assistant_message("assistant 0", [removed_tool_call]),
@@ -103,6 +103,16 @@ def test_context_optimization_removes_orphan_tool_result_after_assistant_trim() 
         for message in result.history
         if isinstance(message, ToolResultMessage)
     ]
+    folded_tool_messages = [
+        message.visible_text
+        for message in result.history
+        if isinstance(message, SessionBackedMessage) and message.source_kind == "optimized_tool_history"
+    ]
 
     assert tool_results == ["新工具结果"]
-    assert result.removed_count == 2
+    assert len(folded_tool_messages) == 1
+    assert "removed-call" in folded_tool_messages[0]
+    assert "query_memory" in folded_tool_messages[0]
+    assert "旧记忆" in folded_tool_messages[0]
+    assert "旧工具结果" in folded_tool_messages[0]
+    assert result.removed_count == 1
