@@ -179,7 +179,7 @@ export function ExpressionReviewLogPanel({ onRescued }: ExpressionReviewLogPanel
             {loading ? (
               <TableRow>
                 <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  加载中...
+                  Thinking...
                 </TableCell>
               </TableRow>
             ) : entries.length === 0 ? (
@@ -241,7 +241,7 @@ export function ExpressionReviewLogPanel({ onRescued }: ExpressionReviewLogPanel
 
       <div className="space-y-3 p-4 md:hidden">
         {loading ? (
-          <div className="py-8 text-center text-muted-foreground">加载中...</div>
+          <div className="py-8 text-center text-muted-foreground">Thinking...</div>
         ) : entries.length === 0 ? (
           <div className="py-8 text-center text-muted-foreground">暂无 AI 审核记录</div>
         ) : (

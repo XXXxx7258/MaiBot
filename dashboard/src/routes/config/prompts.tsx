@@ -326,7 +326,7 @@ export function PromptManagementPage() {
               {loadingCatalog ? (
                 <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  加载中
+                  Thinking
                 </div>
               ) : filteredFiles.length > 0 ? (
                 filteredFiles.map((file) => (
@@ -382,7 +382,7 @@ export function PromptManagementPage() {
             {loadingFile ? (
               <div className="flex h-[calc(100vh-290px)] items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                读取中
+                Thinking
               </div>
             ) : (
               <CodeEditor
@@ -409,7 +409,7 @@ export function PromptManagementPage() {
           {loadingDefaultPrompt ? (
             <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              读取中
+              Thinking
             </div>
           ) : (
             <CodeEditor

@@ -1966,11 +1966,11 @@ export function KnowledgeBasePage() {
 
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
-  const renderPanelFallback = (tab: LoadableMemoryTab, label: string) => (
+  const renderPanelFallback = (tab: LoadableMemoryTab, _label: string) => (
     <TabsContent value={tab} className="space-y-4">
       <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
         <Loader2 className={cn('mr-2 h-4 w-4', tabLoading[tab] ? 'animate-spin' : '')} />
-        正在加载{label}...
+        Thinking...
       </div>
     </TabsContent>
   )

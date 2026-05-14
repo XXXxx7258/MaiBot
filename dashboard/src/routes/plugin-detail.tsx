@@ -421,7 +421,7 @@ export function PluginDetailPage() {
         </div>
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <span className="ml-3 text-muted-foreground">加载插件信息中...</span>
+          <span className="ml-3 text-muted-foreground">Thinking...</span>
         </div>
       </div>
     )
@@ -728,7 +728,7 @@ export function PluginDetailPage() {
                   {readmeLoading ? (
                     <div className="flex items-center justify-center py-12">
                       <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                      <span className="ml-3 text-sm text-muted-foreground">加载说明文档中...</span>
+                      <span className="ml-3 text-sm text-muted-foreground">Thinking...</span>
                     </div>
                   ) : readme ? (
                     <MarkdownRenderer content={readme} />

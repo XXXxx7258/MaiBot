@@ -110,7 +110,7 @@
       "groupName": "가상 그룹 이름(선택)",
       "groupNameHint": "麦麦는 이 이름의 그룹 채팅으로 인식합니다",
       "knownUserSuffix": " · 알고 있음",
-      "loading": "불러오는 중...",
+      "loading": "Thinking...",
       "noUsers": "사용자를 찾을 수 없습니다",
       "personCount": "({{count}}명)",
       "platform": "플랫폼 선택",
@@ -513,7 +513,7 @@
       }
     },
     "loading": {
-      "title": "설정을 불러오는 중...",
+      "title": "설정을 Thinking...",
       "description": "기존 설정을 읽고 있습니다"
     },
     "header": {
@@ -712,7 +712,7 @@
     }
   },
   "common": {
-    "loading": "로딩 중...",
+    "loading": "Thinking...",
     "error": "오류",
     "retry": "재시도",
     "save": "저장",
@@ -808,8 +808,8 @@
   "home": {
     "title": "실시간 모니터",
     "subtitle": "MaiBot 실행 상태 및 통계 데이터 개요",
-    "loading": "통계 데이터 로딩 중...",
-    "loadingHint": "MaiBot 실행 데이터를 가져오는 중",
+    "loading": "통계 데이터 Thinking...",
+    "loadingHint": "Thinking...",
     "timeRange": {
       "24h": "24시간",
       "7d": "7일",

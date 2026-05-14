@@ -1389,7 +1389,7 @@ export function ExpressionReviewer({
               {quickLoading && quickExpressions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center">
                   <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">加载中...</p>
+                  <p className="text-muted-foreground">Thinking...</p>
                 </div>
               ) : quickExpressions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-center">

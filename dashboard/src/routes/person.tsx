@@ -439,7 +439,7 @@ export function PersonManagementPage() {
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                    加载中...
+                    Thinking...
                   </TableCell>
                 </TableRow>
               ) : persons.length === 0 ? (
@@ -516,7 +516,7 @@ export function PersonManagementPage() {
         <div className="md:hidden space-y-3 p-4">
           {loading ? (
             <div className="text-center py-8 text-muted-foreground">
-              加载中...
+              Thinking...
             </div>
           ) : persons.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">

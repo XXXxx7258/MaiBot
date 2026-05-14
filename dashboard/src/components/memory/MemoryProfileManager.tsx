@@ -394,7 +394,7 @@ export function MemoryProfileManager() {
                 )) : (
                   <TableRow>
                     <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {loading ? '正在加载人物画像...' : profileListMode === 'search' ? '没有匹配的人物画像' : '还没有人物画像快照'}
+                      {loading ? 'Thinking...' : profileListMode === 'search' ? '没有匹配的人物画像' : '还没有人物画像快照'}
                     </TableCell>
                   </TableRow>
                 )}

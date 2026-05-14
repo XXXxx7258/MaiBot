@@ -122,7 +122,7 @@ export function ExpressionList({
             {loading ? (
               <TableRow>
                 <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
-                  加载中...
+                  Thinking...
                 </TableCell>
               </TableRow>
             ) : expressions.length === 0 ? (
@@ -201,7 +201,7 @@ export function ExpressionList({
       <div className="md:hidden space-y-3 p-4">
         {loading ? (
           <div className="text-center py-8 text-muted-foreground">
-            加载中...
+            Thinking...
           </div>
         ) : expressions.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">

@@ -98,7 +98,7 @@ export function JargonList({
             {loading ? (
               <TableRow>
                 <TableCell colSpan={tableColSpan} className="text-center py-8 text-muted-foreground">
-                  加载中...
+                  Thinking...
                 </TableCell>
               </TableRow>
             ) : jargons.length === 0 ? (
@@ -171,7 +171,7 @@ export function JargonList({
       {/* 移动端卡片视图 */}
       <div className="md:hidden space-y-3 p-4">
         {loading ? (
-          <div className="text-center py-8 text-muted-foreground">加载中...</div>
+          <div className="text-center py-8 text-muted-foreground">Thinking...</div>
         ) : jargons.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">暂无数据</div>
         ) : (

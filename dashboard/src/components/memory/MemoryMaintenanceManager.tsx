@@ -311,7 +311,7 @@ export function MemoryMaintenanceManager() {
                 }) : (
                   <TableRow>
                     <TableCell colSpan={3} className="text-center text-muted-foreground">
-                      {loading ? '正在加载回收站...' : '回收站没有可展示的关系'}
+                      {loading ? 'Thinking...' : '回收站没有可展示的关系'}
                     </TableCell>
                   </TableRow>
                 )}

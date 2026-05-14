@@ -783,6 +783,20 @@ function PluginsPageContent() {
         {/* 搜索和筛选栏 */}
         <Card className="p-4">
           <div className="flex flex-col gap-4">
+            <div className="min-h-11">
+              {loadProgress && loadProgress.stage === 'loading' && loadProgress.operation === 'fetch' && (
+                <div className="flex items-start gap-3 rounded-lg border bg-background/70 px-3 py-2">
+                  <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-muted-foreground" />
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">加载插件市场</div>
+                    <div className="text-xs text-muted-foreground">
+                      {loadProgress.message || '正在获取插件清单，统计数据将通过轻量摘要接口加载'}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 搜索框 */}
               <div className="flex-1 relative">
@@ -846,21 +860,6 @@ function PluginsPageContent() {
           </TabsList>
         </Tabs>
 
-        {/* 插件市场加载提示 */}
-        {loadProgress && loadProgress.stage === 'loading' && loadProgress.operation === 'fetch' && (
-          <Card className="p-3">
-            <div className="flex items-start gap-3">
-              <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-muted-foreground" />
-              <div className="space-y-1">
-                <div className="text-sm font-medium">加载插件市场</div>
-                <div className="text-xs text-muted-foreground">
-                  {loadProgress.message || '正在获取插件清单，统计数据将通过轻量摘要接口加载'}
-                </div>
-              </div>
-            </div>
-          </Card>
-        )}
-
         {/* 加载错误显示 */}
         {loadProgress && loadProgress.stage === 'error' && loadProgress.error && (
           <Card className="border-destructive bg-destructive/10">
@@ -884,7 +883,7 @@ function PluginsPageContent() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="ml-3 text-muted-foreground">加载插件列表中...</span>
+            <span className="ml-3 text-muted-foreground">Thinking...</span>
           </div>
         ) : error ? (
           <Card className="p-6">

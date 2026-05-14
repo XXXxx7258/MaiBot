@@ -357,7 +357,7 @@ export function SharePackDialog({ trigger }: SharePackDialogProps) {
           {loading ? (
             <div className="py-8 text-center">
               <Loader2 className="w-8 h-8 mx-auto animate-spin text-primary" />
-              <p className="mt-4 text-muted-foreground">正在加载当前配置...</p>
+              <p className="mt-4 text-muted-foreground">Thinking...</p>
             </div>
           ) : (
             <>

@@ -369,7 +369,7 @@ export function DeleteTab(props: DeleteTabProps) {
 
                   {selectedOperationDetailLoading ? (
                     <div className="rounded-lg border bg-background/60 p-4 text-sm text-muted-foreground">
-                      正在加载影响对象详情...
+                      Thinking...
                     </div>
                   ) : null}
 

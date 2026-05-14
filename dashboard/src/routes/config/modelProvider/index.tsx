@@ -735,7 +735,7 @@ function ModelProviderConfigPageContent() {
     return (
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">加载中...</p>
+          <p className="text-muted-foreground">Thinking...</p>
         </div>
       </div>
     )

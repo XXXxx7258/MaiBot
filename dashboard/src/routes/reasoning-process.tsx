@@ -560,7 +560,7 @@ export function ReasoningProcessPage() {
               <TabsContent value="text" className="m-0 min-h-0 flex-1 overflow-hidden">
                 <ScrollArea className="h-full">
                   <pre className="text-foreground min-h-full p-4 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
-                    {contentLoading ? '正在读取...' : textContent || '没有文本内容'}
+                    {contentLoading ? 'Thinking...' : textContent || '没有文本内容'}
                   </pre>
                 </ScrollArea>
               </TabsContent>
