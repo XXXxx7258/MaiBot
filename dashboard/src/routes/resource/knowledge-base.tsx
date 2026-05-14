@@ -162,6 +162,7 @@ function formatMaibotDateTimeLocalForApi(input: string, fieldName: string): stri
 export function KnowledgeBasePage() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
+  const [loadingDotCount, setLoadingDotCount] = useState(6)
   const [refreshingCheck, setRefreshingCheck] = useState(false)
   const [vectorRebuildDialogOpen, setVectorRebuildDialogOpen] = useState(false)
   const [vectorRebuilding, setVectorRebuilding] = useState(false)
@@ -1955,6 +1956,14 @@ export function KnowledgeBasePage() {
     setQuickStartVisible(false)
   }, [])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLoadingDotCount((current) => (current >= 6 ? 2 : current + 1))
+    }, 450)
+
+    return () => window.clearInterval(timer)
+  }, [])
+
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
   const renderPanelFallback = (tab: LoadableMemoryTab, label: string) => (
@@ -1969,8 +1978,8 @@ export function KnowledgeBasePage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-xl border bg-background px-6 py-5 text-sm text-muted-foreground shadow-sm">
-          正在加载长期记忆控制台...
+        <div className="min-w-[10rem] rounded-xl border bg-background px-5 py-3.5 text-base font-medium text-muted-foreground shadow-sm">
+          Thinking{'.'.repeat(loadingDotCount)}
         </div>
       </div>
     )
