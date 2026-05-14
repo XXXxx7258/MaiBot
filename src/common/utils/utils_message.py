@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from maim_message import MessageBase, Seg
@@ -186,8 +187,83 @@ class MessageUtils:
         from src.common.database.database import get_db_session
 
         with get_db_session() as session:
+            MessageUtils._persist_image_components(message.raw_message.components, session)
             db_message = message.to_db_instance()
             session.add(db_message)
+
+    @staticmethod
+    def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
+        """将消息中仍携带二进制数据的图片组件保存到图片库。"""
+        from src.common.database.database_model import Images, ImageType
+
+        for component in components:
+            if isinstance(component, ImageComponent):
+                MessageUtils._persist_image_component(component, session, Images, ImageType)
+            elif isinstance(component, ForwardNodeComponent):
+                for forward_component in component.forward_components:
+                    MessageUtils._persist_image_components(forward_component.content, session)
+
+    @staticmethod
+    def _persist_image_component(component: ImageComponent, session: Any, images_model: Any, image_type_model: Any) -> None:
+        """保存图片文件和图片库记录，确保后续可以通过消息 hash 回读原图。"""
+        if not component.binary_data:
+            return
+
+        image_hash = component.binary_hash.strip()
+        if not image_hash:
+            return
+
+        statement = select(images_model).filter_by(image_hash=image_hash, image_type=image_type_model.IMAGE).limit(1)
+        existing_record = session.exec(statement).first()
+        if existing_record is not None and Path(existing_record.full_path).is_file():
+            existing_record.no_file_flag = False
+            existing_record.last_used_time = datetime.now()
+            session.add(existing_record)
+            return
+
+        image_dir = Path(__file__).parent.parent.parent.parent / "data" / "images"
+        image_dir.mkdir(parents=True, exist_ok=True)
+        image_format = MessageUtils._detect_image_format(component.binary_data)
+        image_path = image_dir / f"{image_hash}.{image_format}"
+        if not image_path.exists():
+            image_path.write_bytes(component.binary_data)
+
+        if existing_record is not None:
+            existing_record.description = component.content.strip()
+            existing_record.full_path = str(image_path.absolute().resolve())
+            existing_record.no_file_flag = False
+            existing_record.last_used_time = datetime.now()
+            existing_record.vlm_processed = bool(component.content.strip())
+            session.add(existing_record)
+        else:
+            session.add(
+                images_model(
+                    image_hash=image_hash,
+                    description=component.content.strip(),
+                    full_path=str(image_path.absolute().resolve()),
+                    image_type=image_type_model.IMAGE,
+                    last_used_time=datetime.now(),
+                    vlm_processed=bool(component.content.strip()),
+                )
+            )
+
+    @staticmethod
+    def _detect_image_format(image_bytes: bytes) -> str:
+        """识别图片格式，失败时使用 png 作为兼容后缀。"""
+        try:
+            from PIL import Image as PILImage
+
+            import io
+
+            with PILImage.open(io.BytesIO(image_bytes)) as image:
+                image_format = (image.format or "").lower()
+                if image_format == "jpeg":
+                    return "jpg"
+                if image_format:
+                    return image_format
+        except Exception as exc:
+            logger.warning(f"识别消息图片格式失败，将按 png 保存: {exc}")
+        return "png"
 
     @staticmethod
     def update_message_id(old_message_id: str, new_message_id: str) -> bool:

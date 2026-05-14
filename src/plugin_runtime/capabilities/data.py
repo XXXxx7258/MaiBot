@@ -321,11 +321,12 @@ class RuntimeDataCapabilityMixin:
             return {"success": False, "error": "缺少必要参数 message_id"}
 
         try:
+            chat_id = str(args.get("chat_id") or args.get("stream_id") or "").strip()
+            include_binary_data = bool(args.get("include_binary_data", False))
             message = message_service.get_message_by_id(
                 message_id=message_id,
-                chat_id=str(args.get("chat_id") or args.get("stream_id") or "").strip() or None,
+                chat_id=chat_id or None,
             )
-            include_binary_data = bool(args.get("include_binary_data", False))
             serialized_message = (
                 self._serialize_messages([message], include_binary_data=include_binary_data)[0]
                 if message is not None

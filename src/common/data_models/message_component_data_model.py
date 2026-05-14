@@ -378,6 +378,8 @@ class MessageSequence:
                     for comp in item.forward_components
                 ],
             }
+        elif isinstance(item, DictComponent):
+            return {"type": "dict", "data": item.data}
         else:
             logger.warning(f"Unofficial component type: {type(item)}, defaulting to DictComponent")
             return {"type": "dict", "data": item.data}
