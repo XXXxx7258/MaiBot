@@ -337,35 +337,21 @@ async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[s
             plugin_id=plugin_id,
         )
         await update_progress(
-            stage="loading", progress=20, message="正在删除旧版本...", operation="update", plugin_id=plugin_id
+            stage="loading", progress=30, message="正在通过 Git 拉取新版本...", operation="update", plugin_id=plugin_id
         )
-        remove_tree(plugin_path)
-
-        await update_progress(
-            stage="loading", progress=30, message="正在准备下载新版本...", operation="update", plugin_id=plugin_id
-        )
-        repo_url, owner, repo = parse_repository_url(request.repository_url)
         service = get_git_mirror_service()
-        if "github.com" in repo_url:
-            result = await service.clone_repository(
-                owner=owner,
-                repo=repo,
-                target_path=plugin_path,
-                branch=request.branch,
-                mirror_id=request.mirror_id,
-                depth=1,
-            )
-        else:
-            result = await service.clone_repository(
-                owner=owner, repo=repo, target_path=plugin_path, branch=request.branch, custom_url=repo_url, depth=1
-            )
+        result = await service.pull_repository(
+            repository_path=plugin_path,
+            branch=request.branch,
+            remote_url=request.repository_url,
+        )
 
         if not result.get("success"):
-            error_msg = str(result.get("error", "克隆失败"))
+            error_msg = str(result.get("error", "Git 更新失败"))
             await update_progress(
                 stage="error",
                 progress=0,
-                message="下载新版本失败",
+                message="Git 拉取新版本失败",
                 operation="update",
                 plugin_id=plugin_id,
                 error=error_msg,
@@ -377,7 +363,6 @@ async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[s
         )
         new_manifest_path = resolve_plugin_file_path(plugin_path, "_manifest.json")
         if not new_manifest_path.exists():
-            remove_tree(plugin_path)
             await update_progress(
                 stage="error",
                 progress=0,
@@ -410,7 +395,6 @@ async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[s
                 "new_version": new_version,
             }
         except Exception as e:
-            remove_tree(plugin_path)
             await update_progress(
                 stage="error",
                 progress=0,
