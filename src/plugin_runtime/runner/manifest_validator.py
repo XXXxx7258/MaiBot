@@ -27,6 +27,12 @@ _SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 _PLUGIN_ID_PATTERN = re.compile(r"^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)+$")
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _HTTP_URL_PATTERN = re.compile(r"^https?://.+$")
+_RESERVED_PLUGIN_DIRECTORY_NAMES = {"data"}
+
+
+def is_reserved_plugin_directory(path: Path) -> bool:
+    """Return True when a plugins/ child directory is reserved for runtime data."""
+    return path.name.casefold() in _RESERVED_PLUGIN_DIRECTORY_NAMES
 
 
 class VersionComparator:
@@ -802,7 +808,11 @@ class ManifestValidator:
             if not normalized_root.is_dir():
                 continue
 
-            for candidate_path in sorted(entry.resolve() for entry in normalized_root.iterdir() if entry.is_dir()):
+            for candidate_path in sorted(
+                entry.resolve()
+                for entry in normalized_root.iterdir()
+                if entry.is_dir() and not is_reserved_plugin_directory(entry)
+            ):
                 parsed_manifest = self.load_from_plugin_path(candidate_path, require_entrypoint=require_entrypoint)
                 if parsed_manifest is None:
                     continue

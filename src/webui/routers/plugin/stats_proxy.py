@@ -13,7 +13,7 @@ logger = get_logger("webui.plugin_stats_proxy")
 
 router = APIRouter()
 
-PLUGIN_STATS_BASE_URL = getenv("MAIBOT_PLUGIN_STATS_BASE_URL", "http://47.101.40.249:8787").rstrip("/")
+PLUGIN_STATS_BASE_URL = getenv("MAIBOT_PLUGIN_STATS_BASE_URL", "http://hyybuth.xyz:10059").rstrip("/")
 PLUGIN_STATS_TIMEOUT = float(getenv("MAIBOT_PLUGIN_STATS_TIMEOUT", "8"))
 
 

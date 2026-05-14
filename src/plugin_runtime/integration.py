@@ -47,7 +47,7 @@ from src.plugin_runtime.host.hook_dispatcher import HookDispatchResult, HookDisp
 from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistry
 from src.plugin_runtime.host.message_utils import MessageDict, PluginMessageUtils
 from src.plugin_runtime.protocol.envelope import InspectPluginConfigResultPayload
-from src.plugin_runtime.runner.manifest_validator import ManifestValidator
+from src.plugin_runtime.runner.manifest_validator import ManifestValidator, is_reserved_plugin_directory
 
 if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
@@ -1231,7 +1231,7 @@ class PluginRuntimeManager(
             if not plugin_root.is_dir():
                 continue
             for entry in plugin_root.iterdir():
-                if entry.is_dir():
+                if entry.is_dir() and not is_reserved_plugin_directory(entry):
                     yield entry.resolve()
 
     def _read_plugin_id_from_plugin_path(self, plugin_path: Path) -> Optional[str]:
