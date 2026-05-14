@@ -217,6 +217,44 @@ class PromptCLIVisualizer:
                 return image_format, image_base64
         return None
 
+    @staticmethod
+    def _extract_data_url_image(image_url: str) -> tuple[str, str] | None:
+        """从 data URL 中提取图片格式和 Base64 内容。"""
+
+        normalized_url = image_url.strip()
+        if not normalized_url.startswith("data:image/") or ";base64," not in normalized_url:
+            return None
+        prefix, image_base64 = normalized_url.split(";base64,", maxsplit=1)
+        image_format = prefix.removeprefix("data:image/").strip().lower()
+        if not image_format or not image_base64:
+            return None
+        return image_format, image_base64
+
+    @classmethod
+    def _extract_image_dict_pair(cls, item: Any) -> tuple[str, str] | None:
+        """兼容 OpenAI/Responses 风格的图片 content part。"""
+
+        if not isinstance(item, dict):
+            return None
+
+        part_type = str(item.get("type") or "").strip()
+        if part_type not in {"image", "image_url", "input_image"}:
+            return None
+
+        image_url = item.get("image_url")
+        if isinstance(image_url, dict):
+            image_url = image_url.get("url")
+        if isinstance(image_url, str):
+            image_pair = cls._extract_data_url_image(image_url)
+            if image_pair is not None:
+                return image_pair
+
+        image_base64 = item.get("image_base64") or item.get("base64")
+        image_format = item.get("image_format") or item.get("format")
+        if isinstance(image_format, str) and isinstance(image_base64, str):
+            return image_format, image_base64
+        return None
+
     @classmethod
     def _render_message_content(cls, content: Any, settings: PromptImageDisplaySettings) -> RenderableType:
         if isinstance(content, str):
@@ -231,6 +269,11 @@ class PromptCLIVisualizer:
                 image_pair = cls._extract_image_pair(item)
                 if image_pair is not None:
                     image_format, image_base64 = image_pair
+                    parts.append(cls._render_image_item(image_format, image_base64, settings))
+                    continue
+                image_dict_pair = cls._extract_image_dict_pair(item)
+                if image_dict_pair is not None:
+                    image_format, image_base64 = image_dict_pair
                     parts.append(cls._render_image_item(image_format, image_base64, settings))
                     continue
                 if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str):
@@ -257,6 +300,12 @@ class PromptCLIVisualizer:
                 image_pair = cls._extract_image_pair(item)
                 if image_pair is not None:
                     image_format, image_base64 = image_pair
+                    approx_size = max(0, len(str(image_base64)) * 3 // 4)
+                    parts.append(f"[图片 image/{image_format} {approx_size} B]")
+                    continue
+                image_dict_pair = cls._extract_image_dict_pair(item)
+                if image_dict_pair is not None:
+                    image_format, image_base64 = image_dict_pair
                     approx_size = max(0, len(str(image_base64)) * 3 // 4)
                     parts.append(f"[图片 image/{image_format} {approx_size} B]")
                     continue
@@ -435,6 +484,12 @@ class PromptCLIVisualizer:
                 image_pair = cls._extract_image_pair(item)
                 if image_pair is not None:
                     image_format, image_base64 = image_pair
+                    image_html = cls._render_image_item_html(str(image_format), str(image_base64))
+                    parts.append(image_html)
+                    continue
+                image_dict_pair = cls._extract_image_dict_pair(item)
+                if image_dict_pair is not None:
+                    image_format, image_base64 = image_dict_pair
                     image_html = cls._render_image_item_html(str(image_format), str(image_base64))
                     parts.append(image_html)
                     continue
