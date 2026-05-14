@@ -465,6 +465,25 @@ class ChatConfig(ConfigBase):
     )
     """是否启用回复时附带引用回复"""
 
+    typing_speed: float = Field(
+        default=1.0,
+        ge=0,
+        le=2,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "聊天速度",
+                "en_US": "Typing speed",
+                "ja_JP": "チャット速度",
+            },
+            "x-widget": "slider",
+            "x-icon": "keyboard",
+            "x-row": "reply-speed",
+            "step": 0.1,
+            "advanced": True,
+        },
+    )
+    """模拟打字时间倍乘，0 表示不等待，1 保持默认等待时间，2 表示等待时间变为默认的两倍"""
+
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
         ge=0,
