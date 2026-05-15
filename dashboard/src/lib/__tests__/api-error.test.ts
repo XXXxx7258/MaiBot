@@ -42,4 +42,8 @@ describe('formatApiError', () => {
   it('falls back when response has no usable message', () => {
     expect(formatApiError({}, '默认错误')).toBe('默认错误')
   })
+
+  it('uses message when detail is empty', () => {
+    expect(formatApiError({ detail: '', message: '权限不足' }, '默认错误')).toBe('权限不足')
+  })
 })

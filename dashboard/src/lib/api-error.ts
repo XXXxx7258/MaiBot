@@ -5,6 +5,7 @@ type ApiErrorDetail = {
   type?: unknown
 }
 
+/** 将 FastAPI 校验错误中的 loc 路径转换为可读字段路径。 */
 function formatLocation(loc: unknown): string {
   if (Array.isArray(loc)) {
     return loc.map((item) => String(item)).join('.')
@@ -15,6 +16,7 @@ function formatLocation(loc: unknown): string {
   return String(loc)
 }
 
+/** 将单个错误详情转换为可安全渲染的字符串。 */
 function formatDetailItem(item: unknown): string {
   if (typeof item === 'string') {
     return item
@@ -36,6 +38,20 @@ function formatDetailItem(item: unknown): string {
   }
 }
 
+/** 判断候选错误字段是否包含可展示的信息。 */
+function hasUsableMessage(value: unknown): boolean {
+  if (value === null || value === undefined || value === '') {
+    return false
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0
+  }
+  return true
+}
+
+/**
+ * 将后端错误响应统一转换为字符串，避免将对象直接传给 React 渲染。
+ */
 export function formatApiError(errorData: unknown, fallback: string): string {
   if (!errorData) {
     return fallback
@@ -50,7 +66,7 @@ export function formatApiError(errorData: unknown, fallback: string): string {
   }
 
   const data = errorData as { detail?: unknown; message?: unknown; error?: unknown }
-  const rawMessage = data.detail ?? data.message ?? data.error
+  const rawMessage = [data.detail, data.message, data.error].find(hasUsableMessage)
 
   if (Array.isArray(rawMessage)) {
     const message = rawMessage.map(formatDetailItem).filter(Boolean).join('; ')
