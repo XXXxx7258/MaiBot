@@ -98,6 +98,11 @@ async def handle_tool(
     reference_info = str(invocation.arguments.get("reference_info") or "").strip()
     target_message_id = str(invocation.arguments.get("msg_id") or "").strip()
     set_quote = bool(invocation.arguments.get("set_quote", True))
+    reply_tool_args = {
+        key: value
+        for key, value in dict(invocation.arguments or {}).items()
+        if key not in {"msg_id", "set_quote", "reference_info"}
+    }
     enable_reply_quote = bool(config_module.global_config.chat.enable_reply_quote)
     effective_set_quote = set_quote and enable_reply_quote
 
@@ -146,6 +151,7 @@ async def handle_tool(
             stream_id=tool_ctx.runtime.session_id,
             reply_message=target_message,
             chat_history=replyer_chat_history,
+            reply_tool_args=reply_tool_args,
             sub_agent_runner=lambda system_prompt: _run_expression_selector(
                 tool_ctx,
                 system_prompt,

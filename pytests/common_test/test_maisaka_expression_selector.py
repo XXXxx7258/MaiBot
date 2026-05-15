@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Generator
+from typing import Any, Generator
 
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
@@ -11,6 +11,16 @@ from src.chat.replyer import maisaka_expression_selector as selector_module
 from src.chat.replyer.maisaka_expression_selector import MaisakaExpressionSelector
 from src.common.database.database_model import Expression, ModifiedBy
 from src.common.utils.utils_session import SessionUtils
+
+
+class _FakeHookManager:
+    def __init__(self, responses: dict[str, SimpleNamespace]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def invoke_hook(self, hook_name: str, **kwargs: Any) -> SimpleNamespace:
+        self.calls.append((hook_name, dict(kwargs)))
+        return self.responses.get(hook_name, SimpleNamespace(kwargs=dict(kwargs), aborted=False))
 
 
 def _build_target(platform: str, item_id: str, rule_type: str = "group") -> SimpleNamespace:
@@ -232,4 +242,142 @@ def test_load_expression_candidates_checked_only_requires_user_review(monkeypatc
 
     assert candidates
     assert {candidate["id"] for candidate in candidates}.issubset(user_checked_ids)
+
+
+@pytest.mark.asyncio
+async def test_select_for_reply_can_be_aborted_by_before_select_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_manager = _FakeHookManager(
+        {
+            "expression.select.before_select": SimpleNamespace(kwargs={}, aborted=True),
+        }
+    )
+    selector = MaisakaExpressionSelector()
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: fake_manager)
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(
+        selector,
+        "_load_expression_candidates",
+        lambda session_id: [
+            {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+            {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+        ],
+    )
+
+    result = await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        sub_agent_runner=None,
+    )
+
+    assert result.expression_habits == ""
+    assert result.selected_expression_ids == []
+    assert fake_manager.calls[0][0] == "expression.select.before_select"
+
+
+@pytest.mark.asyncio
+async def test_select_for_reply_passes_reply_tool_args_to_hooks(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_manager = _FakeHookManager({})
+    selector = MaisakaExpressionSelector()
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: fake_manager)
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(
+        selector,
+        "_load_expression_candidates",
+        lambda session_id: [
+            {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+            {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+        ],
+    )
+    monkeypatch.setattr(selector, "_update_last_active_time", lambda selected_ids: None)
+
+    await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        reply_tool_args={"expression_strategy": "casual"},
+        sub_agent_runner=None,
+    )
+
+    assert fake_manager.calls[0][1]["reply_tool_args"] == {"expression_strategy": "casual"}
+    assert fake_manager.calls[1][1]["reply_tool_args"] == {"expression_strategy": "casual"}
+
+
+@pytest.mark.asyncio
+async def test_select_for_reply_uses_candidates_modified_by_before_select_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_candidates = [
+        {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+        {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+    ]
+    fake_manager = _FakeHookManager(
+        {
+            "expression.select.before_select": SimpleNamespace(
+                kwargs={
+                    "candidates": [original_candidates[1]],
+                    "max_num": 1,
+                },
+                aborted=False,
+            ),
+        }
+    )
+    selector = MaisakaExpressionSelector()
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: fake_manager)
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(selector, "_load_expression_candidates", lambda session_id: list(original_candidates))
+    monkeypatch.setattr(selector, "_update_last_active_time", lambda selected_ids: None)
+
+    result = await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        sub_agent_runner=None,
+    )
+
+    assert result.selected_expression_ids == [2]
+    assert "主动接话" in result.expression_habits
+    assert fake_manager.calls[0][0] == "expression.select.before_select"
+    assert fake_manager.calls[1][0] == "expression.select.after_selection"
+
+
+@pytest.mark.asyncio
+async def test_select_for_reply_uses_ids_modified_by_after_selection_hook(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidates = [
+        {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+        {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+    ]
+    fake_manager = _FakeHookManager(
+        {
+            "expression.select.after_selection": SimpleNamespace(
+                kwargs={
+                    "selected_expression_ids": [2],
+                    "selected_expressions": [candidates[0], candidates[1]],
+                },
+                aborted=False,
+            ),
+        }
+    )
+    selector = MaisakaExpressionSelector()
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: fake_manager)
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(selector, "_load_expression_candidates", lambda session_id: list(candidates))
+    monkeypatch.setattr(selector, "_update_last_active_time", lambda selected_ids: None)
+
+    result = await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        sub_agent_runner=None,
+    )
+
+    assert result.selected_expression_ids == [2]
+    assert "主动接话" in result.expression_habits
+    assert "轻松吐槽" not in result.expression_habits
 
