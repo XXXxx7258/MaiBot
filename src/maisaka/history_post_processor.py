@@ -1,17 +1,19 @@
 """Maisaka 历史消息轮次结束后处理。"""
 
 from dataclasses import dataclass
-from json import dumps
+from json import dumps, loads
 from math import ceil
 
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 
-from .context_messages import AssistantMessage, LLMContextMessage, SessionBackedMessage, ToolResultMessage
+from .context_messages import AssistantMessage, ComplexSessionMessage, LLMContextMessage, SessionBackedMessage, ToolResultMessage
 from .history_utils import drop_leading_orphan_tool_results, drop_orphan_tool_results, normalize_tool_result_order
 
 TRIM_TARGET_RATIO = 1.0
 TRIM_THRESHOLD_RATIO = 2.0
 ASSISTANT_OPTIMIZATION_KEEP_COUNT = 3
+FOLDED_TOOL_COMPLEX_MESSAGE_THRESHOLD = 1024
+TRIMMED_TOOL_CALL_DROP_NAMES = {"continue", "finish", "no_action", "reply", "wait"}
 
 
 @dataclass(slots=True)
@@ -147,13 +149,20 @@ def _build_trimmed_assistant_tool_user_message(
 
     tool_sections: list[str] = []
     for tool_call in assistant_message.tool_calls:
+        if tool_call.func_name in TRIMMED_TOOL_CALL_DROP_NAMES:
+            continue
+
+        tool_result = tool_result_by_call_id.get(tool_call.call_id)
+        if tool_call.func_name == "tool_search":
+            tool_sections.append(_format_trimmed_tool_search_call(tool_call.args or {}, tool_result))
+            continue
+
         args_text = dumps(tool_call.args or {}, ensure_ascii=False, sort_keys=True)
         section_lines = [
             f"- tool_call_id: {tool_call.call_id}",
             f"  tool_name: {tool_call.func_name}",
             f"  args: {args_text}",
         ]
-        tool_result = tool_result_by_call_id.get(tool_call.call_id)
         if tool_result is not None:
             result_status = "success" if tool_result.success else "failed"
             section_lines.extend(
@@ -164,14 +173,67 @@ def _build_trimmed_assistant_tool_user_message(
             )
         tool_sections.append("\n".join(section_lines))
 
+    if not tool_sections:
+        return None
+
     folded_text = "[已折叠的历史工具调用]\n" + "\n".join(tool_sections)
+    message_id = f"optimized_tool_history:{assistant_message.timestamp.timestamp()}"
+    if len(folded_text) > FOLDED_TOOL_COMPLEX_MESSAGE_THRESHOLD:
+        return ComplexSessionMessage(
+            raw_message=MessageSequence([TextComponent(folded_text)]),
+            visible_text=folded_text,
+            timestamp=assistant_message.timestamp,
+            message_id=message_id,
+            source_kind="optimized_tool_history",
+            prompt_text=folded_text,
+            complex_message_type="tool_history",
+        )
+
     return SessionBackedMessage(
         raw_message=MessageSequence([TextComponent(folded_text)]),
         visible_text=folded_text,
         timestamp=assistant_message.timestamp,
-        message_id=f"optimized_tool_history:{assistant_message.timestamp.timestamp()}",
+        message_id=message_id,
         source_kind="optimized_tool_history",
     )
+
+
+def _format_trimmed_tool_search_call(
+    args: dict,
+    tool_result: ToolResultMessage | None,
+) -> str:
+    """以更短的形式保留 tool_search 结果，供后续恢复 deferred tool 激活状态。"""
+
+    query = str(args.get("query", "") or "").strip()
+    matched_tool_names = _parse_tool_search_result_tool_names(tool_result.content if tool_result is not None else "")
+    matched_text = ", ".join(matched_tool_names) if matched_tool_names else "无"
+    if query:
+        return f"- tool_search: {matched_text} (query={query})"
+    return f"- tool_search: {matched_text}"
+
+
+def _parse_tool_search_result_tool_names(content: str) -> list[str]:
+    """从 tool_search 的结果文本中提取工具名，折叠时只保留最关键的信息。"""
+
+    try:
+        structured_content = loads(content)
+    except (TypeError, ValueError):
+        structured_content = None
+
+    if isinstance(structured_content, dict):
+        raw_tool_names = structured_content.get("matched_tool_names")
+        if isinstance(raw_tool_names, list):
+            return [str(tool_name).strip() for tool_name in raw_tool_names if str(tool_name).strip()]
+
+    matched_tool_names: list[str] = []
+    for raw_line in content.splitlines():
+        normalized_line = raw_line.strip()
+        if not normalized_line.startswith("- "):
+            continue
+        normalized_name = normalized_line[2:].split("（", 1)[0].strip()
+        if normalized_name:
+            matched_tool_names.append(normalized_name)
+    return matched_tool_names
 
 
 def _normalize_history_structure(

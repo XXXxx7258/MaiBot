@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.llm_models.payload_content.tool_option import ToolCall
 from src.maisaka.context_messages import AssistantMessage, SessionBackedMessage, ToolResultMessage
@@ -116,3 +118,36 @@ def test_context_optimization_preserves_trimmed_assistant_tool_content_as_user_m
     assert "旧记忆" in folded_tool_messages[0]
     assert "旧工具结果" in folded_tool_messages[0]
     assert result.removed_count == 1
+
+
+@pytest.mark.parametrize("tool_name", ["continue", "finish", "no_action", "reply", "wait"])
+def test_context_optimization_drops_trimmed_control_tools_without_folding(tool_name: str) -> None:
+    control_tool_call = ToolCall(call_id=f"{tool_name}-call", func_name=tool_name, args={})
+    chat_history = [
+        _assistant_message("assistant 0", [control_tool_call]),
+        ToolResultMessage(
+            content=f"{tool_name} 工具结果",
+            timestamp=datetime.now(),
+            tool_call_id=f"{tool_name}-call",
+            tool_name=tool_name,
+        ),
+        _assistant_message("assistant 1"),
+        _assistant_message("assistant 2"),
+        _assistant_message("assistant 3"),
+    ]
+
+    result = process_chat_history_after_cycle(
+        chat_history,
+        max_context_size=100,
+        enable_context_optimization=True,
+    )
+
+    folded_tool_messages = [
+        message
+        for message in result.history
+        if isinstance(message, SessionBackedMessage) and message.source_kind == "optimized_tool_history"
+    ]
+    tool_results = [message for message in result.history if isinstance(message, ToolResultMessage)]
+
+    assert folded_tool_messages == []
+    assert tool_results == []
