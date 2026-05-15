@@ -16,7 +16,7 @@ from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.mai_message_data_model import MessageInfo, UserInfo
 from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
-from src.config.config import config_manager, global_config
+from src.config.config import config_manager
 
 from .maisaka_cli_sender import CLI_PLATFORM_NAME
 from .console import console
@@ -67,11 +67,10 @@ class BufferCLI:
             timestamp=timestamp,
             platform=BufferCLI._CLI_PLATFORM,
         )
-        user_name = global_config.maisaka.cli_user_name.strip() or "用户"
         message.message_info = MessageInfo(
             user_info=UserInfo(
                 user_id=BufferCLI._CLI_USER_ID,
-                user_nickname=user_name,
+                user_nickname="用户",
                 user_cardname=None,
             ),
             group_info=None,
