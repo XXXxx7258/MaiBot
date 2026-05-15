@@ -193,6 +193,39 @@ class RuntimeCoreCapabilityMixin:
             logger.error(f"[cap.maisaka.context.append] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
 
+    async def _cap_maisaka_proactive_trigger(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """请求 Maisaka 基于指定聊天流主动处理一轮对话。"""
+
+        del capability
+
+        stream_id = str(args.get("stream_id") or args.get("chat_id") or args.get("session_id") or "").strip()
+        intent = str(args.get("intent") or args.get("prompt") or args.get("text") or "").strip()
+        if not stream_id:
+            return {"success": False, "error": "缺少必要参数 stream_id"}
+        if not intent:
+            return {"success": False, "error": "缺少必要参数 intent"}
+
+        try:
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+            from src.chat.message_receive.chat_manager import chat_manager
+
+            chat_session = chat_manager.get_existing_session_by_session_id(stream_id)
+            if chat_session is None:
+                return {"success": False, "error": f"未找到已存在的聊天流: {stream_id}"}
+
+            runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)
+            result = await runtime.enqueue_proactive_task(
+                plugin_id=plugin_id,
+                intent=intent,
+                reason=str(args.get("reason") or "").strip(),
+                priority=str(args.get("priority") or "").strip(),
+                metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
+            )
+            return {"success": True, **result}
+        except Exception as exc:
+            logger.error(f"[cap.maisaka.proactive.trigger] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
+
     async def _cap_send_text(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
         """向指定流发送文本消息。
 

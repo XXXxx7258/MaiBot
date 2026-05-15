@@ -464,9 +464,13 @@ class MaisakaReasoningEngine:
         try:
             while self._runtime._running:
                 queued_trigger = await self._runtime._internal_turn_queue.get()
-                message_triggered, timeout_triggered = self._drain_ready_turn_triggers(queued_trigger)
+                message_triggered, timeout_triggered, proactive_triggered = self._drain_ready_turn_triggers(
+                    queued_trigger
+                )
 
-                if self._runtime._agent_state == self._runtime._STATE_WAIT and not timeout_triggered:
+                if self._runtime._agent_state == self._runtime._STATE_WAIT and not (
+                    timeout_triggered or proactive_triggered
+                ):
                     self._runtime._message_turn_scheduled = False
                     logger.debug(f"{self._runtime.log_prefix} 当前仍处于 wait 状态，忽略消息触发并继续等待超时")
                     continue
@@ -493,7 +497,11 @@ class MaisakaReasoningEngine:
                     await self._ingest_messages(cached_messages)
                     anchor_message = cached_messages[-1]
                 else:
-                    anchor_message = self._get_timeout_anchor_message()
+                    anchor_message = (
+                        self._runtime._proactive_anchor_message
+                        if proactive_triggered
+                        else self._get_timeout_anchor_message()
+                    )
                     if anchor_message is None:
                         logger.warning(f"{self._runtime.log_prefix} wait 超时后没有可复用的锚点消息，跳过本轮")
                         continue
@@ -845,12 +853,13 @@ class MaisakaReasoningEngine:
 
     def _drain_ready_turn_triggers(
         self,
-        queued_trigger: Literal["message", "timeout"],
-    ) -> tuple[bool, bool]:
+        queued_trigger: Literal["message", "timeout", "proactive"],
+    ) -> tuple[bool, bool, bool]:
         """合并当前已就绪的消息触发信号。"""
 
         message_triggered = queued_trigger == "message"
         timeout_triggered = queued_trigger == "timeout"
+        proactive_triggered = queued_trigger == "proactive"
 
         while True:
             try:
@@ -864,8 +873,11 @@ class MaisakaReasoningEngine:
             if next_trigger == "timeout":
                 timeout_triggered = True
                 continue
+            if next_trigger == "proactive":
+                proactive_triggered = True
+                continue
 
-        return message_triggered, timeout_triggered
+        return message_triggered, timeout_triggered, proactive_triggered
 
     def _get_timeout_anchor_message(self) -> Optional[SessionMessage]:
         """在 wait 超时后复用最近一条真实用户消息作为锚点。"""
