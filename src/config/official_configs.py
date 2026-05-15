@@ -2335,6 +2335,21 @@ class ExpressionConfig(ConfigBase):
     )
     """是否在表达学习写入前进行 AI 审核；开启后只有审核通过的表达方式会被写入。"""
 
+    enable_precise_expression_selection: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用精细表达选择",
+                "en_US": "Enable precise expression selection",
+                "ja_JP": "精密な表現選択を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "target",
+            "advanced": True,
+        },
+    )
+    """是否启用精细表达选择；开启后 replyer 会使用子代理从候选表达中挑选更贴合当前语境的表达方式。"""
+
     max_expression_learner: int = Field(
         default=3,
         json_schema_extra={

@@ -381,3 +381,87 @@ async def test_select_for_reply_uses_ids_modified_by_after_selection_hook(monkey
     assert "主动接话" in result.expression_habits
     assert "轻松吐槽" not in result.expression_habits
 
+
+@pytest.mark.asyncio
+async def test_select_for_reply_uses_direct_selection_when_precise_selection_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [
+        {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+        {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+    ]
+    selector = MaisakaExpressionSelector()
+    sub_agent_calls: list[str] = []
+
+    async def fake_sub_agent(prompt: str) -> str:
+        sub_agent_calls.append(prompt)
+        return '{"selected_ids":[2]}'
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: _FakeHookManager({}))
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(selector, "_load_expression_candidates", lambda session_id: list(candidates))
+    monkeypatch.setattr(selector, "_update_last_active_time", lambda selected_ids: None)
+    monkeypatch.setattr(
+        selector_module,
+        "global_config",
+        SimpleNamespace(
+            expression=SimpleNamespace(
+                enable_precise_expression_selection=False,
+            )
+        ),
+    )
+
+    result = await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        sub_agent_runner=fake_sub_agent,
+    )
+
+    assert sub_agent_calls == []
+    assert result.selected_expression_ids == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_select_for_reply_uses_sub_agent_when_precise_selection_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidates = [
+        {"id": 1, "situation": "有人开玩笑", "style": "轻松吐槽", "count": 1},
+        {"id": 2, "situation": "气氛沉默", "style": "主动接话", "count": 1},
+    ]
+    selector = MaisakaExpressionSelector()
+    sub_agent_calls: list[str] = []
+
+    async def fake_sub_agent(prompt: str) -> str:
+        sub_agent_calls.append(prompt)
+        return '{"selected_ids":[2]}'
+
+    monkeypatch.setattr(selector, "_get_runtime_manager", lambda: _FakeHookManager({}))
+    monkeypatch.setattr(selector, "_can_use_expressions", lambda session_id: True)
+    monkeypatch.setattr(selector, "_load_expression_candidates", lambda session_id: list(candidates))
+    monkeypatch.setattr(selector, "_update_last_active_time", lambda selected_ids: None)
+    monkeypatch.setattr(
+        selector_module,
+        "global_config",
+        SimpleNamespace(
+            expression=SimpleNamespace(
+                enable_precise_expression_selection=True,
+            )
+        ),
+    )
+
+    result = await selector.select_for_reply(
+        session_id="session-1",
+        chat_history=[],
+        reply_message=None,
+        reply_reason="",
+        sub_agent_runner=fake_sub_agent,
+    )
+
+    assert len(sub_agent_calls) == 1
+    assert result.selected_expression_ids == [2]
+    assert "主动接话" in result.expression_habits
+    assert "轻松吐槽" not in result.expression_habits
+

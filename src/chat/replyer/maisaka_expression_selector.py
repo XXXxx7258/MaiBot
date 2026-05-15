@@ -384,6 +384,54 @@ class MaisakaExpressionSelector:
             selected_expression_ids=selected_ids,
         )
 
+    async def _build_default_selection_result(
+        self,
+        *,
+        session_id: str,
+        chat_history: List[LLMContextMessage],
+        reply_message: Optional[SessionMessage],
+        reply_reason: str,
+        candidates: List[dict[str, Any]],
+        sub_agent_runner: Optional[SubAgentRunner],
+    ) -> MaisakaExpressionSelectionResult:
+        if not global_config.expression.enable_precise_expression_selection:
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        if sub_agent_runner is None:
+            logger.info("精细表达选择已跳过：缺少子代理执行器，回退为直接注入")
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        selector_prompt = self._build_selector_prompt(
+            chat_history=chat_history,
+            reply_message=reply_message,
+            reply_reason=reply_reason,
+            candidates=candidates,
+        )
+        try:
+            raw_response = await sub_agent_runner(selector_prompt)
+        except Exception as exc:
+            logger.warning(f"精细表达选择子代理执行失败，回退为直接注入: {exc}")
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        selected_ids = self._parse_selected_ids(raw_response, candidates)
+        logger.debug(
+            f"精细表达选择完成：session_id={session_id} selected_ids={selected_ids!r} "
+            f"候选预览={self._format_candidate_preview(candidates)}"
+        )
+        return self._build_selection_result_from_ids(
+            candidates=candidates,
+            selected_ids=selected_ids,
+        )
+
     def _update_last_active_time(self, selected_ids: List[int]) -> None:
         if not selected_ids:
             return
@@ -404,8 +452,6 @@ class MaisakaExpressionSelector:
         reply_tool_args: Optional[dict[str, Any]] = None,
         sub_agent_runner: Optional[SubAgentRunner],
     ) -> MaisakaExpressionSelectionResult:
-        del sub_agent_runner
-
         if not session_id:
             logger.info("表达方式选择已跳过：缺少 session_id")
             return MaisakaExpressionSelectionResult()
@@ -451,9 +497,13 @@ class MaisakaExpressionSelector:
             logger.info(f"表达方式选择已跳过：Hook 过滤后候选为空，session_id={session_id}")
             return MaisakaExpressionSelectionResult()
 
-        selection_result = self._build_direct_selection_result(
+        selection_result = await self._build_default_selection_result(
             session_id=session_id,
+            chat_history=chat_history,
+            reply_message=reply_message,
+            reply_reason=reply_reason,
             candidates=candidates,
+            sub_agent_runner=sub_agent_runner,
         )
         selected_ids = list(selection_result.selected_expression_ids)
         selected_expressions = [
