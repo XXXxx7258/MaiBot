@@ -42,6 +42,7 @@ interface MCPAuthorization {
 }
 
 interface MCPServerConfig {
+  _uuid?: string
   name: string
   enabled: boolean
   transport: MCPTransport
@@ -100,6 +101,7 @@ function normalizeMCPServer(value: unknown, index: number): MCPServerConfig {
 
   return {
     ...DEFAULT_MCP_SERVER,
+    _uuid: typeof source._uuid === 'string' ? source._uuid : crypto.randomUUID(),
     name: typeof source.name === 'string' ? source.name : `mcp-server-${index + 1}`,
     enabled: typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_MCP_SERVER.enabled,
     transport,
@@ -187,6 +189,7 @@ function MCPServersBlockEditor({
       ...servers,
       {
         ...DEFAULT_MCP_SERVER,
+        _uuid: crypto.randomUUID(),
         name: `mcp-server-${servers.length + 1}`,
       },
     ])
@@ -199,6 +202,7 @@ function MCPServersBlockEditor({
     }
     const nextServer = {
       ...server,
+      _uuid: crypto.randomUUID(),
       name: `${server.name || 'mcp-server'}-copy`,
       args: [...server.args],
       env: { ...server.env },
@@ -245,7 +249,7 @@ function MCPServersBlockEditor({
           </div>
         ) : (
           servers.map((server, index) => (
-            <Card key={`${server.name}-${index}`} className="border-border/70 bg-muted/20 shadow-none">
+            <Card key={server._uuid || `${server.name}-${index}`} className="border-border/70 bg-muted/20 shadow-none">
               <CardHeader className="space-y-3 px-4 py-3">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                   <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -512,7 +516,15 @@ function MCPSettingsPageContent() {
   const saveConfig = useCallback(async (): Promise<boolean> => {
     try {
       setSaving(true)
-      const result = await updateBotConfigSection('mcp', mcpConfig)
+      const configToSave = { ...mcpConfig }
+      if (Array.isArray(configToSave.servers)) {
+        configToSave.servers = configToSave.servers.map((server: MCPServerConfig) => {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { _uuid, ...rest } = server
+          return rest
+        })
+      }
+      const result = await updateBotConfigSection('mcp', configToSave)
 
       if (!result.success) {
         toast({
