@@ -410,7 +410,3 @@ function BackgroundAnimation() {
   )
 }
 
-// ============ 导出旧组件（兼容性） ============
-
-// 如需使用旧版组件，请直接导入:
-// import { RestartingOverlay } from '@/components/RestartingOverlay.legacy'

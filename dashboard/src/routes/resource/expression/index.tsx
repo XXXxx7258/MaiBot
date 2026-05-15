@@ -1,4 +1,4 @@
-import { ClipboardCheck, Download, MessageSquare, Plus, Search, Trash2, Upload, Zap } from 'lucide-react'
+import { ClipboardCheck, Download, FileClock, MessageSquare, Plus, Search, Trash2, Upload, Zap } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 
@@ -40,6 +40,7 @@ import {
   LegacyExpressionImportDialog,
 } from './ExpressionDialogs'
 import { ExpressionList } from './ExpressionList'
+import { ExpressionReviewLogPanel } from './ExpressionReviewLogPanel'
 
 import type { ChatInfo, Expression, ExpressionExportItem, ExpressionGroupInfo } from '@/types/expression'
 import type { StatsData } from './types'
@@ -79,7 +80,7 @@ export function ExpressionManagementPage() {
   const [chatList, setChatList] = useState<ChatInfo[]>([])
   const [expressionGroups, setExpressionGroups] = useState<ExpressionGroupInfo[]>([])
   const [chatNameMap, setChatNameMap] = useState<Map<string, string>>(new Map())
-  const [activeView, setActiveView] = useState<'list' | 'review' | 'quick'>('list')
+  const [activeView, setActiveView] = useState<'list' | 'review' | 'quick' | 'reviewLogs'>('list')
   const [uncheckedCount, setUncheckedCount] = useState(0)
   const { toast } = useToast()
   const importInputRef = useRef<HTMLInputElement>(null)
@@ -162,7 +163,7 @@ export function ExpressionManagementPage() {
   }
 
   // 加载聚天列表
-  const handleActiveViewChange = (view: 'list' | 'review' | 'quick') => {
+  const handleActiveViewChange = (view: 'list' | 'review' | 'quick' | 'reviewLogs') => {
     setActiveView(view)
     if (view === 'list') {
       loadExpressions()
@@ -630,6 +631,18 @@ export function ExpressionManagementPage() {
           <Zap className="h-4 w-4" />
           <span>快速审核</span>
         </button>
+        <button
+          type="button"
+          onClick={() => handleActiveViewChange('reviewLogs')}
+          className={`inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-md px-3 text-sm font-medium transition-colors sm:flex-none ${
+            activeView === 'reviewLogs'
+              ? 'bg-background text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <FileClock className="h-4 w-4" />
+          <span>AI审核记录</span>
+        </button>
       </div>
 
       <ScrollArea className={activeView === 'list' ? 'flex-1' : 'hidden'}>
@@ -926,6 +939,18 @@ export function ExpressionManagementPage() {
             mode={activeView === 'quick' ? 'quick' : 'list'}
             className="h-full"
             onReviewed={() => {
+              loadExpressions()
+              loadStats()
+              loadReviewStats()
+            }}
+          />
+        </div>
+      )}
+
+      {activeView === 'reviewLogs' && (
+        <div className="min-h-0 flex-1 pr-4">
+          <ExpressionReviewLogPanel
+            onRescued={() => {
               loadExpressions()
               loadStats()
               loadReviewStats()

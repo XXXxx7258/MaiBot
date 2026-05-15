@@ -313,7 +313,7 @@ export function LegacyExpressionImportDialog({
           <div className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-background/80 backdrop-blur-sm">
             <div className="rounded-lg border bg-background px-5 py-4 text-center shadow-lg">
               <div className="text-sm font-medium">
-                {loadingPreview ? '正在加载旧数据库，请勿关闭' : '正在导入表达方式，请勿关闭'}
+                {loadingPreview ? 'Thinking...' : '正在导入表达方式，请勿关闭'}
               </div>
               <div className="mt-1 text-xs text-muted-foreground">数据量较大时可能需要等待一会儿</div>
             </div>
@@ -730,7 +730,7 @@ export function ExpressionEditDialog({
             <AlertDescription className="text-xs">
               <div className="space-y-1">
                 <p><strong>状态标记说明：</strong></p>
-                <p>• 已检查：表示该表达方式已通过审核（可由AI自动检查或人工审核）</p>
+                <p>• 已检查：表示该表达方式已通过人工审核</p>
                 <p className="text-muted-foreground mt-2">
                   根据配置中"仅使用已审核通过的表达方式"设置：<br/>
                   • 开启时：只有通过审核（已检查）的项目会被使用<br/>

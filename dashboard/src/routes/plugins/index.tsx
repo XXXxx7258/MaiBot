@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -19,6 +18,7 @@ import {
   checkPluginInstalled,
   connectPluginProgressWebSocket,
   fetchPluginList,
+  getCachedPluginList,
   getInstalledPluginVersion,
   getInstalledPlugins,
   getMaimaiVersion,
@@ -28,7 +28,7 @@ import {
   updatePlugin,
   type InstalledPlugin,
 } from '@/lib/plugin-api'
-import { getPluginStatsByIds, recordPluginDownload, type PluginStatsData } from '@/lib/plugin-stats'
+import { getPluginStatsSummary, recordPluginDownload, type PluginStatsData } from '@/lib/plugin-stats'
 
 import { InstallDialog } from './InstallDialog'
 import { InstalledTab } from './InstalledTab'
@@ -75,35 +75,40 @@ function PluginsPageContent() {
     setRestartNoticeVisible(false)
   }
 
-  // 加载插件统计数据
-  const loadPluginStats = async (pluginList: PluginInfo[]) => {
-    const statsPromises = pluginList.map(async (plugin) => {
-      try {
-        const statsIds = plugin.stats_ids?.length
-          ? plugin.stats_ids
-          : ([plugin.marketplace_id, plugin.id].filter(Boolean) as string[])
-        const stats = await getPluginStatsByIds(statsIds)
-        return { id: plugin.id, stats, statsIds }
-      } catch (error) {
-        console.warn(`Failed to load stats for ${plugin.id}:`, error)
-        return { id: plugin.id, stats: null, statsIds: [plugin.id] }
-      }
-    })
+  const resolvePluginStats = (
+    plugin: PluginInfo,
+    statsSummary: Record<string, PluginStatsData>
+  ): PluginStatsData | undefined => {
+    const statsIds = [
+      plugin.manifest?.id,
+    ].filter((id): id is string => Boolean(id))
 
-    const results = await Promise.all(statsPromises)
+    return statsIds.map(id => statsSummary[id]).find(Boolean)
+  }
+
+  const buildPluginStatsMap = (
+    pluginList: PluginInfo[],
+    statsSummary: Record<string, PluginStatsData>
+  ): Record<string, PluginStatsData> => {
     const statsMap: Record<string, PluginStatsData> = {}
-    
-    results.forEach(({ id, stats, statsIds }) => {
-      if (stats) {
-        statsMap[id] = stats
-        statsMap[stats.plugin_id] = stats
-        statsIds.forEach(statsId => {
-          statsMap[statsId] = stats
-        })
-      }
-    })
 
-    setPluginStats(statsMap)
+    for (const plugin of pluginList) {
+      const stats = resolvePluginStats(plugin, statsSummary)
+      if (!stats) {
+        continue
+      }
+
+      const statsIds = [
+        plugin.manifest?.id,
+        stats.plugin_id,
+      ].filter((id): id is string => Boolean(id))
+
+      for (const statsId of statsIds) {
+        statsMap[statsId] = stats
+      }
+    }
+
+    return statsMap
   }
 
   // 统一管理 WebSocket 和数据加载
@@ -112,6 +117,12 @@ function PluginsPageContent() {
     let isUnmounted = false
 
     const init = async () => {
+      const cachedPluginList = getCachedPluginList()
+      if (cachedPluginList?.length && !isUnmounted) {
+        setPlugins(cachedPluginList)
+        setLoading(false)
+      }
+
       // 1. 先连接 WebSocket（异步获取 token）
       unsubscribeProgress = await connectPluginProgressWebSocket(
         (progress) => {
@@ -182,9 +193,11 @@ function PluginsPageContent() {
       // 4. 加载插件列表（包含已安装信息）
       if (!isUnmounted) {
         try {
-          setLoading(true)
+          if (!cachedPluginList?.length) {
+            setLoading(true)
+          }
           setError(null)
-          const apiResult = await fetchPluginList()
+          const apiResult = await fetchPluginList({ forceRefresh: Boolean(cachedPluginList?.length) })
           if (!apiResult.success) {
             if (!isUnmounted) {
               setError(apiResult.error)
@@ -200,7 +213,10 @@ function PluginsPageContent() {
           
           if (!isUnmounted) {
             // 获取已安装插件列表
-            const installedResult = await getInstalledPlugins()
+            const [installedResult, statsSummary] = await Promise.all([
+              getInstalledPlugins(),
+              getPluginStatsSummary(),
+            ])
             if (!installedResult.success) {
               toast({
                 title: '获取已安装插件失败',
@@ -256,17 +272,15 @@ function PluginsPageContent() {
                   installed: true,
                   installed_version: installedPlugin.manifest.version,
                   source: 'local',
-                  stats_ids: [installedPlugin.manifest.id || installedPlugin.id, installedPlugin.id].filter(Boolean) as string[],
+                  stats_ids: [installedPlugin.manifest.id].filter(Boolean) as string[],
                   published_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
                 })
               }
             }
             
+            setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
             setPlugins(mergedData)
-            
-            // 6. 加载所有插件的统计数据
-            loadPluginStats(mergedData)
           }
         } finally {
           if (!isUnmounted) {
@@ -464,9 +478,11 @@ function PluginsPageContent() {
       }
       
       // 记录下载统计
-      recordPluginDownload(installingPlugin.stats_ids?.[0] ?? installingPlugin.marketplace_id ?? installingPlugin.id).catch(err => {
-        console.warn('Failed to record download:', err)
-      })
+      if (installingPlugin.manifest.id) {
+        recordPluginDownload(installingPlugin.manifest.id).catch(err => {
+          console.warn('Failed to record download:', err)
+        })
+      }
       
       toast({
         title: '安装成功',
@@ -767,6 +783,20 @@ function PluginsPageContent() {
         {/* 搜索和筛选栏 */}
         <Card className="p-4">
           <div className="flex flex-col gap-4">
+            <div className="min-h-11">
+              {loadProgress && loadProgress.stage === 'loading' && loadProgress.operation === 'fetch' && (
+                <div className="flex items-start gap-3 rounded-lg border bg-background/70 px-3 py-2">
+                  <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-muted-foreground" />
+                  <div className="space-y-1">
+                    <div className="text-sm font-medium">加载插件市场</div>
+                    <div className="text-xs text-muted-foreground">
+                      {loadProgress.message || '正在获取插件清单，统计数据将通过轻量摘要接口加载'}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 搜索框 */}
               <div className="flex-1 relative">
@@ -830,30 +860,6 @@ function PluginsPageContent() {
           </TabsList>
         </Tabs>
 
-        {/* 进度条 - 仅显示插件清单加载进度 */}
-        {loadProgress && loadProgress.stage === 'loading' && loadProgress.operation === 'fetch' && (
-          <Card className="p-4">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span className="text-sm font-medium">加载插件列表</span>
-                </div>
-                <span className="text-sm font-medium">{loadProgress.progress}%</span>
-              </div>
-              <Progress value={loadProgress.progress} className="h-2" />
-              <div className="text-xs text-muted-foreground">
-                {loadProgress.message}
-              </div>
-              {loadProgress.total_plugins > 0 && (
-                <div className="text-xs text-muted-foreground text-center">
-                  已加载 {loadProgress.loaded_plugins} / {loadProgress.total_plugins} 个插件
-                </div>
-              )}
-            </div>
-          </Card>
-        )}
-
         {/* 加载错误显示 */}
         {loadProgress && loadProgress.stage === 'error' && loadProgress.error && (
           <Card className="border-destructive bg-destructive/10">
@@ -877,7 +883,7 @@ function PluginsPageContent() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            <span className="ml-3 text-muted-foreground">加载插件列表中...</span>
+            <span className="ml-3 text-muted-foreground">Thinking...</span>
           </div>
         ) : error ? (
           <Card className="p-6">

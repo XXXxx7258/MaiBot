@@ -143,8 +143,6 @@ export function AuthPage() {
       }
 
       setIsValidating(true)
-      console.log('开始验证 token...')
-
       try {
         // 向后端发送请求验证 token（后端会设置 HttpOnly Cookie）
         const response = await fetch('/api/webui/auth/verify', {
@@ -155,8 +153,6 @@ export function AuthPage() {
           credentials: 'include', // 确保接收并存储 Cookie
           body: JSON.stringify({ token: trimmed }),
         })
-
-        console.log('Token 验证响应状态:', response.status)
 
         const result = await parseResponse<{
           valid: boolean
@@ -171,26 +167,19 @@ export function AuthPage() {
         }
 
         const data = result.data
-        console.log('Token 验证响应数据:', data)
 
         if (data.valid) {
-          console.log('Token 验证成功，准备跳转...')
-          console.log('is_first_setup:', data.is_first_setup)
-
           // Token 验证成功，Cookie 已由后端设置
           // 等待一小段时间确保 Cookie 已设置
           await new Promise((resolve) => setTimeout(resolve, 100))
 
           // 再次检查认证状态
-          const authCheck = await checkAuthStatus()
-          console.log('跳转前认证状态检查:', authCheck)
+          await checkAuthStatus()
 
           // 直接使用验证响应中的 is_first_setup 字段，避免额外请求
           if (data.is_first_setup) {
-            console.log('跳转到首次配置页面')
             navigate({ to: '/setup' })
           } else {
-            console.log('跳转到首页')
             navigate({ to: '/' })
           }
           return true

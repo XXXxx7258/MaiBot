@@ -263,10 +263,6 @@ export async function detectPackConflicts(
   const responseData = await response.json()
   const currentConfig = responseData.config || responseData
   
-  console.log('=== Pack Conflict Detection ===')
-  console.log('Pack providers:', pack.providers)
-  console.log('Local providers:', currentConfig.api_providers)
-  
   const conflicts: ApplyPackConflicts = {
     existing_providers: [],
     new_providers: [],
@@ -276,24 +272,16 @@ export async function detectPackConflicts(
   // 检测提供商冲突
   const localProviders = currentConfig.api_providers || []
   for (const packProvider of pack.providers) {
-    console.log(`\nChecking pack provider: ${packProvider.name}`)
-    console.log(`  Pack URL: ${packProvider.base_url}`)
-    console.log(`  Normalized: ${normalizeUrl(packProvider.base_url)}`)
-    
     // 按 URL 匹配 - 找出所有匹配的本地提供商
     const matchedProviders = localProviders.filter(
       (p: { base_url: string; name: string }) => {
         const localNormalized = normalizeUrl(p.base_url)
         const packNormalized = normalizeUrl(packProvider.base_url)
-        console.log(`  Comparing with local "${p.name}": ${p.base_url}`)
-        console.log(`    Local normalized: ${localNormalized}`)
-        console.log(`    Match: ${localNormalized === packNormalized}`)
         return localNormalized === packNormalized
       }
     )
     
     if (matchedProviders.length > 0) {
-      console.log(`  ✓ Matched with ${matchedProviders.length} local provider(s):`, matchedProviders.map((p: {name: string}) => p.name).join(', '))
       conflicts.existing_providers.push({
         pack_provider: packProvider,
         local_providers: matchedProviders.map((p: { name: string; base_url: string }) => ({
@@ -302,32 +290,23 @@ export async function detectPackConflicts(
         })),
       })
     } else {
-      console.log(`  ✗ No match found - will need API key`)
       conflicts.new_providers.push(packProvider)
     }
   }
   
   // 检测模型名称冲突
   const localModels = currentConfig.models || []
-  console.log('\n=== Model Conflict Detection ===')
   for (const packModel of pack.models) {
     const conflictModel = localModels.find(
       (m: { name: string }) => m.name === packModel.name
     )
     if (conflictModel) {
-      console.log(`Model conflict: ${packModel.name}`)
       conflicts.conflicting_models.push({
         pack_model: packModel.name,
         local_model: conflictModel.name,
       })
     }
   }
-  
-  console.log('\n=== Detection Summary ===')
-  console.log(`Existing providers: ${conflicts.existing_providers.length}`)
-  console.log(`New providers: ${conflicts.new_providers.length}`)
-  console.log(`Conflicting models: ${conflicts.conflicting_models.length}`)
-  console.log('===========================\n')
   
   return conflicts
 }

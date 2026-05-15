@@ -1,6 +1,7 @@
 """Maisaka 规划器消息构造工具。"""
 
 from datetime import datetime
+from html import escape
 from typing import Optional
 
 from src.chat.message_receive.message import SessionMessage
@@ -31,20 +32,17 @@ def build_planner_prefix(
         str: 拼接完成的规划器前缀。
     """
 
-    prefix_parts = []
+    message_attrs = [
+        f'time="{escape(timestamp.strftime("%H:%M:%S"), quote=True)}"',
+        f'user="{escape(user_name, quote=True)}"',
+    ]
     if include_message_id:
-        prefix_parts.append(f"[msg_id]{message_id or ''}\n")
-    prefix_parts.extend(
-        [
-            f"[时间]{timestamp.strftime('%H:%M:%S')}\n",
-            f"[用户名]{user_name}\n",
-        ]
-    )
+        message_attrs.insert(0, f'msg_id="{escape(message_id or "", quote=True)}"')
+
     normalized_group_card = group_card.strip()
     if normalized_group_card:
-        prefix_parts.append(f"[用户群昵称]{normalized_group_card}\n")
-    prefix_parts.append("[发言内容]")
-    return "".join(prefix_parts)
+        message_attrs.append(f'group_card="{escape(normalized_group_card, quote=True)}"')
+    return f"<message {' '.join(message_attrs)}>\n"
 
 
 def build_planner_user_prefix_from_session_message(message: SessionMessage) -> str:

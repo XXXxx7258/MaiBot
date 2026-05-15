@@ -5,7 +5,7 @@
  * 1. 分页显示待审核/已通过的表达方式
  * 2. 支持单条通过/拒绝
  * 3. 支持批量操作
- * 4. 冲突检测（防止与AI自动检查冲突）
+ * 4. 冲突检测（防止与并发审核操作冲突）
  */
 
 import { animated, useSpring } from '@react-spring/web'
@@ -555,12 +555,16 @@ export function ExpressionReviewer({
 
   // 初始加载
   useEffect(() => {
-    if (open) {
-      loadStats()
+    if (!open) {
+      return
+    }
+
+    loadStats()
+    if (reviewMode === 'list') {
       loadList()
       loadChatNames()
     }
-  }, [open, loadStats, loadList, loadChatNames])
+  }, [open, reviewMode, loadStats, loadList, loadChatNames])
 
   // 切换筛选时重置页码
   useEffect(() => {
@@ -1385,7 +1389,7 @@ export function ExpressionReviewer({
               {quickLoading && quickExpressions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center">
                   <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">加载中...</p>
+                  <p className="text-muted-foreground">Thinking...</p>
                 </div>
               ) : quickExpressions.length === 0 ? (
                 <div className="flex flex-col items-center justify-center text-center">

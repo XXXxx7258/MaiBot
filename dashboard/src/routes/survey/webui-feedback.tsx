@@ -2,27 +2,20 @@
  * WebUI 使用反馈问卷页面
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Loader2, AlertCircle, FileQuestion } from 'lucide-react'
+import { AlertCircle, FileQuestion } from 'lucide-react'
 import { SurveyRenderer } from '@/components/survey'
 import { webuiFeedbackSurvey } from '@/config/surveys'
 import { APP_VERSION } from '@/lib/version'
 import type { SurveyConfig, QuestionAnswer } from '@/types/survey'
 
 export function WebUIFeedbackSurveyPage() {
-  const [isLoading, setIsLoading] = useState(true)
-
   // 使用 useMemo 派生配置而不是 useState + useEffect
   const surveyConfig = useMemo(() => {
     // 深拷贝配置以避免修改原始对象
     return JSON.parse(JSON.stringify(webuiFeedbackSurvey)) as SurveyConfig
-  }, [])
-
-  // 初始化完成后设置加载状态
-  useEffect(() => {
-    setIsLoading(false)
   }, [])
 
   // 预填充的答案（版本号自动填写）
@@ -34,22 +27,12 @@ export function WebUIFeedbackSurveyPage() {
   ], [])
 
   // 提交成功回调
-  const handleSubmitSuccess = useCallback((submissionId: string) => {
-    console.log('WebUI Survey submitted:', submissionId)
-  }, [])
+  const handleSubmitSuccess = useCallback(() => {}, [])
 
   // 提交错误回调
   const handleSubmitError = useCallback((error: string) => {
     console.error('WebUI Survey submission error:', error)
   }, [])
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
 
   if (!surveyConfig) {
     return (

@@ -110,7 +110,7 @@
       "groupName": "仮想グループ名（任意）",
       "groupNameHint": "麦麦はこれをこの名前のグループチャットとして認識します",
       "knownUserSuffix": " · 既知",
-      "loading": "読み込み中...",
+      "loading": "Thinking...",
       "noUsers": "ユーザーが見つかりません",
       "personCount": "({{count}} 人)",
       "platform": "プラットフォームを選択",
@@ -513,7 +513,7 @@
       }
     },
     "loading": {
-      "title": "設定を読み込み中...",
+      "title": "設定をThinking...",
       "description": "既存の設定を読み取っています"
     },
     "header": {
@@ -712,7 +712,7 @@
     }
   },
   "common": {
-    "loading": "読み込み中...",
+    "loading": "Thinking...",
     "error": "エラー",
     "retry": "再試行",
     "save": "保存する",
@@ -808,8 +808,8 @@
   "home": {
     "title": "リアルタイムモニター",
     "subtitle": "MaiBotの稼働状況と統計データの一覧",
-    "loading": "統計データを読み込み中...",
-    "loadingHint": "MaiBotの稼働データを取得しています",
+    "loading": "統計データをThinking...",
+    "loadingHint": "Thinking...",
     "timeRange": {
       "24h": "24時間",
       "7d": "7日間",

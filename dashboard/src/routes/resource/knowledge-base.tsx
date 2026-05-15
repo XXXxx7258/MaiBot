@@ -162,6 +162,7 @@ function formatMaibotDateTimeLocalForApi(input: string, fieldName: string): stri
 export function KnowledgeBasePage() {
   const { toast } = useToast()
   const [loading, setLoading] = useState(true)
+  const [loadingDotCount, setLoadingDotCount] = useState(6)
   const [refreshingCheck, setRefreshingCheck] = useState(false)
   const [vectorRebuildDialogOpen, setVectorRebuildDialogOpen] = useState(false)
   const [vectorRebuilding, setVectorRebuilding] = useState(false)
@@ -1955,13 +1956,21 @@ export function KnowledgeBasePage() {
     setQuickStartVisible(false)
   }, [])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLoadingDotCount((current) => (current >= 6 ? 2 : current + 1))
+    }, 450)
+
+    return () => window.clearInterval(timer)
+  }, [])
+
   const shouldRenderMemoryTab = (tab: MemoryConsoleTab) => activeTab === tab || visitedMemoryTabs.has(tab)
   const shouldShowPanelFallback = (tab: LoadableMemoryTab) => !loadedPanelDataRef.current.has(tab)
-  const renderPanelFallback = (tab: LoadableMemoryTab, label: string) => (
+  const renderPanelFallback = (tab: LoadableMemoryTab, _label: string) => (
     <TabsContent value={tab} className="space-y-4">
       <div className="flex min-h-[240px] items-center justify-center rounded-xl border bg-background/70 text-sm text-muted-foreground">
         <Loader2 className={cn('mr-2 h-4 w-4', tabLoading[tab] ? 'animate-spin' : '')} />
-        正在加载{label}...
+        Thinking...
       </div>
     </TabsContent>
   )
@@ -1969,8 +1978,8 @@ export function KnowledgeBasePage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="rounded-xl border bg-background px-6 py-5 text-sm text-muted-foreground shadow-sm">
-          正在加载长期记忆控制台...
+        <div className="min-w-[10rem] rounded-xl border bg-background px-5 py-3.5 text-base font-medium text-muted-foreground shadow-sm">
+          Thinking{'.'.repeat(loadingDotCount)}
         </div>
       </div>
     )

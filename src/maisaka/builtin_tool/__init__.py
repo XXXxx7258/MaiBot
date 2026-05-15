@@ -26,6 +26,8 @@ from .reply import get_tool_spec as get_reply_tool_spec
 from .reply import handle_tool as handle_reply_tool
 from .send_emoji import get_tool_spec as get_send_emoji_tool_spec
 from .send_emoji import handle_tool as handle_send_emoji_tool
+from .send_image import get_tool_spec as get_send_image_tool_spec
+from .send_image import handle_tool as handle_send_image_tool
 from .tool_search import get_tool_spec as get_tool_search_tool_spec
 from .tool_search import handle_tool as handle_tool_search_tool
 from .view_complex_message import get_tool_spec as get_view_complex_message_tool_spec
@@ -98,6 +100,7 @@ BUILTIN_TOOL_ENTRIES: List[BuiltinToolEntry] = [
         stage="action",
     ),
     BuiltinToolEntry("send_emoji", get_send_emoji_tool_spec, handle_send_emoji_tool, stage="action"),
+    BuiltinToolEntry("send_image", get_send_image_tool_spec, handle_send_image_tool, stage="action"),
     BuiltinToolEntry("tool_search", get_tool_search_tool_spec, handle_tool_search_tool, stage="action"),
 ]
 
@@ -147,6 +150,12 @@ def is_builtin_tool_in_action_stage(tool_spec: ToolSpec) -> bool:
     """判断内置工具是否属于 Action Loop 阶段。"""
 
     return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "action"
+
+
+def is_builtin_tool_in_timing_stage(tool_spec: ToolSpec) -> bool:
+    """判断内置工具是否属于 Timing Gate 阶段。"""
+
+    return str(tool_spec.metadata.get("builtin_stage") or "").strip() == "timing"
 
 
 def get_all_builtin_tool_specs(context: Optional[ToolAvailabilityContext] = None) -> List[ToolSpec]:

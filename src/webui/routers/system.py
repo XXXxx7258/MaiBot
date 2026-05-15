@@ -6,7 +6,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -21,12 +21,6 @@ from src.common.database.database import engine, get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
 from src.config.config import MMC_VERSION
-from src.webui.dashboard_update import (
-    DASHBOARD_PACKAGE_NAME,
-    PYPI_PROJECT_URL,
-    detect_package_runner,
-    get_dashboard_version_info,
-)
 from src.webui.dependencies import require_auth
 
 router = APIRouter(prefix="/system", tags=["system"], dependencies=[Depends(require_auth)])
@@ -59,17 +53,6 @@ class StatusResponse(BaseModel):
     uptime: float
     version: str
     start_time: str
-
-
-class DashboardVersionResponse(BaseModel):
-    """WebUI 版本检查响应"""
-
-    current_version: str
-    latest_version: Optional[str] = None
-    has_update: bool = False
-    runner: str = "unknown"
-    package_name: str = DASHBOARD_PACKAGE_NAME
-    pypi_url: str = PYPI_PROJECT_URL
 
 
 class CacheDirectoryStats(BaseModel):
@@ -130,31 +113,6 @@ class LocalCacheCleanupResponse(BaseModel):
     removed_files: int = 0
     removed_bytes: int = 0
     removed_records: int = 0
-
-
-def _parse_version_parts(version: str | None) -> Optional[list[int]]:
-    """将版本号转换为可比较的整数列表。"""
-    if not version:
-        return None
-    parts: list[int] = []
-    for raw_part in version.split("."):
-        if not raw_part.isdigit():
-            return None
-        parts.append(int(raw_part))
-    return parts
-
-
-def _is_newer_version(latest: str | None, current: str | None) -> bool:
-    """判断 latest 是否新于 current。"""
-    latest_parts = _parse_version_parts(latest)
-    current_parts = _parse_version_parts(current)
-    if latest_parts is None or current_parts is None:
-        return False
-
-    max_len = max(len(latest_parts), len(current_parts))
-    latest_parts.extend([0] * (max_len - len(latest_parts)))
-    current_parts.extend([0] * (max_len - len(current_parts)))
-    return latest_parts > current_parts
 
 
 def _iter_files(directory: Path) -> list[Path]:
@@ -305,7 +263,9 @@ async def _stop_runtime_before_restart() -> None:
 async def _delayed_restart() -> None:
     await asyncio.sleep(0.5)  # 延迟 0.5 秒，确保响应已发送
     logger.info("WebUI 请求重启，正在停止插件运行时")
-    await _stop_runtime_before_restart()
+    from src.common.runtime_loop import run_on_main_loop
+
+    await run_on_main_loop(_stop_runtime_before_restart())
     logger.info(f"WebUI 请求重启，退出代码 {_RESTART_EXIT_CODE}")
     os._exit(_RESTART_EXIT_CODE)
 
@@ -352,19 +312,6 @@ async def get_maibot_status():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取状态失败: {str(e)}") from e
-
-
-@router.get("/dashboard-version", response_model=DashboardVersionResponse)
-async def get_dashboard_version(current_version: Optional[str] = None):
-    """获取 WebUI 当前版本和 PyPI 最新版本。"""
-    version_info = await get_dashboard_version_info(current_version)
-
-    return DashboardVersionResponse(
-        current_version=version_info.current_version,
-        latest_version=version_info.latest_version,
-        has_update=version_info.has_update,
-        runner=detect_package_runner(),
-    )
 
 
 @router.get("/local-cache", response_model=LocalCacheStatsResponse)

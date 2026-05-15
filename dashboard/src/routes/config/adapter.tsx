@@ -562,7 +562,7 @@ export function AdapterConfigPage() {
                       {isLoading ? (
                         <>
                           <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                          <span className="sm:hidden">加载中...</span>
+                          <span className="sm:hidden">Thinking...</span>
                         </>
                       ) : (
                         <>

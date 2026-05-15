@@ -19,7 +19,8 @@ from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_mentioned_bot_in_message
-from src.common.data_models.mai_message_data_model import GroupInfo, UserInfo
+from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config
@@ -41,6 +42,7 @@ from .context_messages import (
     LLMContextMessage,
     ReferenceMessage,
     ReferenceMessageType,
+    SessionBackedMessage,
     ToolResultMessage,
 )
 from .display.display_utils import build_tool_call_summary_lines, format_token_count
@@ -87,7 +89,8 @@ class MaisakaHeartFlowChatting:
         # Keep all original messages for batching and later learning.
         self.message_cache: list[SessionMessage] = []
         self._last_processed_index = 0
-        self._internal_turn_queue: asyncio.Queue[Literal["message", "timeout"]] = asyncio.Queue()
+        self._internal_turn_queue: asyncio.Queue[Literal["message", "timeout", "proactive"]] = asyncio.Queue()
+        self._proactive_anchor_message: Optional[SessionMessage] = None
 
         self._mcp_manager: Optional[MCPManager] = None
         self._mcp_host_bridge: Optional[MCPHostLLMBridge] = None
@@ -288,6 +291,83 @@ class MaisakaHeartFlowChatting:
                 f"message_id={message.message_id} error={exc}"
             )
             return False
+
+    async def enqueue_proactive_task(
+        self,
+        *,
+        plugin_id: str,
+        intent: str,
+        reason: str = "",
+        priority: str = "",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """追加一个插件主动聊天任务，并唤醒 Maisaka 主循环。"""
+
+        normalized_plugin_id = str(plugin_id or "").strip() or "unknown"
+        normalized_intent = str(intent or "").strip()
+        if not normalized_intent:
+            raise ValueError("主动聊天任务缺少 intent")
+
+        task_id = f"proactive:{normalized_plugin_id}:{int(time.time() * 1000)}"
+        detail_lines = [
+            f'<plugin_proactive_task id="{task_id}" plugin_id="{normalized_plugin_id}">',
+            f"插件请求你主动处理一轮聊天：{normalized_intent}",
+        ]
+        if reason:
+            detail_lines.append(f"触发原因：{reason}")
+        if priority:
+            detail_lines.append(f"优先级：{priority}")
+        if metadata:
+            detail_lines.append(f"附加信息：{json.dumps(metadata, ensure_ascii=False, default=str)}")
+        detail_lines.extend(
+            [
+                "请结合当前聊天关系、记忆和上下文，自行决定是否回复以及如何表达。",
+                "</plugin_proactive_task>",
+            ]
+        )
+        visible_text = "\n".join(detail_lines)
+        self._chat_history.append(
+            SessionBackedMessage(
+                raw_message=MessageSequence([TextComponent(visible_text)]),
+                visible_text=visible_text,
+                timestamp=datetime.now(),
+                message_id=task_id,
+                source_kind=f"plugin_proactive:{normalized_plugin_id}",
+            )
+        )
+        self._proactive_anchor_message = self._build_proactive_anchor_message(task_id)
+        self._force_next_timing_continue = True
+        self._force_next_timing_message_id = task_id
+        self._force_next_timing_reason = "插件主动聊天任务"
+        if self._agent_state == self._STATE_WAIT:
+            self._agent_state = self._STATE_RUNNING
+            self._pending_wait_tool_call_id = None
+            self._cancel_wait_timeout_task()
+        self._internal_turn_queue.put_nowait("proactive")
+        logger.info(f"{self.log_prefix} 已接收插件主动聊天任务: plugin_id={normalized_plugin_id} task_id={task_id}")
+        return {
+            "stream_id": self.session_id,
+            "task_id": task_id,
+            "queued": True,
+        }
+
+    def _build_proactive_anchor_message(self, task_id: str) -> SessionMessage:
+        """构造仅供工具上下文使用的主动任务锚点消息，不写入消息数据库。"""
+
+        message = SessionMessage(
+            message_id=task_id,
+            timestamp=datetime.now(),
+            platform=self.chat_stream.platform,
+        )
+        message.session_id = self.session_id
+        message.message_info = MessageInfo(
+            user_info=self._build_runtime_user_info(),
+            group_info=self._build_group_info(),
+            additional_config={},
+        )
+        message.raw_message = MessageSequence([TextComponent("插件主动聊天任务")])
+        message.processed_plain_text = "插件主动聊天任务"
+        return message
 
     def _emit_monitor_message_sent(
         self,
@@ -624,12 +704,18 @@ class MaisakaHeartFlowChatting:
 
         trigger_reason = self._force_next_timing_reason or "@/提及消息"
         trigger_message_id = self._force_next_timing_message_id or "unknown"
-        reason = (
-            f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
-            "本轮直接跳过 Timing Gate 并视作 continue。"
-        )
+        if global_config.chat.enable_independent_timing_gate:
+            reason = (
+                f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
+                "本轮直接跳过 Timing Gate 并视作 continue。"
+            )
+        else:
+            reason = (
+                f"检测到新的{trigger_reason}（消息编号={trigger_message_id}），"
+                "本轮直接交由 Planner 处理。"
+            )
         logger.info(
-            f"{self.log_prefix} 已结束本次强制 continue，恢复 Timing Gate；"
+            f"{self.log_prefix} 已结束本次强制 continue 状态；"
             f"触发原因={trigger_reason} "
             f"触发消息编号={trigger_message_id}"
         )
@@ -849,11 +935,11 @@ class MaisakaHeartFlowChatting:
             for tool_call in message.tool_calls
             if tool_call.func_name == "tool_search" and tool_call.call_id
         }
-        if not tool_search_call_ids:
-            return set()
-
         discovered_tool_names: set[str] = set()
         for message in selected_history:
+            if isinstance(message, SessionBackedMessage) and message.source_kind == "optimized_tool_history":
+                discovered_tool_names.update(self._parse_folded_tool_search_result_tool_names(message.visible_text))
+                continue
             if not isinstance(message, ToolResultMessage):
                 continue
             if message.tool_name != "tool_search" or message.tool_call_id not in tool_search_call_ids:
@@ -888,6 +974,21 @@ class MaisakaHeartFlowChatting:
             if normalized_name in self.deferred_tool_specs_by_name:
                 discovered_tool_names.add(normalized_name)
 
+        return discovered_tool_names
+
+    def _parse_folded_tool_search_result_tool_names(self, content: str) -> set[str]:
+        """从优化上下文折叠后的 tool_search 文本中恢复已发现工具名。"""
+
+        discovered_tool_names: set[str] = set()
+        for raw_line in content.splitlines():
+            normalized_line = raw_line.strip()
+            if not normalized_line.startswith("- tool_search:"):
+                continue
+            raw_names = normalized_line.removeprefix("- tool_search:").split("(", 1)[0]
+            for raw_tool_name in raw_names.split(","):
+                normalized_name = raw_tool_name.strip()
+                if normalized_name in self.deferred_tool_specs_by_name:
+                    discovered_tool_names.add(normalized_name)
         return discovered_tool_names
 
     def get_discovered_deferred_tool_specs(self) -> list[ToolSpec]:

@@ -23,6 +23,7 @@ from src.plugin_runtime.host.hook_spec_registry import HookSpec, HookSpecRegistr
 from src.prompt.prompt_manager import prompt_manager
 from src.services.llm_service import LLMServiceClient
 
+from .expression_review_store import append_ai_review_log
 from .expression_utils import check_expression_suitability, parse_expression_response
 
 if TYPE_CHECKING:
@@ -549,7 +550,11 @@ class ExpressionLearner:
                 continue
 
             expression_self_reflect = global_config.expression.expression_self_reflect
-            if expression_self_reflect and not await self._check_expression_before_upsert(situation, style):
+            if expression_self_reflect and not await self._check_expression_before_upsert(
+                situation,
+                style,
+                session_id=learning_session_id,
+            ):
                 continue
 
             expression = await self._upsert_expression_to_db(
@@ -1009,13 +1014,38 @@ class ExpressionLearner:
             logger.error(f"更新表达方式失败: {e}")
         return None
 
-    async def _check_expression_before_upsert(self, situation: str, style: str) -> bool:
+    async def _check_expression_before_upsert(
+        self,
+        situation: str,
+        style: str,
+        *,
+        session_id: Optional[str] = None,
+    ) -> bool:
         """在表达方式写入数据库前执行 AI 审核，只有通过时才允许写入。"""
 
         suitable, reason, error = await check_expression_suitability(situation, style)
+        review_session_id = session_id or self.session_id
         if error:
+            append_ai_review_log(
+                session_id=review_session_id,
+                situation=situation,
+                style=style,
+                passed=False,
+                reason=reason or error,
+                source="learn_before_upsert",
+                error=error,
+            )
             logger.error(f"检查表达方式时发生错误: {error}")
             return False
+
+        append_ai_review_log(
+            session_id=review_session_id,
+            situation=situation,
+            style=style,
+            passed=suitable,
+            reason=reason,
+            source="learn_before_upsert",
+        )
 
         status = "通过" if suitable else "不通过"
         logger.info(

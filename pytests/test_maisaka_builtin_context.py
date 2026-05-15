@@ -45,7 +45,7 @@ def test_append_sent_message_to_chat_history_keeps_message_id() -> None:
     assert len(runtime._chat_history) == 1
     history_message = runtime._chat_history[0]
     assert history_message.message_id == "real-message-id"
-    assert "[msg_id]real-message-id\n" in history_message.raw_message.components[0].text
+    assert '<message msg_id="real-message-id" time="12:00:00" user="MaiSaka">' in history_message.raw_message.components[0].text
     assert "[msg_id:real-message-id]" in history_message.visible_text
 
 

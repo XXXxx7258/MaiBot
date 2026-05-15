@@ -1,10 +1,12 @@
-/**
- * 插件统计 API 客户端
- * 用于与 Cloudflare Workers 统计服务交互
+﻿/**
+ * 閹绘帊娆㈢紒鐔活吀 API 鐎广垺鍩涚粩?
+ * 閻劋绨稉?Cloudflare Workers 缂佺喕顓搁張宥呭娴溿倓绨?
  */
 
-// 配置统计服务 API 地址（所有用户共享的云端统计服务）
-const STATS_API_BASE_URL = 'https://maibot-plugin-stats.maibot-webui.workers.dev'
+// 闁板秶鐤嗙紒鐔活吀閺堝秴濮?API 閸︽澘娼冮敍鍫熷閺堝鏁ら幋宄板彙娴滎偆娈戞禍鎴狀伂缂佺喕顓搁張宥呭閿?
+import { fetchWithAuth } from '@/lib/fetch-with-auth'
+
+const STATS_API_BASE_URL = '/api/webui/plugins/stats-proxy'
 
 export interface PluginStatsData {
   plugin_id: string
@@ -26,6 +28,12 @@ export interface StatsResponse {
   error?: string
   remaining?: number
   [key: string]: unknown
+}
+
+interface PluginStatsSummaryResponse {
+  success?: boolean
+  stats?: Record<string, Partial<PluginStatsData>>
+  error?: string
 }
 
 function createEmptyStats(pluginId: string): PluginStatsData {
@@ -63,11 +71,11 @@ function normalizePluginStatsResponse(data: unknown, pluginId: string): PluginSt
 }
 
 /**
- * 获取插件统计数据
+ * 閼惧嘲褰囬幓鎺嶆缂佺喕顓搁弫鐗堝祦
  */
 export async function getPluginStats(pluginId: string): Promise<PluginStatsData | null> {
   try {
-    const response = await fetch(`${STATS_API_BASE_URL}/stats/${pluginId}`)
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/${encodeURIComponent(pluginId)}`)
     
     if (!response.ok) {
       console.error('Failed to fetch plugin stats:', response.statusText)
@@ -82,29 +90,42 @@ export async function getPluginStats(pluginId: string): Promise<PluginStatsData 
 }
 
 /**
- * 按多个历史 ID 尝试读取统计数据，兼容 plugin-repo 顶层 ID 与 manifest.id 不一致的插件。
- */
-export async function getPluginStatsByIds(pluginIds: string[]): Promise<PluginStatsData | null> {
-  const ids = Array.from(new Set(pluginIds.map(id => id.trim()).filter(Boolean)))
+ * 閼惧嘲褰囬幓鎺嶆鐢倸婧€閻ㄥ嫯浜ら柌蹇曠埠鐠佲剝鎲崇憰渚婄礄娑撳秴瀵橀崥顐ョ槑鐠佺尨绱氶妴? */
+export async function getPluginStatsSummary(): Promise<Record<string, PluginStatsData>> {
+  try {
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/summary`)
 
-  for (const pluginId of ids) {
-    const stats = await getPluginStats(pluginId)
-    if (stats) {
-      return stats
+    if (!response.ok) {
+      console.error('Failed to fetch plugin stats summary:', response.statusText)
+      return {}
     }
-  }
 
-  return null
+    const data = await response.json() as PluginStatsSummaryResponse
+    if (!data.success || !data.stats || typeof data.stats !== 'object') {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(data.stats).map(([pluginId, stats]) => [
+        pluginId,
+        normalizePluginStatsResponse({ stats }, pluginId) ?? createEmptyStats(pluginId),
+      ])
+    )
+  } catch (error) {
+    console.error('Error fetching plugin stats summary:', error)
+    return {}
+  }
 }
 
+
 /**
- * 点赞插件
+ * 閻愮绂愰幓鎺嶆
  */
 export async function likePlugin(pluginId: string, userId?: string): Promise<StatsResponse> {
   try {
     const finalUserId = userId || getUserId()
     
-    const response = await fetch(`${STATS_API_BASE_URL}/stats/like`, {
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/like`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -115,28 +136,28 @@ export async function likePlugin(pluginId: string, userId?: string): Promise<Sta
     const data = await response.json()
     
     if (response.status === 429) {
-      return { success: false, error: '操作过于频繁，请稍后再试' }
+      return { success: false, error: '閹垮秳缍旀潻鍥︾艾妫版垹绠掗敍宀冾嚞缁嬪秴鎮楅崘宥堢槸' }
     }
     
     if (!response.ok) {
-      return { success: false, error: data.error || '点赞失败' }
+      return { success: false, error: data.error || '閻愮绂愭径杈Е' }
     }
     
     return { success: true, ...data }
   } catch (error) {
     console.error('Error liking plugin:', error)
-    return { success: false, error: '网络错误' }
+    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
   }
 }
 
 /**
- * 点踩插件
+ * 閻愮淇幓鎺嶆
  */
 export async function dislikePlugin(pluginId: string, userId?: string): Promise<StatsResponse> {
   try {
     const finalUserId = userId || getUserId()
     
-    const response = await fetch(`${STATS_API_BASE_URL}/stats/dislike`, {
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/dislike`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -147,22 +168,22 @@ export async function dislikePlugin(pluginId: string, userId?: string): Promise<
     const data = await response.json()
     
     if (response.status === 429) {
-      return { success: false, error: '操作过于频繁，请稍后再试' }
+      return { success: false, error: '閹垮秳缍旀潻鍥︾艾妫版垹绠掗敍宀冾嚞缁嬪秴鎮楅崘宥堢槸' }
     }
     
     if (!response.ok) {
-      return { success: false, error: data.error || '点踩失败' }
+      return { success: false, error: data.error || '閻愮淇径杈Е' }
     }
     
     return { success: true, ...data }
   } catch (error) {
     console.error('Error disliking plugin:', error)
-    return { success: false, error: '网络错误' }
+    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
   }
 }
 
 /**
- * 评分插件
+ * 鐠囧嫬鍨庨幓鎺嶆
  */
 export async function ratePlugin(
   pluginId: string,
@@ -177,7 +198,7 @@ export async function ratePlugin(
   try {
     const finalUserId = userId || getUserId()
     
-    const response = await fetch(`${STATS_API_BASE_URL}/stats/rate`, {
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/rate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -192,22 +213,22 @@ export async function ratePlugin(
     }
     
     if (!response.ok) {
-      return { success: false, error: data.error || '评分失败' }
+      return { success: false, error: data.error || '鐠囧嫬鍨庢径杈Е' }
     }
     
     return { success: true, ...data }
   } catch (error) {
     console.error('Error rating plugin:', error)
-    return { success: false, error: '网络错误' }
+    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
   }
 }
 
 /**
- * 记录插件下载
+ * 鐠佹澘缍嶉幓鎺嶆娑撳娴?
  */
 export async function recordPluginDownload(pluginId: string): Promise<StatsResponse> {
   try {
-    const response = await fetch(`${STATS_API_BASE_URL}/stats/download`, {
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/download`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -218,7 +239,7 @@ export async function recordPluginDownload(pluginId: string): Promise<StatsRespo
     const data = await response.json()
     
     if (response.status === 429) {
-      // 下载统计被限流时静默失败，不影响用户体验
+      // 娑撳娴囩紒鐔活吀鐞氼偊妾哄ù浣规闂堟瑩绮径杈Е閿涘奔绗夎ぐ鍗炴惙閻劍鍩涙担鎾荤崣
       console.warn('Download recording rate limited')
       return { success: true }
     }
@@ -231,13 +252,13 @@ export async function recordPluginDownload(pluginId: string): Promise<StatsRespo
     return { success: true, ...data }
   } catch (error) {
     console.error('Error recording download:', error)
-    return { success: false, error: '网络错误' }
+    return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
   }
 }
 
 /**
- * 生成用户指纹（基于浏览器特征）
- * 用于在未登录时识别用户，防止重复投票
+ * 閻㈢喐鍨氶悽銊﹀煕閹稿洨姹楅敍鍫濈唨娴滃孩绁荤憴鍫濇珤閻楃懓绶涢敍?
+ * 閻劋绨崷銊︽弓閻ц缍嶉弮鎯扮槕閸掝偆鏁ら幋鍑ょ礉闂冨弶顒涢柌宥咁槻閹舵洜銈?
  */
 export function generateUserFingerprint(): string {
   const nav = navigator as Navigator & { deviceMemory?: number }
@@ -257,7 +278,7 @@ export function generateUserFingerprint(): string {
     nav.deviceMemory || 0,
   ].join('|')
   
-  // 简单哈希函数
+  // 缁犫偓閸楁洖鎼辩敮灞藉毐閺?
   let hash = 0
   for (let i = 0; i < features.length; i++) {
     const char = features.charCodeAt(i)
@@ -269,24 +290,24 @@ export function generateUserFingerprint(): string {
 }
 
 /**
- * 生成或获取用户 UUID
- * 存储在 localStorage 中持久化
+ * 閻㈢喐鍨氶幋鏍箯閸欐牜鏁ら幋?UUID
+ * 鐎涙ê鍋嶉崷?localStorage 娑擃厽瀵旀稊鍛
  */
 export function getUserId(): string {
   const STORAGE_KEY = 'maibot_user_id'
   
-  // 尝试从 localStorage 获取
+  // 鐏忔繆鐦禒?localStorage 閼惧嘲褰?
   let userId = localStorage.getItem(STORAGE_KEY)
   
   if (!userId) {
-    // 生成新的 UUID
+    // 閻㈢喐鍨氶弬鎵畱 UUID
     const fingerprint = generateUserFingerprint()
     const timestamp = Date.now().toString(36)
     const random = Math.random().toString(36).substring(2, 15)
     
     userId = `${fingerprint}_${timestamp}_${random}`
     
-    // 存储到 localStorage
+    // 鐎涙ê鍋嶉崚?localStorage
     localStorage.setItem(STORAGE_KEY, userId)
   }
   

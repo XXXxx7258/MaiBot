@@ -10,14 +10,15 @@ from src.common.database.database import get_db_session
 from src.common.database.database_model import Messages
 from src.common.data_models.mai_message_data_model import MaiMessage, UserInfo
 from src.common.data_models.message_component_data_model import (
-    TextComponent,
-    ImageComponent,
-    EmojiComponent,
     AtComponent,
-    ReplyComponent,
-    VoiceComponent,
+    DictComponent,
+    EmojiComponent,
     ForwardNodeComponent,
+    ImageComponent,
+    ReplyComponent,
     StandardMessageComponents,
+    TextComponent,
+    VoiceComponent,
 )
 
 
@@ -212,8 +213,52 @@ class SessionMessage(MaiMessage):
                 enable_heavy_media_analysis=enable_heavy_media_analysis,
                 enable_voice_transcription=enable_voice_transcription,
             )
+        elif isinstance(component, DictComponent):
+            return self.process_dict_component(component)
         else:
             raise NotImplementedError(f"暂时不支持的消息组件类型: {type(component)}")
+
+    def process_dict_component(self, component: DictComponent) -> str:
+        """处理字典组件，保留非标准消息的可读摘要。"""
+
+        component_data = component.data
+        raw_type = str(component_data.get("type") or "dict").strip().lower()
+        raw_payload = component_data.get("data", component_data)
+
+        if raw_type == "file" and isinstance(raw_payload, dict):
+            return self._build_file_component_text(raw_payload)
+        if raw_type == "json" and isinstance(raw_payload, dict):
+            return str(raw_payload.get("text") or raw_payload.get("prompt") or "[json]")
+        if raw_type:
+            return f"[{raw_type}]"
+        return "[复杂消息]"
+
+    @staticmethod
+    def _build_file_component_text(payload: Dict[str, object]) -> str:
+        """构造文件字典组件的可读文本。"""
+
+        file_name = str(
+            payload.get("name")
+            or payload.get("file")
+            or payload.get("file_name")
+            or payload.get("filename")
+            or ""
+        ).strip()
+        file_size = str(payload.get("size") or payload.get("file_size") or "").strip()
+        file_url = str(payload.get("url") or payload.get("file_url") or "").strip()
+
+        text_parts: List[str] = []
+        if file_name:
+            text_parts.append(file_name)
+        if file_size:
+            text_parts.append(f"大小: {file_size}")
+
+        file_text = "[文件]"
+        if text_parts:
+            file_text = f"[文件] {'，'.join(text_parts)}"
+        if file_url:
+            file_text = f"{file_text}，链接: {file_url}"
+        return file_text
 
     async def process_image_component(
         self,

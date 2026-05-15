@@ -46,9 +46,7 @@ export function MaiBotFeedbackSurveyPage() {
   ], [maibotVersion])
 
   // 提交成功回调
-  const handleSubmitSuccess = useCallback((submissionId: string) => {
-    console.log('MaiBot Survey submitted:', submissionId)
-  }, [])
+  const handleSubmitSuccess = useCallback(() => {}, [])
 
   // 提交错误回调
   const handleSubmitError = useCallback((error: string) => {

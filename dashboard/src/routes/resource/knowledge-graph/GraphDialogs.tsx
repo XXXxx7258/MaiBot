@@ -189,7 +189,7 @@ export function NodeDetailDialog({
               </div>
 
               {loading ? (
-                <p className="text-sm text-muted-foreground">正在加载节点证据…</p>
+                <p className="text-sm text-muted-foreground">Thinking...</p>
               ) : (
                 <>
                   <section className="space-y-3">
@@ -303,7 +303,7 @@ export function EdgeDetailDialog({
               </div>
 
               {loading ? (
-                <p className="text-sm text-muted-foreground">正在加载边的证据…</p>
+                <p className="text-sm text-muted-foreground">Thinking...</p>
               ) : (
                 <>
                   <section className="space-y-3">

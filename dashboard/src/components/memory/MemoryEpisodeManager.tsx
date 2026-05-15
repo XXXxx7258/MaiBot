@@ -365,7 +365,7 @@ export function MemoryEpisodeManager() {
                   }) : (
                     <TableRow>
                       <TableCell colSpan={3} className="text-center text-muted-foreground">
-                        {loading ? '正在加载 Episode...' : '没有匹配的 Episode'}
+                        {loading ? 'Thinking...' : '没有匹配的 Episode'}
                       </TableCell>
                     </TableRow>
                   )}
@@ -385,7 +385,7 @@ export function MemoryEpisodeManager() {
               {detailLoading ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  正在加载详情
+                  Thinking
                 </div>
               ) : selectedEpisode ? (
                 <>

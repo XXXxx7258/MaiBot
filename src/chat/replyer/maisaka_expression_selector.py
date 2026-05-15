@@ -32,6 +32,14 @@ class MaisakaExpressionSelectionResult:
 class MaisakaExpressionSelector:
     """负责在 replyer 侧完成表达方式筛选与子代理二次选择。"""
 
+    @staticmethod
+    def _get_runtime_manager() -> Any:
+        """获取插件运行时管理器。"""
+
+        from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+        return get_plugin_runtime_manager()
+
     def _can_use_expressions(self, session_id: str) -> bool:
         try:
             use_expression, _ = ExpressionConfigUtils.get_expression_config_for_chat(session_id)
@@ -246,6 +254,184 @@ class MaisakaExpressionSelector:
             selected_expression_ids=selected_ids,
         )
 
+    @staticmethod
+    def _build_chat_info(chat_history: List[LLMContextMessage]) -> str:
+        history_lines = [
+            MaisakaExpressionSelector._normalize_history_line(message)
+            for message in chat_history[-10:]
+            if (message.processed_plain_text or "").strip()
+        ]
+        return "\n".join(history_lines)
+
+    @staticmethod
+    def _serialize_context_message(message: LLMContextMessage) -> dict[str, Any]:
+        timestamp = message.timestamp.isoformat() if isinstance(message.timestamp, datetime) else ""
+        return {
+            "role": message.role,
+            "text": message.processed_plain_text or "",
+            "timestamp": timestamp,
+            "source_kind": message.source_kind,
+        }
+
+    @staticmethod
+    def _serialize_reply_message(reply_message: Optional[SessionMessage]) -> dict[str, Any] | None:
+        if reply_message is None:
+            return None
+        return {
+            "message_id": str(reply_message.message_id or ""),
+            "text": reply_message.processed_plain_text or "",
+        }
+
+    @staticmethod
+    def _normalize_candidate_list(raw_candidates: Any, fallback: List[dict[str, Any]]) -> List[dict[str, Any]]:
+        if not isinstance(raw_candidates, list):
+            return fallback
+
+        normalized_candidates: List[dict[str, Any]] = []
+        for raw_candidate in raw_candidates:
+            if not isinstance(raw_candidate, dict):
+                continue
+            candidate_id = raw_candidate.get("id")
+            if not isinstance(candidate_id, int):
+                continue
+            situation = str(raw_candidate.get("situation") or "").strip()
+            style = str(raw_candidate.get("style") or "").strip()
+            if not situation or not style:
+                continue
+            normalized_candidates.append(
+                {
+                    "id": candidate_id,
+                    "situation": situation,
+                    "style": style,
+                    "count": raw_candidate.get("count", 1) or 1,
+                }
+            )
+        return normalized_candidates
+
+    @staticmethod
+    def _normalize_selected_ids(raw_selected_ids: Any, candidates: List[dict[str, Any]]) -> List[int]:
+        if not isinstance(raw_selected_ids, list):
+            return []
+
+        candidate_ids = {
+            candidate["id"]
+            for candidate in candidates
+            if isinstance(candidate.get("id"), int)
+        }
+        selected_ids: List[int] = []
+        for raw_id in raw_selected_ids:
+            if not isinstance(raw_id, int):
+                continue
+            if raw_id not in candidate_ids or raw_id in selected_ids:
+                continue
+            selected_ids.append(raw_id)
+        return selected_ids
+
+    @staticmethod
+    def _normalize_selected_expressions(raw_selected_expressions: Any) -> List[dict[str, Any]]:
+        if not isinstance(raw_selected_expressions, list):
+            return []
+
+        selected_expressions: List[dict[str, Any]] = []
+        for raw_expression in raw_selected_expressions:
+            if not isinstance(raw_expression, dict):
+                continue
+            situation = str(raw_expression.get("situation") or "").strip()
+            style = str(raw_expression.get("style") or "").strip()
+            if not situation or not style:
+                continue
+            normalized_expression = {
+                "situation": situation,
+                "style": style,
+                "count": raw_expression.get("count", 1) or 1,
+            }
+            expression_id = raw_expression.get("id")
+            if isinstance(expression_id, int):
+                normalized_expression["id"] = expression_id
+            selected_expressions.append(normalized_expression)
+        return selected_expressions
+
+    def _build_selection_result_from_ids(
+        self,
+        *,
+        candidates: List[dict[str, Any]],
+        selected_ids: List[int],
+    ) -> MaisakaExpressionSelectionResult:
+        selected_expressions = [
+            candidate
+            for candidate in candidates
+            if candidate.get("id") in selected_ids
+        ]
+        self._update_last_active_time(selected_ids)
+        return MaisakaExpressionSelectionResult(
+            expression_habits=self._build_expression_habits_block(selected_expressions),
+            selected_expression_ids=selected_ids,
+        )
+
+    def _build_selection_result_from_expressions(
+        self,
+        selected_expressions: List[dict[str, Any]],
+    ) -> MaisakaExpressionSelectionResult:
+        selected_ids = [
+            expression["id"]
+            for expression in selected_expressions
+            if isinstance(expression.get("id"), int)
+        ]
+        if selected_ids:
+            self._update_last_active_time(selected_ids)
+        return MaisakaExpressionSelectionResult(
+            expression_habits=self._build_expression_habits_block(selected_expressions),
+            selected_expression_ids=selected_ids,
+        )
+
+    async def _build_default_selection_result(
+        self,
+        *,
+        session_id: str,
+        chat_history: List[LLMContextMessage],
+        reply_message: Optional[SessionMessage],
+        reply_reason: str,
+        candidates: List[dict[str, Any]],
+        sub_agent_runner: Optional[SubAgentRunner],
+    ) -> MaisakaExpressionSelectionResult:
+        if not global_config.expression.enable_precise_expression_selection:
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        if sub_agent_runner is None:
+            logger.info("精细表达选择已跳过：缺少子代理执行器，回退为直接注入")
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        selector_prompt = self._build_selector_prompt(
+            chat_history=chat_history,
+            reply_message=reply_message,
+            reply_reason=reply_reason,
+            candidates=candidates,
+        )
+        try:
+            raw_response = await sub_agent_runner(selector_prompt)
+        except Exception as exc:
+            logger.warning(f"精细表达选择子代理执行失败，回退为直接注入: {exc}")
+            return self._build_direct_selection_result(
+                session_id=session_id,
+                candidates=candidates,
+            )
+
+        selected_ids = self._parse_selected_ids(raw_response, candidates)
+        logger.debug(
+            f"精细表达选择完成：session_id={session_id} selected_ids={selected_ids!r} "
+            f"候选预览={self._format_candidate_preview(candidates)}"
+        )
+        return self._build_selection_result_from_ids(
+            candidates=candidates,
+            selected_ids=selected_ids,
+        )
+
     def _update_last_active_time(self, selected_ids: List[int]) -> None:
         if not selected_ids:
             return
@@ -263,13 +449,9 @@ class MaisakaExpressionSelector:
         chat_history: List[LLMContextMessage],
         reply_message: Optional[SessionMessage],
         reply_reason: str,
+        reply_tool_args: Optional[dict[str, Any]] = None,
         sub_agent_runner: Optional[SubAgentRunner],
     ) -> MaisakaExpressionSelectionResult:
-        del chat_history
-        del reply_message
-        del reply_reason
-        del sub_agent_runner
-
         if not session_id:
             logger.info("表达方式选择已跳过：缺少 session_id")
             return MaisakaExpressionSelectionResult()
@@ -282,10 +464,82 @@ class MaisakaExpressionSelector:
             logger.info(f"表达方式选择已跳过：本地候选不足，session_id={session_id}")
             return MaisakaExpressionSelectionResult()
 
-        return self._build_direct_selection_result(
-            session_id=session_id,
-            candidates=candidates,
+        chat_info = self._build_chat_info(chat_history)
+        target_message = (reply_message.processed_plain_text or "").strip() if reply_message is not None else ""
+        hook_kwargs = {
+            "chat_id": session_id,
+            "session_id": session_id,
+            "chat_info": chat_info,
+            "chat_history": [self._serialize_context_message(message) for message in chat_history[-10:]],
+            "reply_message": self._serialize_reply_message(reply_message),
+            "reply_tool_args": dict(reply_tool_args or {}),
+            "target_message": target_message,
+            "reply_reason": reply_reason,
+            "max_num": len(candidates),
+            "think_level": 0,
+            "candidates": candidates,
+        }
+
+        before_select_result = await self._get_runtime_manager().invoke_hook(
+            "expression.select.before_select",
+            **hook_kwargs,
         )
+        if before_select_result.aborted:
+            logger.info(f"表达方式选择在开始前被 Hook 中止：session_id={session_id}")
+            return MaisakaExpressionSelectionResult()
+
+        before_kwargs = before_select_result.kwargs
+        candidates = self._normalize_candidate_list(before_kwargs.get("candidates"), candidates)
+        max_num = int(before_kwargs.get("max_num") or len(candidates))
+        if max_num >= 0:
+            candidates = candidates[:max_num]
+        if not candidates:
+            logger.info(f"表达方式选择已跳过：Hook 过滤后候选为空，session_id={session_id}")
+            return MaisakaExpressionSelectionResult()
+
+        selection_result = await self._build_default_selection_result(
+            session_id=session_id,
+            chat_history=chat_history,
+            reply_message=reply_message,
+            reply_reason=reply_reason,
+            candidates=candidates,
+            sub_agent_runner=sub_agent_runner,
+        )
+        selected_ids = list(selection_result.selected_expression_ids)
+        selected_expressions = [
+            candidate
+            for candidate in candidates
+            if candidate.get("id") in selected_ids
+        ]
+
+        after_selection_result = await self._get_runtime_manager().invoke_hook(
+            "expression.select.after_selection",
+            **{
+                **before_kwargs,
+                "candidates": candidates,
+                "selected_expressions": selected_expressions,
+                "selected_expression_ids": selected_ids,
+            },
+        )
+        if after_selection_result.aborted:
+            logger.info(f"表达方式选择结果被 Hook 中止：session_id={session_id}")
+            return MaisakaExpressionSelectionResult()
+
+        after_kwargs = after_selection_result.kwargs
+        raw_selected_ids = after_kwargs.get("selected_expression_ids")
+        raw_selected_expressions = after_kwargs.get("selected_expressions")
+        hook_selected_expressions = self._normalize_selected_expressions(raw_selected_expressions)
+        if hook_selected_expressions and raw_selected_expressions != selected_expressions:
+            return self._build_selection_result_from_expressions(hook_selected_expressions)
+
+        hook_selected_ids = self._normalize_selected_ids(raw_selected_ids, candidates)
+        if hook_selected_ids or raw_selected_ids == []:
+            return self._build_selection_result_from_ids(
+                candidates=candidates,
+                selected_ids=hook_selected_ids,
+            )
+
+        return selection_result
 
 
 maisaka_expression_selector = MaisakaExpressionSelector()

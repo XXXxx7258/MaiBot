@@ -54,9 +54,8 @@ import { Link } from '@tanstack/react-router'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { ExpressionReviewer } from '@/components/expression-reviewer'
-import { getBotConfig, getModelConfig } from '@/lib/config-api'
+import { getBotConfigCached, getModelConfigCached } from '@/lib/config-api'
 import { getReviewStats } from '@/lib/expression-api'
-import { getDashboardVersionStatus, type DashboardVersionStatus } from '@/lib/system-api'
 import { APP_VERSION } from '@/lib/version'
 import { ZoomableChart } from '@/components/ui/zoomable-chart'
 
@@ -132,6 +131,18 @@ interface FeatureStatus {
   visualEnabled: boolean
 }
 
+const DEFAULT_TIME_RANGE = 24
+const DASHBOARD_DATA_CACHE_TTL = 30_000
+const dashboardDataCache = new Map<number, { timestamp: number; data: DashboardData }>()
+
+function getCachedDashboardData(hours: number): DashboardData | null {
+  const cached = dashboardDataCache.get(hours)
+  if (!cached || Date.now() - cached.timestamp > DASHBOARD_DATA_CACHE_TTL) {
+    return null
+  }
+  return cached.data
+}
+
 // 为饼图生成更丰富的颜色方案 (HSL色相均匀分布)
 const generatePieColors = (count: number): string[] => {
   const colors: string[] = []
@@ -159,17 +170,17 @@ function FeatureStatusLight({ enabled, label }: { enabled: boolean; label: strin
 
 function IndexPageContent() {
   const { t } = useTranslation()
-  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const initialDashboardData = getCachedDashboardData(DEFAULT_TIME_RANGE)
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(initialDashboardData)
+  const [loading, setLoading] = useState(!initialDashboardData)
   const [loadingProgress, setLoadingProgress] = useState(0)
-  const [timeRange, setTimeRange] = useState(24) // 默认24小时
+  const [timeRange, setTimeRange] = useState(DEFAULT_TIME_RANGE) // 默认24小时
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [hitokoto, setHitokoto] = useState<{ hitokoto: string; from: string } | null>(null)
   const [hitokotoLoading, setHitokotoLoading] = useState(true)
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null)
   const [maibotStableRelease, setMaibotStableRelease] = useState<ReleaseStatus | null>(null)
   const [maibotTestRelease, setMaibotTestRelease] = useState<ReleaseStatus | null>(null)
-  const [dashboardVersionStatus, setDashboardVersionStatus] = useState<DashboardVersionStatus | null>(null)
   const [featureStatus, setFeatureStatus] = useState<FeatureStatus>({
     memoryEnabled: false,
     visualEnabled: false,
@@ -234,14 +245,6 @@ function IndexPageContent() {
         console.debug('检查 MaiBot 最新版本失败:', error)
       }
 
-      try {
-        const status = await getDashboardVersionStatus(APP_VERSION)
-        if (mounted) {
-          setDashboardVersionStatus(status)
-        }
-      } catch (error) {
-        console.debug('妫€鏌?WebUI 鐗堟湰鏇存柊澶辫触:', error)
-      }
     }
 
     void loadLatestVersions()
@@ -312,8 +315,8 @@ function IndexPageContent() {
   const fetchFeatureStatus = useCallback(async () => {
     try {
       const [botConfigResult, modelConfigResult] = await Promise.all([
-        getBotConfig(),
-        getModelConfig(),
+        getBotConfigCached(),
+        getModelConfigCached(),
       ])
 
       if (!isMountedRef.current || !botConfigResult.success) return
@@ -353,10 +356,20 @@ function IndexPageContent() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
+      const cachedData = getCachedDashboardData(timeRange)
+      if (cachedData) {
+        setDashboardData(cachedData)
+        setLoading(false)
+        setLoadingProgress(100)
+        return
+      }
+
+      setLoading(true)
       const response = await fetchWithAuth(`/api/webui/statistics/dashboard?hours=${timeRange}`)
       if (!isMountedRef.current) return
       if (response.ok) {
         const data = await response.json()
+        dashboardDataCache.set(timeRange, { timestamp: Date.now(), data })
         setDashboardData(data)
       }
       setLoading(false)
@@ -627,9 +640,6 @@ function IndexPageContent() {
                 </Badge>
               </div>
               <div className="hidden">
-                最新版本 v{dashboardVersionStatus?.latest_version || APP_VERSION}
-              </div>
-              <div className="hidden">
                 <a
                   href={maibotTestRelease?.url || 'https://github.com/Mai-with-u/MaiBot/releases'}
                   target="_blank"
@@ -665,18 +675,7 @@ function IndexPageContent() {
                     <ExternalLink className="h-3 w-3" />
                   </span>
                 </a>
-                <a
-                  href={dashboardVersionStatus?.pypi_url || 'https://pypi.org/project/maibot-dashboard/'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-between gap-2 transition-colors hover:text-muted-foreground"
-                >
-                  <span>WebUI 最新</span>
-                  <span className="inline-flex items-center gap-1">
-                    v{dashboardVersionStatus?.latest_version || APP_VERSION}
-                    <ExternalLink className="h-3 w-3" />
-                  </span>
-                </a>
+
               </div>
             </div>
           </CardContent>

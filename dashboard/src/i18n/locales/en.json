@@ -110,7 +110,7 @@
       "groupName": "Virtual group name (optional)",
       "groupNameHint": "MaiBot will treat this as a group chat with this name",
       "knownUserSuffix": " · Known",
-      "loading": "Loading...",
+      "loading": "Thinking...",
       "noUsers": "No users found",
       "personCount": "({{count}} people)",
       "platform": "Select platform",
@@ -513,7 +513,7 @@
       }
     },
     "loading": {
-      "title": "Loading configuration...",
+      "title": "Thinking...",
       "description": "Reading existing configuration"
     },
     "header": {
@@ -712,7 +712,7 @@
     }
   },
   "common": {
-    "loading": "Loading...",
+    "loading": "Thinking...",
     "error": "Error",
     "retry": "Retry",
     "save": "Save",
@@ -808,8 +808,8 @@
   "home": {
     "title": "Live Monitor",
     "subtitle": "MaiBot runtime status and statistics overview",
-    "loading": "Loading statistics...",
-    "loadingHint": "Fetching MaiBot runtime data",
+    "loading": "Thinking...",
+    "loadingHint": "Thinking...",
     "timeRange": {
       "24h": "24 Hours",
       "7d": "7 Days",

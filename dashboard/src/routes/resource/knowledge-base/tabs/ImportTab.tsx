@@ -1100,7 +1100,7 @@ export function ImportTab(props: ImportTabProps) {
             {selectedImportTaskLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                正在加载任务详情...
+                Thinking...
               </div>
             ) : null}
 
@@ -1320,7 +1320,7 @@ export function ImportTab(props: ImportTabProps) {
                         {importChunksLoading ? (
                           <TableRow>
                             <TableCell colSpan={5} className="text-center text-muted-foreground">
-                              正在加载分块详情...
+                              Thinking...
                             </TableCell>
                           </TableRow>
                         ) : selectedImportChunks.length > 0 ? (

@@ -110,7 +110,7 @@
       "groupName": "虚拟群名（可选）",
       "groupNameHint": "麦麦会认为这是一个名为此名称的群聊",
       "knownUserSuffix": " · 已认识",
-      "loading": "加载中...",
+      "loading": "Thinking...",
       "noUsers": "没有找到用户",
       "personCount": "({{count}} 人)",
       "platform": "选择平台",
@@ -513,8 +513,8 @@
       }
     },
     "loading": {
-      "title": "加载配置中...",
-      "description": "正在读取现有配置"
+      "title": "Thinking...",
+      "description": "Thinking..."
     },
     "header": {
       "title": "首次配置向导",
@@ -712,7 +712,7 @@
     }
   },
   "common": {
-    "loading": "加载中...",
+    "loading": "Thinking...",
     "error": "错误",
     "retry": "重试",
     "save": "保存",
@@ -808,8 +808,8 @@
   "home": {
     "title": "实时监控面板",
     "subtitle": "麦麦运行状态和统计数据一览",
-    "loading": "加载统计数据中...",
-    "loadingHint": "正在获取麦麦运行数据",
+    "loading": "Thinking...",
+    "loadingHint": "Thinking...",
     "timeRange": {
       "24h": "24小时",
       "7d": "7天",

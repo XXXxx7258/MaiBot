@@ -151,8 +151,14 @@ async def test_ai_self_reflect_expression_stays_unchecked(
         del self, pending_messages, prompt
         return []
 
-    async def fake_check_expression_before_upsert(self, situation: str, style: str) -> bool:
-        del self, situation, style
+    async def fake_check_expression_before_upsert(
+        self,
+        situation: str,
+        style: str,
+        *,
+        session_id: str | None = None,
+    ) -> bool:
+        del self, situation, style, session_id
         return True
 
     monkeypatch.setattr(expression_learner_module, "get_db_session", fake_get_db_session)

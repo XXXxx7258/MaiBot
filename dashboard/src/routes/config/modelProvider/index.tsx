@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import { getModelConfig, testProviderConnection, updateModelConfig, updateModelConfigSection } from '@/lib/config-api'
+import {
+  getModelConfig,
+  getModelConfigCached,
+  testProviderConnection,
+  updateModelConfig,
+  updateModelConfigSection,
+} from '@/lib/config-api'
 import type { TestConnectionResult } from '@/lib/config-api'
 import { Info, Plus, Power, Save, Trash2, Zap } from 'lucide-react'
 
@@ -151,7 +157,7 @@ function ModelProviderConfigPageContent() {
   const loadConfig = async () => {
     try {
       setLoading(true)
-      const result = await getModelConfig()
+      const result = await getModelConfigCached()
       if (!result.success) {
         toast({
           title: '加载失败',
@@ -527,10 +533,8 @@ function ModelProviderConfigPageContent() {
         })
       }
 
-      console.log('发送的 providers 数据:', cleanedProviders)
       config.api_providers = cleanedProviders
       config.models = filteredModels
-      console.log('完整配置数据:', config)
 
       const resultUpdate = await updateModelConfig(config)
       if (!resultUpdate.success) {
@@ -731,7 +735,7 @@ function ModelProviderConfigPageContent() {
     return (
       <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">加载中...</p>
+          <p className="text-muted-foreground">Thinking...</p>
         </div>
       </div>
     )

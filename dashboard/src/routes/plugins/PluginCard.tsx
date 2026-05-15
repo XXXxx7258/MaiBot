@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Star, Trash2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Star, ThumbsUp, Trash2 } from 'lucide-react'
 
 import type { GitStatus, MaimaiVersion, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
 import { CATEGORY_NAMES } from './types'
@@ -38,7 +38,7 @@ export function PluginCard({
   getIncompatibleReason,
 }: PluginCardProps) {
   const navigate = useNavigate()
-  const stats = [plugin.id, plugin.marketplace_id, ...(plugin.stats_ids ?? [])]
+  const stats = [plugin.manifest?.id]
     .map(id => id ? pluginStats[id] : undefined)
     .find(Boolean)
 
@@ -72,6 +72,10 @@ export function PluginCard({
             <div className="flex items-center gap-1">
               <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
               <span>{(stats?.rating ?? plugin.rating ?? 0).toFixed(1)}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <ThumbsUp className="h-3.5 w-3.5" />
+              <span>{(stats?.likes ?? 0).toLocaleString()}</span>
             </div>
           </div>
           {/* 标签 */}

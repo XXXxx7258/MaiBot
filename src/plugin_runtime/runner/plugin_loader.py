@@ -18,7 +18,7 @@ import re
 import sys
 
 from src.common.logger import get_logger
-from src.plugin_runtime.runner.manifest_validator import ManifestValidator, PluginManifest
+from src.plugin_runtime.runner.manifest_validator import ManifestValidator, PluginManifest, is_reserved_plugin_directory
 
 logger = get_logger("plugin_runtime.runner.plugin_loader")
 
@@ -153,7 +153,9 @@ class PluginLoader:
                 logger.warning(f"插件目录不存在: {base_dir}")
                 continue
 
-            for plugin_dir in sorted(entry for entry in base_dir.iterdir() if entry.is_dir()):
+            for plugin_dir in sorted(
+                entry for entry in base_dir.iterdir() if entry.is_dir() and not is_reserved_plugin_directory(entry)
+            ):
                 discovered = self._discover_single_candidate(plugin_dir)
                 if discovered is None:
                     continue

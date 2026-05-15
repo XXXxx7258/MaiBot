@@ -156,6 +156,72 @@ def test_plugin_tool_allowed_session_filters_tool_exposure(monkeypatch: pytest.M
     assert "mute" not in blocked_specs
 
 
+def test_plugin_tool_can_declare_visible_core_tool(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = ComponentQueryService()
+    registry = ComponentRegistry()
+    supervisor = SimpleNamespace(component_registry=registry)
+    monkeypatch.setattr(service, "_iter_supervisors", lambda: [supervisor])
+
+    registry.register_plugin_components(
+        "core_tool_plugin",
+        [
+            {
+                "name": "always_ready",
+                "component_type": "TOOL",
+                "metadata": {
+                    "description": "directly visible tool",
+                    "core_tool": True,
+                },
+            },
+            {
+                "name": "explicit_visible",
+                "component_type": "TOOL",
+                "metadata": {
+                    "description": "explicitly visible tool",
+                    "visibility": "visible",
+                },
+            },
+            {
+                "name": "normal_tool",
+                "component_type": "TOOL",
+                "metadata": {"description": "deferred by default"},
+            },
+        ],
+    )
+
+    specs = service.get_llm_available_tool_specs()
+
+    assert specs["always_ready"].metadata["visibility"] == "visible"
+    assert specs["explicit_visible"].metadata["visibility"] == "visible"
+    assert specs["normal_tool"].metadata["visibility"] == "deferred"
+
+
+def test_plugin_tool_can_be_hidden_from_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = ComponentQueryService()
+    registry = ComponentRegistry()
+    supervisor = SimpleNamespace(component_registry=registry)
+    monkeypatch.setattr(service, "_iter_supervisors", lambda: [supervisor])
+
+    registry.register_plugin_components(
+        "hidden_tool_plugin",
+        [
+            {
+                "name": "internal_only",
+                "component_type": "TOOL",
+                "metadata": {
+                    "description": "internal tool",
+                    "visibility": "hidden",
+                },
+            }
+        ],
+    )
+
+    specs = service.get_llm_available_tool_specs()
+
+    assert specs["internal_only"].metadata["visibility"] == "hidden"
+    assert specs["internal_only"].enabled is False
+
+
 def test_plugin_tool_disabled_session_take_precedence_over_allowed_session(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

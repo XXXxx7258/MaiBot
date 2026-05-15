@@ -76,7 +76,10 @@ interface FieldRendererProps {
   sectionName: string
 }
 
-function getNestedRecord(config: Record<string, unknown>, path: string): Record<string, unknown> | undefined {
+function getNestedRecord(config: Record<string, unknown>, path?: string): Record<string, unknown> | undefined {
+  if (!path) {
+    return undefined
+  }
   const parts = path.split('.').filter(Boolean)
   let current: unknown = config
 
@@ -307,19 +310,21 @@ function FieldRenderer({ field, value, onChange }: FieldRendererProps) {
 
 // Section 渲染组件
 interface SectionRendererProps {
+  sectionName: string
   section: ConfigSectionSchema
   config: Record<string, unknown>
   onChange: (sectionName: string, fieldName: string, value: unknown) => void
 }
 
-function SectionRenderer({ section, config, onChange }: SectionRendererProps) {
+function SectionRenderer({ sectionName, section, config, onChange }: SectionRendererProps) {
   const [isOpen, setIsOpen] = useState(!section.collapsed)
-  const sectionConfig = getNestedRecord(config, section.name)
+  const resolvedSectionName = section.name || sectionName
+  const sectionConfig = getNestedRecord(config, resolvedSectionName)
   
   // 按 order 排序字段
   const sortedFields = Object.entries(section.fields)
     .filter(([, field]) => !field.hidden)
-    .sort(([, a], [, b]) => a.order - b.order)
+    .sort(([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0))
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -353,8 +358,8 @@ function SectionRenderer({ section, config, onChange }: SectionRendererProps) {
                 key={fieldName}
                 field={field}
                 value={sectionConfig?.[fieldName]}
-                onChange={(value) => onChange(section.name, fieldName, value)}
-                sectionName={section.name}
+                onChange={(value) => onChange(resolvedSectionName, fieldName, value)}
+                sectionName={resolvedSectionName}
               />
             ))}
           </CardContent>
@@ -575,8 +580,8 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
   }
 
   // 按 order 排序 sections
-  const sortedSections = Object.values(schema.sections)
-    .sort((a, b) => a.order - b.order)
+  const sortedSections = Object.entries(schema.sections)
+    .sort(([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0))
 
   // 获取当前启用状态
   const isEnabled = (config.plugin as Record<string, unknown>)?.enabled !== false
@@ -740,6 +745,7 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
                 return (
                   <SectionRenderer
                     key={sectionName}
+                    sectionName={sectionName}
                     section={section}
                     config={config}
                     onChange={handleFieldChange}
@@ -752,9 +758,10 @@ function PluginConfigEditor({ plugin, onBack }: PluginConfigEditorProps) {
       ) : (
         // 自动布局
         <div className="space-y-4">
-          {sortedSections.map(section => (
+          {sortedSections.map(([sectionName, section]) => (
             <SectionRenderer
-              key={section.name}
+              key={sectionName}
+              sectionName={sectionName}
               section={section}
               config={config}
               onChange={handleFieldChange}

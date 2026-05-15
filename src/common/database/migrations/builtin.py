@@ -13,6 +13,7 @@ from .v4_to_v5 import migrate_v4_to_v5
 from .v5_to_v6 import migrate_v5_to_v6
 from .v6_to_v7 import migrate_v6_to_v7
 from .v7_to_v8 import migrate_v7_to_v8
+from .v8_to_v9 import migrate_v8_to_v9
 from .version_store import SQLiteUserVersionStore
 
 EMPTY_SCHEMA_VERSION = 0
@@ -23,7 +24,8 @@ V4_SCHEMA_VERSION = 4
 V5_SCHEMA_VERSION = 5
 V6_SCHEMA_VERSION = 6
 V7_SCHEMA_VERSION = 7
-LATEST_SCHEMA_VERSION = 8
+V8_SCHEMA_VERSION = 8
+LATEST_SCHEMA_VERSION = 9
 
 _LEGACY_V1_EXCLUSIVE_TABLES = (
     "chat_streams",
@@ -95,6 +97,14 @@ class LatestSchemaVersionDetector(BaseSchemaVersionDetector):
         if snapshot.has_column("expressions", "rejected"):
             return None
         if snapshot.has_column("mai_messages", "display_message"):
+            return None
+        if not snapshot.has_table("statistics_message_hourly"):
+            return None
+        if not snapshot.has_table("statistics_tool_hourly"):
+            return None
+        if not snapshot.has_table("statistics_model_hourly"):
+            return None
+        if not snapshot.has_table("statistics_aggregation_cursors"):
             return None
         return LATEST_SCHEMA_VERSION
 
@@ -380,10 +390,17 @@ def build_default_migration_registry() -> MigrationRegistry:
             ),
             MigrationStep(
                 version_from=V7_SCHEMA_VERSION,
-                version_to=LATEST_SCHEMA_VERSION,
+                version_to=V8_SCHEMA_VERSION,
                 name="v7_to_v8",
                 description="将 AI 标记的已审核表达方式改回待人工审核。",
                 handler=migrate_v7_to_v8,
+            ),
+            MigrationStep(
+                version_from=V8_SCHEMA_VERSION,
+                version_to=LATEST_SCHEMA_VERSION,
+                name="v8_to_v9",
+                description="新增统计汇总表、索引与历史统计回填。",
+                handler=migrate_v8_to_v9,
             ),
         ]
     )

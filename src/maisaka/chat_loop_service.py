@@ -83,7 +83,7 @@ logger = get_logger("maisaka_chat_loop")
 
 
 def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
-    """注册 Maisaka 规划器内置 Hook 规格。
+    """注册 Maisaka 规划器与 replyer 内置 Hook 规格。
 
     Args:
         registry: 目标 Hook 规格注册中心。
@@ -186,6 +186,94 @@ def register_maisaka_hook_specs(registry: HookSpecRegistry) -> List[HookSpec]:
                         "built_message_count",
                         "selection_reason",
                         "session_id",
+                        "prompt_tokens",
+                        "completion_tokens",
+                        "total_tokens",
+                    ],
+                ),
+                default_timeout_ms=6000,
+                allow_abort=False,
+                allow_kwargs_mutation=True,
+            ),
+            HookSpec(
+                name="maisaka.replyer.after_response",
+                description="在 Maisaka replyer 收到模型响应后触发，可要求重新生成或改写回复文本。",
+                parameters_schema=build_object_schema(
+                    {
+                        "response": {
+                            "type": "string",
+                            "description": "replyer 模型返回的文本内容。",
+                        },
+                        "session_id": {
+                            "type": "string",
+                            "description": "当前会话 ID。",
+                        },
+                        "request_type": {
+                            "type": "string",
+                            "description": "当前 replyer 请求类型。",
+                        },
+                        "attempt": {
+                            "type": "integer",
+                            "description": "当前生成尝试序号，从 1 开始。",
+                        },
+                        "retry_count": {
+                            "type": "integer",
+                            "description": "当前已经重新生成的次数。",
+                        },
+                        "max_retries": {
+                            "type": "integer",
+                            "description": "本轮 replyer 最多允许重新生成多少次。",
+                        },
+                        "reply_message_id": {
+                            "type": "string",
+                            "description": "被回复消息 ID；无目标消息时为空字符串。",
+                        },
+                        "selected_expression_ids": {
+                            "type": "array",
+                            "description": "本次 replyer 选中的表达方式编号列表。",
+                        },
+                        "prompt_tokens": {
+                            "type": "integer",
+                            "description": "输入 Token 数。",
+                        },
+                        "completion_tokens": {
+                            "type": "integer",
+                            "description": "输出 Token 数。",
+                        },
+                        "total_tokens": {
+                            "type": "integer",
+                            "description": "总 Token 数。",
+                        },
+                        "retry": {
+                            "type": "boolean",
+                            "description": "Hook 处理器可置为 true，要求 replyer 重新生成。",
+                        },
+                        "retry_reason": {
+                            "type": "string",
+                            "description": "可选的重新生成约束原因；留空时只重新生成，不追加下一轮 replyer 提示词。",
+                        },
+                        "matched_regex": {
+                            "type": "string",
+                            "description": "触发重新生成的正则或规则名称。",
+                        },
+                        "matched_regex_pattern": {
+                            "type": "string",
+                            "description": "触发重新生成的正则文本。",
+                        },
+                        "matched_regex_description": {
+                            "type": "string",
+                            "description": "触发重新生成的规则说明。",
+                        },
+                    },
+                    required=[
+                        "response",
+                        "session_id",
+                        "request_type",
+                        "attempt",
+                        "retry_count",
+                        "max_retries",
+                        "reply_message_id",
+                        "selected_expression_ids",
                         "prompt_tokens",
                         "completion_tokens",
                         "total_tokens",
@@ -428,9 +516,17 @@ class MaisakaChatLoopService:
         """基于当前配置实时构造主聊天系统提示词。"""
 
         try:
-            return load_prompt("maisaka_chat", **self.build_prompt_template_context(tools_section))
+            return load_prompt(self._get_chat_prompt_name(), **self.build_prompt_template_context(tools_section))
         except Exception:
             return f"{self.personality_prompt}\n\nYou are a helpful AI assistant."
+
+    @staticmethod
+    def _get_chat_prompt_name() -> str:
+        """根据独立 Timing Gate 配置选择 Planner 模板。"""
+
+        if global_config.chat.enable_independent_timing_gate:
+            return "maisaka_chat"
+        return "maisaka_chat_merged_timing"
 
     def build_prompt_template_context(self, tools_section: str = "") -> dict[str, str]:
         """构造 Maisaka prompt 模板的公共渲染参数。"""
@@ -442,7 +538,6 @@ class MaisakaChatLoopService:
             "identity": self.personality_prompt,
             "timing_gate_wait_rule": self._build_timing_gate_wait_rule(),
         }
-
 
 
     @staticmethod
@@ -884,6 +979,9 @@ class MaisakaChatLoopService:
         ]
 
         if request_kind != "planner":
+            return selected_history
+
+        if not global_config.chat.enable_independent_timing_gate:
             return selected_history
 
         filtered_history: List[LLMContextMessage] = []

@@ -405,6 +405,36 @@ class ChatConfig(ConfigBase):
     )
     """私聊上下文长度"""
 
+    enable_context_optimization: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "优化上下文",
+                "en_US": "Optimize context",
+                "ja_JP": "コンテキスト最適化",
+            },
+            "x-widget": "switch",
+            "x-icon": "scissors",
+            "x-row": "context-sizes",
+        },
+    )
+    """优化50%左右的Planner上下文消耗，但是可能影响缓存，轻微影响性能表现"""
+
+    enable_independent_timing_gate: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "独立时间感知",
+                "en_US": "Independent timing gate",
+                "ja_JP": "独立タイミング判断",
+            },
+            "x-widget": "switch",
+            "x-icon": "clock-3",
+            "x-description-display": "icon",
+        },
+    )
+    """开启后启用独立 Timing Gate；关闭后不再单独运行 Timing Gate，并将节奏控制工具合并到 Planner"""
+
     enable_at: bool = Field(
         default=True,
         json_schema_extra={
@@ -434,6 +464,25 @@ class ChatConfig(ConfigBase):
         },
     )
     """是否启用回复时附带引用回复"""
+
+    typing_speed: float = Field(
+        default=1.0,
+        ge=0,
+        le=2,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "聊天速度",
+                "en_US": "Typing speed",
+                "ja_JP": "チャット速度",
+            },
+            "x-widget": "slider",
+            "x-icon": "keyboard",
+            "x-row": "reply-speed",
+            "step": 0.1,
+            "advanced": True,
+        },
+    )
+    """模拟打字时间倍乘，0 表示不等待，1 保持默认等待时间，2 表示等待时间变为默认的两倍"""
 
     planner_interrupt_max_consecutive_count: int = Field(
         default=0,
@@ -2286,6 +2335,21 @@ class ExpressionConfig(ConfigBase):
     )
     """是否在表达学习写入前进行 AI 审核；开启后只有审核通过的表达方式会被写入。"""
 
+    enable_precise_expression_selection: bool = Field(
+        default=True,
+        json_schema_extra={
+            "label": {
+                "zh_CN": "启用精细表达选择",
+                "en_US": "Enable precise expression selection",
+                "ja_JP": "精密な表現選択を有効化",
+            },
+            "x-widget": "switch",
+            "x-icon": "target",
+            "advanced": True,
+        },
+    )
+    """是否启用精细表达选择；开启后 replyer 会使用子代理从候选表达中挑选更贴合当前语境的表达方式。"""
+
     max_expression_learner: int = Field(
         default=3,
         json_schema_extra={
@@ -3272,15 +3336,6 @@ class WebUIConfig(ConfigBase):
         },
     )
     """是否启用WebUI"""
-
-    auto_update_dashboard: bool = Field(
-        default=True,
-        json_schema_extra={
-            "x-widget": "switch",
-            "x-icon": "refresh-cw",
-        },
-    )
-    """启动时是否自动检查并更新 WebUI dashboard"""
 
     host: str = Field(
         default="127.0.0.1",

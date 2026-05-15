@@ -138,11 +138,6 @@ function SessionSidebar({
                   <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
                 )}
               </span>
-              {false && session.isGroupChat !== undefined && (
-                <Badge variant="outline" className="h-4 shrink-0 px-1 text-[10px]">
-                  {session.isGroupChat ? '群' : '私'}
-                </Badge>
-              )}
               {!collapsed && <span className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-medium" title={session.sessionName}>
                 {session.sessionName}
               </span>}

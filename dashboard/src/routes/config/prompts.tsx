@@ -303,8 +303,8 @@ export function PromptManagementPage() {
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <Card className="min-h-0 overflow-hidden">
-          <CardHeader className="space-y-3 pb-3">
+        <Card className="flex min-h-0 flex-col overflow-hidden">
+          <CardHeader className="shrink-0 space-y-3 pb-3">
             <CardTitle className="flex items-center gap-2 text-sm">
               <FileText className="h-4 w-4" />
               Prompt 文件
@@ -321,12 +321,12 @@ export function PromptManagementPage() {
             </div>
           </CardHeader>
           <Separator />
-          <ScrollArea className="h-full">
+          <ScrollArea className="min-h-0 flex-1" scrollbars="vertical">
             <div className="space-y-1 p-2">
               {loadingCatalog ? (
                 <div className="flex items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  加载中
+                  Thinking
                 </div>
               ) : filteredFiles.length > 0 ? (
                 filteredFiles.map((file) => (
@@ -382,7 +382,7 @@ export function PromptManagementPage() {
             {loadingFile ? (
               <div className="flex h-[calc(100vh-290px)] items-center justify-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                读取中
+                Thinking
               </div>
             ) : (
               <CodeEditor
@@ -409,7 +409,7 @@ export function PromptManagementPage() {
           {loadingDefaultPrompt ? (
             <div className="flex h-[520px] items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
-              读取中
+              Thinking
             </div>
           ) : (
             <CodeEditor

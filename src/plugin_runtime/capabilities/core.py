@@ -57,6 +57,48 @@ def _normalize_prompt_arg(prompt: Any) -> str | List[Dict[str, Any]]:
     raise ValueError("缺少必要参数 prompt")
 
 
+def _normalize_embedding_text_arg(args: Dict[str, Any]) -> str | None:
+    """校验并规范化插件传入的单条嵌入文本。"""
+
+    text = args.get("text")
+    if text is None:
+        text = args.get("input")
+    if not isinstance(text, str):
+        return None
+
+    normalized_text = text.strip()
+    return normalized_text or None
+
+
+def _normalize_embedding_texts_arg(args: Dict[str, Any]) -> List[str]:
+    """校验并规范化插件传入的批量嵌入文本。"""
+
+    texts = args.get("texts")
+    if texts is None:
+        texts = args.get("inputs")
+    if not isinstance(texts, list):
+        return []
+
+    normalized_texts: List[str] = []
+    for index, text in enumerate(texts, start=1):
+        if not isinstance(text, str):
+            raise ValueError(f"texts 第 {index} 项必须为字符串")
+        normalized_text = text.strip()
+        if not normalized_text:
+            raise ValueError(f"texts 第 {index} 项不能为空")
+        normalized_texts.append(normalized_text)
+    return normalized_texts
+
+
+def _embedding_result_to_payload(result: Any) -> Dict[str, Any]:
+    """将 Embedding 服务结果转换为 capability 返回结构。"""
+
+    return {
+        "embedding": list(result.embedding),
+        "model_name": result.model_name,
+    }
+
+
 def _normalize_context_segment(raw_segment: Any) -> Dict[str, Any] | None:
     """将插件传入的上下文消息段规范化为宿主消息段结构。"""
 
@@ -149,6 +191,39 @@ class RuntimeCoreCapabilityMixin:
             }
         except Exception as exc:
             logger.error(f"[cap.maisaka.context.append] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    async def _cap_maisaka_proactive_trigger(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """请求 Maisaka 基于指定聊天流主动处理一轮对话。"""
+
+        del capability
+
+        stream_id = str(args.get("stream_id") or args.get("chat_id") or args.get("session_id") or "").strip()
+        intent = str(args.get("intent") or args.get("prompt") or args.get("text") or "").strip()
+        if not stream_id:
+            return {"success": False, "error": "缺少必要参数 stream_id"}
+        if not intent:
+            return {"success": False, "error": "缺少必要参数 intent"}
+
+        try:
+            from src.chat.heart_flow.heartflow_manager import heartflow_manager
+            from src.chat.message_receive.chat_manager import chat_manager
+
+            chat_session = chat_manager.get_existing_session_by_session_id(stream_id)
+            if chat_session is None:
+                return {"success": False, "error": f"未找到已存在的聊天流: {stream_id}"}
+
+            runtime = await heartflow_manager.get_or_create_heartflow_chat(stream_id)
+            result = await runtime.enqueue_proactive_task(
+                plugin_id=plugin_id,
+                intent=intent,
+                reason=str(args.get("reason") or "").strip(),
+                priority=str(args.get("priority") or "").strip(),
+                metadata=args.get("metadata") if isinstance(args.get("metadata"), dict) else None,
+            )
+            return {"success": True, **result}
+        except Exception as exc:
+            logger.error(f"[cap.maisaka.proactive.trigger] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
 
     async def _cap_send_text(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
@@ -396,6 +471,46 @@ class RuntimeCoreCapabilityMixin:
             return result.to_capability_payload()
         except Exception as exc:
             logger.error(f"[cap.llm.generate_with_tools] 执行失败: {exc}", exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    async def _cap_llm_embed(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:
+        """执行文本嵌入能力。"""
+
+        del capability
+        from src.services.embedding_service import EmbeddingServiceClient
+        from src.services.llm_service import resolve_task_name
+
+        try:
+            text = _normalize_embedding_text_arg(args)
+            texts = _normalize_embedding_texts_arg(args)
+            if text is None and not texts:
+                return {"success": False, "error": "缺少必要参数 text 或 texts"}
+            if text is not None and texts:
+                return {"success": False, "error": "text 与 texts 只能提供一个"}
+
+            task_name = resolve_task_name(
+                str(args.get("task_name", "") or args.get("model", "") or args.get("model_name", "") or "embedding")
+            )
+            embedding_client = EmbeddingServiceClient(
+                task_name=task_name,
+                request_type=f"plugin.{plugin_id}",
+            )
+
+            if text is not None:
+                result = await embedding_client.embed_text(text)
+                return {"success": True, **_embedding_result_to_payload(result)}
+
+            max_concurrent = args.get("max_concurrent")
+            results = await embedding_client.embed_texts(
+                texts,
+                max_concurrent=int(max_concurrent) if max_concurrent is not None else None,
+            )
+            return {
+                "success": True,
+                "results": [_embedding_result_to_payload(result) for result in results],
+            }
+        except Exception as exc:
+            logger.error(f"[cap.llm.embed] 执行失败: {exc}", exc_info=True)
             return {"success": False, "error": str(exc)}
 
     async def _cap_llm_get_available_models(self, plugin_id: str, capability: str, args: Dict[str, Any]) -> Any:

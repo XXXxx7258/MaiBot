@@ -52,6 +52,7 @@ from .maisaka_expression_selector import maisaka_expression_selector
 logger = get_logger("replyer")
 
 DEBUG_REPLY_CACHE_DIR = Path("logs/debug_reply_cache")
+REPLYER_MAX_HOOK_RETRIES = 3
 
 
 @dataclass
@@ -391,6 +392,47 @@ class BaseMaisakaReplyGenerator:
         return ""
 
     @staticmethod
+    def _coerce_hook_bool(value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        normalized_value = str(value).strip().lower()
+        if normalized_value in {"1", "true", "yes", "on", "retry"}:
+            return True
+        if normalized_value in {"0", "false", "no", "off", "continue"}:
+            return False
+        return default
+
+    @staticmethod
+    def _build_retry_reference_info(reference_info: str, retry_constraints: List[str]) -> str:
+        normalized_reference_info = reference_info.strip()
+        if not retry_constraints:
+            return normalized_reference_info
+
+        retry_lines = ["【重生成约束】"]
+        retry_lines.extend(retry_constraints[-REPLYER_MAX_HOOK_RETRIES:])
+        retry_block = "\n".join(retry_lines)
+        if normalized_reference_info:
+            return f"{normalized_reference_info}\n\n{retry_block}"
+        return retry_block
+
+    @staticmethod
+    def _build_retry_constraint_sentence(retry_reason: str, rejected_response: str) -> str:
+        normalized_reason = " ".join((retry_reason or "").split()).rstrip("。！？!?；;，,")
+        if not normalized_reason:
+            return ""
+
+        normalized_response = " ".join((rejected_response or "").split()).replace('"', '\\"')
+        return f'由于{normalized_reason}，之前生成的回复"{normalized_response}"不符合要求，你需要重新生成回复。'
+
+    @staticmethod
+    def _get_runtime_manager() -> Any:
+        from src.plugin_runtime.integration import get_plugin_runtime_manager
+
+        return get_plugin_runtime_manager()
+
+    @staticmethod
     def _build_debug_request_filename(stream_id: str, model_name: str) -> str:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         raw_name = f"{timestamp}_{stream_id or 'unknown'}_{model_name or 'unknown'}.json"
@@ -431,6 +473,7 @@ class BaseMaisakaReplyGenerator:
         reply_reason: str,
         stream_id: Optional[str],
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]],
+        reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> MaisakaReplyContext:
         session_id = self._resolve_session_id(stream_id)
         if not session_id:
@@ -446,6 +489,7 @@ class BaseMaisakaReplyGenerator:
             chat_history=chat_history,
             reply_message=reply_message,
             reply_reason=reply_reason,
+            reply_tool_args=reply_tool_args or {},
             sub_agent_runner=sub_agent_runner,
         )
         return MaisakaReplyContext(
@@ -471,6 +515,7 @@ class BaseMaisakaReplyGenerator:
         expression_habits: str = "",
         selected_expression_ids: Optional[List[int]] = None,
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]] = None,
+        reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, ReplyGenerationResult]:
         def finalize(success_value: bool) -> Tuple[bool, ReplyGenerationResult]:
             result.monitor_detail = build_reply_monitor_detail(result)
@@ -514,6 +559,7 @@ class BaseMaisakaReplyGenerator:
                 reply_reason=reply_reason or "",
                 stream_id=stream_id,
                 sub_agent_runner=sub_agent_runner,
+                reply_tool_args=reply_tool_args or {},
             )
         except Exception as exc:
             import traceback
@@ -536,93 +582,200 @@ class BaseMaisakaReplyGenerator:
         #     f"回复上下文完成 流={stream_id} 已选表达={result.selected_expression_ids!r}"
         # )
 
-        prompt_started_at = time.perf_counter()
-        try:
-            request_messages = self._build_request_messages(
-                chat_history=filtered_history,
-                reply_message=reply_message,
-                reply_reason=reply_reason or "",
-                reference_info=reference_info or "",
-                expression_habits=merged_expression_habits,
-                stream_id=stream_id,
-            )
-        except Exception as exc:
-            import traceback
-
-            logger.error(f"构建提示词失败: {exc}\n{traceback.format_exc()}")
-            result.error_message = f"构建提示词失败: {exc}"
-            result.metrics = GenerationMetrics(
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
-
-        prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-        prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
         show_replyer_prompt = bool(getattr(global_config.debug, "show_replyer_prompt", False))
         show_replyer_reasoning = bool(getattr(global_config.debug, "show_replyer_reasoning", False))
-
-        def message_factory(_client: object, model_info: Optional[ModelInfo] = None) -> List[Message]:
-            nonlocal prompt_ms, prompt_preview, request_messages
-            prompt_started_at = time.perf_counter()
-            request_messages = self._build_request_messages(
-                chat_history=filtered_history,
-                reply_message=reply_message,
-                reply_reason=reply_reason or "",
-                reference_info=reference_info or "",
-                expression_habits=merged_expression_habits,
-                stream_id=stream_id,
-                enable_visual_message=self._resolve_enable_visual_message(model_info),
-            )
-            prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
-            prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
-            return request_messages
-
         preview_chat_id = self._resolve_session_id(stream_id)
         replyer_prompt_section: RenderableType | None = None
+        retry_constraints: List[str] = []
+        retry_reasons: List[str] = []
+        retry_events: List[Dict[str, Any]] = []
+        hook_rewrite_events: List[Dict[str, str]] = []
+        retry_count = 0
+        aggregate_prompt_tokens = 0
+        aggregate_completion_tokens = 0
+        aggregate_total_tokens = 0
 
-        llm_started_at = time.perf_counter()
-        try:
-            generation_result = await self.express_model.generate_response_with_messages(
-                message_factory=message_factory
-            )
-        except Exception as exc:
-            logger.exception("Maisaka 回复器调用失败")
-            result.error_message = str(exc)
-            result.metrics = GenerationMetrics(
-                prompt_ms=prompt_ms,
-                llm_ms=round((time.perf_counter() - llm_started_at) * 1000, 2),
-                overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
-            )
-            return finalize(False)
+        while True:
+            effective_reference_info = self._build_retry_reference_info(reference_info or "", retry_constraints)
+            prompt_started_at = time.perf_counter()
+            try:
+                request_messages = self._build_request_messages(
+                    chat_history=filtered_history,
+                    reply_message=reply_message,
+                    reply_reason=reply_reason or "",
+                    reference_info=effective_reference_info,
+                    expression_habits=merged_expression_habits,
+                    stream_id=stream_id,
+                )
+            except Exception as exc:
+                import traceback
 
-        result.completion.request_prompt = prompt_preview
-        result.request_messages = serialize_prompt_messages(request_messages)
-        self._save_debug_reply_request_body(
-            stream_id=preview_chat_id,
-            model_name=generation_result.model_name or "",
-            messages=request_messages,
-            response_body={
-                "response": generation_result.response,
-                "reasoning": generation_result.reasoning,
-                "model_name": generation_result.model_name,
-                "tool_calls": [
-                    {
-                        "id": tool_call.call_id,
-                        "name": tool_call.func_name,
-                        "arguments": tool_call.args,
-                        "extra_content": tool_call.extra_content,
+                logger.error(f"构建提示词失败: {exc}\n{traceback.format_exc()}")
+                result.error_message = f"构建提示词失败: {exc}"
+                result.metrics = GenerationMetrics(
+                    overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
+                )
+                return finalize(False)
+
+            prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
+            prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
+
+            def message_factory(
+                _client: object,
+                model_info: Optional[ModelInfo] = None,
+                reference_info_for_attempt: str = effective_reference_info,
+            ) -> List[Message]:
+                nonlocal prompt_ms, prompt_preview, request_messages
+                prompt_started_at = time.perf_counter()
+                request_messages = self._build_request_messages(
+                    chat_history=filtered_history,
+                    reply_message=reply_message,
+                    reply_reason=reply_reason or "",
+                    reference_info=reference_info_for_attempt,
+                    expression_habits=merged_expression_habits,
+                    stream_id=stream_id,
+                    enable_visual_message=self._resolve_enable_visual_message(model_info),
+                )
+                prompt_ms = round((time.perf_counter() - prompt_started_at) * 1000, 2)
+                prompt_preview = PromptCLIVisualizer._build_prompt_dump_text(request_messages)
+                return request_messages
+
+            llm_started_at = time.perf_counter()
+            try:
+                generation_result = await self.express_model.generate_response_with_messages(
+                    message_factory=message_factory
+                )
+            except Exception as exc:
+                logger.exception("Maisaka 回复器调用失败")
+                result.error_message = str(exc)
+                result.metrics = GenerationMetrics(
+                    prompt_ms=prompt_ms,
+                    llm_ms=round((time.perf_counter() - llm_started_at) * 1000, 2),
+                    overall_ms=round((time.perf_counter() - overall_started_at) * 1000, 2),
+                )
+                return finalize(False)
+
+            result.completion.request_prompt = prompt_preview
+            result.request_messages = serialize_prompt_messages(request_messages)
+            self._save_debug_reply_request_body(
+                stream_id=preview_chat_id,
+                model_name=generation_result.model_name or "",
+                messages=request_messages,
+                response_body={
+                    "response": generation_result.response,
+                    "reasoning": generation_result.reasoning,
+                    "model_name": generation_result.model_name,
+                    "tool_calls": [
+                        {
+                            "id": tool_call.call_id,
+                            "name": tool_call.func_name,
+                            "arguments": tool_call.args,
+                            "extra_content": tool_call.extra_content,
+                        }
+                        for tool_call in (generation_result.tool_calls or [])
+                    ],
+                    "prompt_tokens": generation_result.prompt_tokens,
+                    "completion_tokens": generation_result.completion_tokens,
+                    "total_tokens": generation_result.total_tokens,
+                    "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
+                    "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
+                    "replyer_retry_count": retry_count,
+                },
+            )
+            llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
+            response_text = (generation_result.response or "").strip()
+            aggregate_prompt_tokens += generation_result.prompt_tokens
+            aggregate_completion_tokens += generation_result.completion_tokens
+            aggregate_total_tokens += generation_result.total_tokens
+            hook_original_response = response_text
+
+            try:
+                after_response_result = await self._get_runtime_manager().invoke_hook(
+                    "maisaka.replyer.after_response",
+                    response=response_text,
+                    session_id=preview_chat_id,
+                    request_type=self.request_type,
+                    attempt=retry_count + 1,
+                    retry_count=retry_count,
+                    max_retries=REPLYER_MAX_HOOK_RETRIES,
+                    reply_message_id=str(reply_message.message_id if reply_message is not None else ""),
+                    selected_expression_ids=list(result.selected_expression_ids),
+                    prompt_tokens=generation_result.prompt_tokens,
+                    completion_tokens=generation_result.completion_tokens,
+                    total_tokens=generation_result.total_tokens,
+                )
+                after_response_kwargs = after_response_result.kwargs
+            except Exception as exc:
+                logger.warning(f"Maisaka 回复器 after_response Hook 调用失败，将继续使用当前回复: {exc}")
+                after_response_kwargs = {}
+            if "response" in after_response_kwargs:
+                hook_modified_response = str(after_response_kwargs.get("response") or "").strip()
+                if hook_modified_response != response_text:
+                    rewrite_event = {
+                        "attempt": str(retry_count + 1),
+                        "before": hook_original_response,
+                        "after": hook_modified_response,
                     }
-                    for tool_call in (generation_result.tool_calls or [])
-                ],
-                "prompt_tokens": generation_result.prompt_tokens,
-                "completion_tokens": generation_result.completion_tokens,
-                "total_tokens": generation_result.total_tokens,
-                "prompt_cache_hit_tokens": getattr(generation_result, "prompt_cache_hit_tokens", 0) or 0,
-                "prompt_cache_miss_tokens": getattr(generation_result, "prompt_cache_miss_tokens", 0) or 0,
-            },
-        )
-        llm_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
-        response_text = (generation_result.response or "").strip()
+                    hook_rewrite_events.append(rewrite_event)
+                    logger.warning(
+                        "Maisaka 回复器回复被 Hook 改写: "
+                        f"session={preview_chat_id} attempt={retry_count + 1} "
+                        f"before={self._normalize_content(hook_original_response, limit=300)!r} "
+                        f"after={self._normalize_content(hook_modified_response, limit=300)!r}"
+                    )
+                response_text = hook_modified_response
+            retry_requested = self._coerce_hook_bool(after_response_kwargs.get("retry"), default=False)
+            matched_regex = str(after_response_kwargs.get("matched_regex") or "").strip()
+            matched_regex_pattern = str(after_response_kwargs.get("matched_regex_pattern") or "").strip()
+            matched_regex_description = str(after_response_kwargs.get("matched_regex_description") or "").strip()
+            retry_reason = str(after_response_kwargs.get("retry_reason") or "").strip()
+            if retry_requested and retry_count < REPLYER_MAX_HOOK_RETRIES:
+                reason_parts = []
+                if matched_regex:
+                    reason_parts.append(f"命中规则: {matched_regex}")
+                if matched_regex_description:
+                    reason_parts.append(f"规则说明: {matched_regex_description}")
+                if retry_reason:
+                    reason_parts.append(retry_reason)
+                if response_text:
+                    reason_parts.append(f"被拦截回复: {response_text!r}")
+                retry_log_reason = "；".join(reason_parts) or "Hook 请求重生成"
+                retry_events.append(
+                    {
+                        "attempt": retry_count + 1,
+                        "matched_regex": matched_regex,
+                        "matched_regex_pattern": matched_regex_pattern,
+                        "matched_regex_description": matched_regex_description,
+                        "retry_reason": retry_reason,
+                        "rejected_response": response_text,
+                    }
+                )
+                retry_reasons.append(retry_log_reason)
+                retry_constraint = self._build_retry_constraint_sentence(retry_reason, response_text)
+                if retry_constraint:
+                    retry_constraints.append(retry_constraint)
+                retry_count += 1
+                logger.warning(
+                    "Maisaka 回复器触发重生成: "
+                    f"session={preview_chat_id} attempt={retry_count} "
+                    f"retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
+                    f"constraint={'有' if retry_reason else '无'} "
+                    f"rule={matched_regex or 'unknown'} "
+                    f"pattern={matched_regex_pattern or 'unknown'} "
+                    f"reason={retry_log_reason} "
+                    f"rejected={self._normalize_content(response_text, limit=300)!r}"
+                )
+                continue
+            if retry_requested:
+                logger.warning(
+                    f"Maisaka 回复器已达到重生成上限，将使用最后一次回复: "
+                    f"session={preview_chat_id} retry={retry_count}/{REPLYER_MAX_HOOK_RETRIES} "
+                    f"rule={matched_regex or 'unknown'} "
+                    f"pattern={matched_regex_pattern or 'unknown'} "
+                    f"response={self._normalize_content(response_text, limit=300)!r}"
+                )
+            break
+
         if show_replyer_prompt:
             replyer_prompt_section = Panel(
                 PromptCLIVisualizer.build_prompt_access_panel(
@@ -670,6 +823,19 @@ class BaseMaisakaReplyGenerator:
         result.metrics.extra["prompt_cache_hit_tokens"] = prompt_cache_hit_tokens
         result.metrics.extra["prompt_cache_miss_tokens"] = prompt_cache_miss_tokens
         result.metrics.extra["prompt_cache_hit_rate"] = round(prompt_cache_hit_rate, 2)
+        result.metrics.extra["replyer_retry_count"] = retry_count
+        result.metrics.extra["replyer_attempt_count"] = retry_count + 1
+        result.metrics.extra["replyer_aggregate_prompt_tokens"] = aggregate_prompt_tokens
+        result.metrics.extra["replyer_aggregate_completion_tokens"] = aggregate_completion_tokens
+        result.metrics.extra["replyer_aggregate_total_tokens"] = aggregate_total_tokens
+        if retry_reasons:
+            result.metrics.extra["replyer_retry_reasons"] = list(retry_reasons)
+        if retry_events:
+            result.metrics.extra["replyer_retry_events"] = list(retry_events)
+        if retry_constraints:
+            result.metrics.extra["replyer_retry_constraints"] = list(retry_constraints)
+        if hook_rewrite_events:
+            result.metrics.extra["replyer_hook_rewrite_events"] = list(hook_rewrite_events)
         logger.info(
             "Replyer KV cache usage - "
             f"hit_tokens={prompt_cache_hit_tokens}, "
@@ -688,8 +854,15 @@ class BaseMaisakaReplyGenerator:
 
         logger.info(
             f"Maisaka 回复器生成成功 文本={response_text!r} "
-            f"总耗时ms={result.metrics.overall_ms} 已选表达={result.selected_expression_ids!r}"
+            f"总耗时ms={result.metrics.overall_ms} 重生成次数={retry_count} "
+            f"已选表达={result.selected_expression_ids!r}"
         )
+        if retry_count > 0:
+            logger.info(
+                "Maisaka 回复器重生成完成: "
+                f"session={preview_chat_id} attempts={retry_count + 1} "
+                f"retry_count={retry_count} final={self._normalize_content(response_text, limit=300)!r}"
+            )
         if show_replyer_prompt or show_replyer_reasoning:
             summary_lines = [
                 f"流ID: {preview_chat_id or 'unknown'}",

@@ -18,7 +18,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
-  getPluginStatsByIds,
+  getPluginStats,
   likePlugin,
   dislikePlugin,
   ratePlugin,
@@ -27,11 +27,10 @@ import {
 
 interface PluginStatsProps {
   pluginId: string
-  pluginIds?: string[]
   compact?: boolean // 紧凑模式（只显示数字）
 }
 
-export function PluginStats({ pluginId, pluginIds, compact = false }: PluginStatsProps) {
+export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
   const [stats, setStats] = useState<PluginStatsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [userRating, setUserRating] = useState(0)
@@ -42,7 +41,7 @@ export function PluginStats({ pluginId, pluginIds, compact = false }: PluginStat
   // 加载统计数据
   const loadStats = async () => {
     setLoading(true)
-    const data = await getPluginStatsByIds(pluginIds?.length ? pluginIds : [pluginId])
+    const data = await getPluginStats(pluginId)
     if (data) {
       setStats(data)
     }

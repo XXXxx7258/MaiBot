@@ -172,6 +172,10 @@ class ToolExecutionContext:
     session_id: str = ""
     stream_id: str = ""
     reasoning: str = ""
+    is_group_chat: bool | None = None
+    group_id: str = ""
+    user_id: str = ""
+    platform: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -365,8 +369,19 @@ class ToolRegistry:
             ToolExecutionResult: 工具执行结果。
         """
 
+        availability_context: ToolAvailabilityContext | None = None
+        if context is not None:
+            availability_context = ToolAvailabilityContext(
+                session_id=context.session_id,
+                stream_id=context.stream_id,
+                is_group_chat=context.is_group_chat,
+                group_id=context.group_id,
+                user_id=context.user_id,
+                platform=context.platform,
+            )
+
         for provider in self._providers:
-            provider_specs = await provider.list_tools()
+            provider_specs = await provider.list_tools(availability_context)
             if any(spec.name == invocation.tool_name and spec.enabled for spec in provider_specs):
                 try:
                     return await provider.invoke(invocation, context)

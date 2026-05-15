@@ -21,9 +21,13 @@ from src.services.statistics_service import (
     fetch_messages_since,
     fetch_model_usage_since,
     fetch_online_time_since,
-    fetch_tool_records_since,
     get_earliest_statistics_time,
     refresh_dashboard_statistics_cache,
+)
+from src.services.statistics_aggregation_service import (
+    count_tool_records_since,
+    fetch_message_count_by_chat_since,
+    refresh_statistics_aggregates,
 )
 
 logger = get_logger("maibot_statistic")
@@ -322,6 +326,8 @@ class StatisticOutputTask(AsyncTask):
             # 在线程池中并行执行数据收集和之前的HTML生成（如果存在）
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 logger.info("正在收集统计数据...")
+
+                await loop.run_in_executor(executor, refresh_statistics_aggregates)
 
                 # 数据收集任务
                 collect_task = loop.run_in_executor(executor, self._collect_all_statistics, now)
@@ -672,65 +678,32 @@ class StatisticOutputTask(AsyncTask):
             for period_key, _ in collect_period
         }
 
-        query_start_timestamp = collect_period[-1][1]
-        messages = fetch_messages_since(query_start_timestamp)
-        for message in messages:
-            message_time_ts = message.timestamp.timestamp()
+        for period_key, period_start_dt in collect_period:
+            for message_row in fetch_message_count_by_chat_since(period_start_dt):
+                chat_id = cast(str, message_row["chat_id"])
+                chat_name = cast(str, message_row["chat_name"])
+                message_count = cast(int, message_row["message_count"])
+                latest_timestamp = cast(datetime, message_row["latest_timestamp"])
+                latest_time_ts = latest_timestamp.timestamp()
 
-            chat_id = None
-            chat_name = None
+                try:
+                    if chat_id in self.name_mapping:
+                        if chat_name != self.name_mapping[chat_id][0] and latest_time_ts > self.name_mapping[chat_id][1]:
+                            self.name_mapping[chat_id] = (chat_name, latest_time_ts)
+                    else:
+                        self.name_mapping[chat_id] = (chat_name, latest_time_ts)
+                except (IndexError, TypeError) as e:
+                    logger.warning(f"更新 name_mapping 时发生错误，chat_id: {chat_id}, 错误: {e}")
+                    self.name_mapping[chat_id] = (chat_name, latest_time_ts)
 
-            # Logic based on Peewee model structure, aiming to replicate original intent
-            if message.group_id:
-                chat_id = f"g{message.group_id}"
-                chat_name = message.group_name or f"群{message.group_id}"
-            elif message.user_id:
-                # This uses the message SENDER's ID as per original logic's fallback
-                chat_id = f"u{message.user_id}"
-                chat_name = message.user_nickname
-            else:
-                # If neither group_id nor sender_id is available for chat identification
-                logger.warning(
-                    f"Message (PK: {message.id if hasattr(message, 'id') else 'N/A'}) lacks group_id and user_id for chat stats."
-                )
-                continue
-
-            if not chat_id:  # Should not happen if above logic is correct
-                continue
-
-            # Update name_mapping（仅用于展示聊天名称）
-            try:
-                if chat_id in self.name_mapping:
-                    if chat_name != self.name_mapping[chat_id][0] and message_time_ts > self.name_mapping[chat_id][1]:
-                        self.name_mapping[chat_id] = (chat_name, message_time_ts)
-                else:
-                    self.name_mapping[chat_id] = (chat_name, message_time_ts)
-            except (IndexError, TypeError) as e:
-                logger.warning(f"更新 name_mapping 时发生错误，chat_id: {chat_id}, 错误: {e}")
-                # 重置为正确的格式
-                self.name_mapping[chat_id] = (chat_name, message_time_ts)
-
-            for idx, (_, period_start_dt) in enumerate(collect_period):
-                if message_time_ts >= period_start_dt.timestamp():
-                    for period_key, _ in collect_period[idx:]:
-                        StatisticOutputTask._add_int_stat(stats[period_key], TOTAL_MSG_CNT, 1)
-                        StatisticOutputTask._add_defaultdict_int(stats[period_key], MSG_CNT_BY_CHAT, chat_id, 1)
-                    break
+                StatisticOutputTask._add_int_stat(stats[period_key], TOTAL_MSG_CNT, message_count)
+                StatisticOutputTask._add_defaultdict_int(stats[period_key], MSG_CNT_BY_CHAT, chat_id, message_count)
 
         # 使用 ToolRecord 中的 reply 工具次数作为回复数基准
         try:
-            tool_query_start_timestamp = collect_period[-1][1]
-            tool_records = fetch_tool_records_since(tool_query_start_timestamp)
-            for tool_record in tool_records:
-                if tool_record.tool_name != "reply":
-                    continue
-
-                action_time_ts = tool_record.timestamp.timestamp()
-                for idx, (_, period_start_dt) in enumerate(collect_period):
-                    if action_time_ts >= period_start_dt.timestamp():
-                        for period_key, _ in collect_period[idx:]:
-                            StatisticOutputTask._add_int_stat(stats[period_key], TOTAL_REPLY_CNT, 1)
-                        break
+            for period_key, period_start_dt in collect_period:
+                reply_count = count_tool_records_since(period_start_dt, "reply")
+                StatisticOutputTask._add_int_stat(stats[period_key], TOTAL_REPLY_CNT, reply_count)
         except Exception as e:
             logger.warning(f"统计 reply 工具次数失败，将回复数视为 0，错误信息：{e}")
 

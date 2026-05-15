@@ -406,7 +406,7 @@ export function EmojiUploadDialog({
           import: '导入',
           importFiles: '从以下位置导入文件:',
           importFrom: '从 %{name} 导入',
-          loading: '加载中...',
+          loading: 'Thinking...',
           logOut: '登出',
           myDevice: '我的设备',
           noFilesFound: '这里没有文件或文件夹',

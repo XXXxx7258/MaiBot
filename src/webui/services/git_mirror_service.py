@@ -521,6 +521,71 @@ class GitMirrorService:
 
         return {"success": False, "error": last_error, "mirror_used": mirror_type, "attempts": attempts, "url": url}
 
+    async def pull_repository(
+        self,
+        repository_path: Path,
+        branch: Optional[str] = None,
+        remote_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        在已安装插件目录内执行 Git 更新。
+
+        与重新克隆不同，该方法保留插件目录中的配置文件、数据文件和未跟踪文件。
+        """
+        git_dir = repository_path / ".git"
+        if not repository_path.exists() or not repository_path.is_dir():
+            return {"success": False, "error": "插件目录不存在", "status_code": 404}
+        if not git_dir.exists() or not git_dir.is_dir():
+            return {"success": False, "error": "插件目录不是 Git 仓库，无法通过 Git 更新", "status_code": 400}
+
+        commands: List[List[str]] = []
+        if remote_url:
+            try:
+                remote_url = _validate_custom_outbound_url(remote_url)
+            except ValueError as e:
+                return {"success": False, "error": str(e), "status_code": 400}
+            commands.append(["git", "remote", "set-url", "origin", remote_url])
+
+        commands.append(["git", "fetch", "origin", "--prune"])
+        if branch:
+            commands.append(["git", "checkout", branch])
+            commands.append(["git", "pull", "--ff-only", "origin", branch])
+        else:
+            commands.append(["git", "pull", "--ff-only"])
+
+        loop = asyncio.get_event_loop()
+        executed: List[str] = []
+
+        for cmd in commands:
+            executed.append(" ".join(cmd))
+
+            def run_git_command(git_cmd=cmd):
+                return subprocess.run(
+                    git_cmd,
+                    cwd=repository_path,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+
+            try:
+                process = await loop.run_in_executor(None, run_git_command)
+            except subprocess.TimeoutExpired:
+                return {"success": False, "error": f"Git 命令超时: {' '.join(cmd)}", "commands": executed}
+            except FileNotFoundError:
+                return {"success": False, "error": "Git 未安装或不在 PATH 中", "commands": executed}
+
+            if process.returncode != 0:
+                error_output = process.stderr.strip() or process.stdout.strip()
+                return {
+                    "success": False,
+                    "error": f"Git 更新失败: {error_output}",
+                    "commands": executed,
+                    "status_code": 500,
+                }
+
+        return {"success": True, "path": str(repository_path), "branch": branch or "current", "commands": executed}
+
     async def clone_repository(
         self,
         owner: str,

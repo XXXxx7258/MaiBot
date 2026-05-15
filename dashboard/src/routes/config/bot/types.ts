@@ -24,6 +24,8 @@ export interface ChatConfig {
   talk_value: number
   mentioned_bot_reply: boolean
   max_context_size: number
+  enable_context_optimization: boolean
+  enable_independent_timing_gate: boolean
   planner_smooth: number
   think_mode: 'classic' | 'deep' | 'dynamic'
   plan_reply_log_max_per_chat: number

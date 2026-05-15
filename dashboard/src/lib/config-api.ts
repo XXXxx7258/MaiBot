@@ -9,6 +9,8 @@ import type { ConfigSchema } from '@/types/config-schema'
 
 const API_BASE = '/api/webui/config'
 const schemaRequestCache = new Map<string, Promise<ApiResponse<ConfigSchema>>>()
+const configDataCache = new Map<string, { timestamp: number; request: Promise<ApiResponse<Record<string, unknown>>> }>()
+const CONFIG_DATA_CACHE_TTL = 30_000
 
 function getCachedSchema(key: string, url: string): Promise<ApiResponse<ConfigSchema>> {
   const cachedRequest = schemaRequestCache.get(key)
@@ -25,6 +27,31 @@ function getCachedSchema(key: string, url: string): Promise<ApiResponse<ConfigSc
 
   schemaRequestCache.set(key, request)
   return request
+}
+
+function getCachedConfigData(key: string, url: string): Promise<ApiResponse<Record<string, unknown>>> {
+  const cachedRequest = configDataCache.get(key)
+  if (cachedRequest && Date.now() - cachedRequest.timestamp < CONFIG_DATA_CACHE_TTL) {
+    return cachedRequest.request
+  }
+
+  const request = fetchWithAuth(url, { cache: 'no-store' })
+    .then((response) => parseResponse<Record<string, unknown>>(response))
+    .catch((error) => {
+      configDataCache.delete(key)
+      throw error
+    })
+
+  configDataCache.set(key, { timestamp: Date.now(), request })
+  return request
+}
+
+function invalidateConfigDataCache(key?: string): void {
+  if (key) {
+    configDataCache.delete(key)
+    return
+  }
+  configDataCache.clear()
 }
 
 /**
@@ -56,12 +83,22 @@ export async function getBotConfig(): Promise<ApiResponse<Record<string, unknown
   return parseResponse<Record<string, unknown>>(response)
 }
 
+/** Cached config data for lightweight status summaries. */
+export async function getBotConfigCached(): Promise<ApiResponse<Record<string, unknown>>> {
+  return getCachedConfigData('bot', `${API_BASE}/bot`)
+}
+
 /**
  * 获取模型配置数据
  */
 export async function getModelConfig(): Promise<ApiResponse<Record<string, unknown>>> {
   const response = await fetchWithAuth(`${API_BASE}/model`, { cache: 'no-store' })
   return parseResponse<Record<string, unknown>>(response)
+}
+
+/** Cached model config data for lightweight status summaries. */
+export async function getModelConfigCached(): Promise<ApiResponse<Record<string, unknown>>> {
+  return getCachedConfigData('model', `${API_BASE}/model`)
 }
 
 /**
@@ -74,7 +111,9 @@ export async function updateBotConfig(
     method: 'POST',
     body: JSON.stringify(config),
   })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<Record<string, unknown>>(response)
+  if (result.success) invalidateConfigDataCache('bot')
+  return result
 }
 
 /**
@@ -93,7 +132,9 @@ export async function updateBotConfigRaw(rawContent: string): Promise<ApiRespons
     method: 'POST',
     body: JSON.stringify({ raw_content: rawContent }),
   })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<Record<string, unknown>>(response)
+  if (result.success) invalidateConfigDataCache('bot')
+  return result
 }
 
 /**
@@ -106,7 +147,9 @@ export async function updateModelConfig(
     method: 'POST',
     body: JSON.stringify(config),
   })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<Record<string, unknown>>(response)
+  if (result.success) invalidateConfigDataCache('model')
+  return result
 }
 
 /**
@@ -120,7 +163,9 @@ export async function updateBotConfigSection(
     method: 'POST',
     body: JSON.stringify(sectionData),
   })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<Record<string, unknown>>(response)
+  if (result.success) invalidateConfigDataCache('bot')
+  return result
 }
 
 /**
@@ -134,7 +179,9 @@ export async function updateModelConfigSection(
     method: 'POST',
     body: JSON.stringify(sectionData),
   })
-  return parseResponse<Record<string, unknown>>(response)
+  const result = await parseResponse<Record<string, unknown>>(response)
+  if (result.success) invalidateConfigDataCache('model')
+  return result
 }
 
 /**

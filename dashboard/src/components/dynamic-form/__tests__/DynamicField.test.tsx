@@ -273,14 +273,13 @@ describe('DynamicField', () => {
         },
       }
       let controlledValue: unknown = ['a']
-      let rerender!: ReturnType<typeof render>['rerender']
       const onChange = vi.fn((nextValue: unknown) => {
         controlledValue = nextValue
-        rerender(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />)
+        view.rerender(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />)
       })
       const user = userEvent.setup()
 
-      rerender = render(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />).rerender
+      const view = render(<DynamicField schema={schema} value={controlledValue} onChange={onChange} />)
       const textbox = screen.getByRole('textbox')
       await user.click(textbox)
       await user.keyboard('{End}{Enter}')

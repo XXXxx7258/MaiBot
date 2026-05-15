@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import pytest
 
+from src.A_memorix.core.utils.profile_text import build_structured_profile_text
 from src.chat.message_receive.message import SessionMessage
 from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
 from src.common.data_models.message_component_data_model import AtComponent, MessageSequence, ReplyComponent, TextComponent
@@ -181,6 +182,52 @@ async def test_injection_builds_internal_reference_and_skips_empty(monkeypatch: 
     assert "Alice 喜欢咖啡" in result[0]
     assert "不应注入 evidence" not in result[0]
     assert [call["person_id"] for call in calls] == ["pid-alice", "pid-bob"]
+
+
+@pytest.mark.asyncio
+async def test_injection_compacts_structured_profile_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(person_profile_injector, "global_config", _build_config(max_profiles=1))
+    _patch_resolver(monkeypatch)
+    profile_text = build_structured_profile_text(
+        person_id="pid-alice",
+        primary_name="Alice",
+        aliases=["Alice", "小爱"],
+        identity_settings=["Alice 是长期参与记忆测试的用户。"],
+        relationship_settings=["Alice 把麦麦当作协作搭档。"],
+        stable_facts=["Alice 熟悉模型记忆模块。"],
+        interaction_preferences=["Alice 喜欢直接、可编辑的文本。"],
+        recent_interactions=["Alice 最近讨论了画像结构。", "Alice 最近调整了注入策略。", "Alice 最近补充了第三条。"],
+        uncertain_notes=["Alice 可能更偏好蓝色界面。"],
+    )
+
+    async def fake_profile_admin(*, action: str, **kwargs: Any) -> Dict[str, Any]:
+        _ = action
+        return {
+            "success": True,
+            "person_id": kwargs["person_id"],
+            "person_name": "Alice",
+            "profile_text": profile_text,
+        }
+
+    monkeypatch.setattr(person_profile_injector.memory_service, "profile_admin", fake_profile_admin)
+
+    anchor = _build_message(message_id="m1", user_id="alice", nickname="Alice", group_id="group-1")
+
+    result = await person_profile_injector.build_person_profile_injection_messages(
+        anchor_message=anchor,
+        pending_messages=[anchor],
+    )
+
+    assert len(result) == 1
+    assert "## 身份设定" in result[0]
+    assert "## 关系设定" in result[0]
+    assert "## 稳定了解" in result[0]
+    assert "## 相处偏好" in result[0]
+    assert "Alice 最近讨论了画像结构" in result[0]
+    assert "Alice 最近调整了注入策略" in result[0]
+    assert "Alice 最近补充了第三条" not in result[0]
+    assert "可能更偏好蓝色" not in result[0]
+    assert "维护备注" not in result[0]
 
 
 @pytest.mark.asyncio

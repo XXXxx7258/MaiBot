@@ -20,7 +20,14 @@ import { CodeEditor } from '@/components/CodeEditor'
 import { DynamicConfigForm } from '@/components/dynamic-form'
 import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
-import { getBotConfig, getBotConfigRaw, getBotConfigSchema, updateBotConfig, updateBotConfigRaw } from '@/lib/config-api'
+import {
+  getBotConfig,
+  getBotConfigCached,
+  getBotConfigRaw,
+  getBotConfigSchema,
+  updateBotConfig,
+  updateBotConfigRaw,
+} from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import { cn } from '@/lib/utils'
@@ -385,7 +392,7 @@ function BotConfigPageContent() {
   const loadConfig = useCallback(async () => {
     try {
       setLoading(true)
-      const [result, schemaResult] = await Promise.all([getBotConfig(), getBotConfigSchema()])
+      const [result, schemaResult] = await Promise.all([getBotConfigCached(), getBotConfigSchema()])
       if (!result.success) {
         toast({
           title: '加载失败',
@@ -771,7 +778,7 @@ function BotConfigPageContent() {
       <ScrollArea className="h-full">
         <div className="space-y-4 sm:space-y-6 p-4 sm:p-6">
           <div className="flex items-center justify-center h-64">
-            <p className="text-muted-foreground">加载中...</p>
+            <p className="text-muted-foreground">Thinking...</p>
           </div>
         </div>
       </ScrollArea>
