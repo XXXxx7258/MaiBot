@@ -19,7 +19,8 @@ from src.chat.heart_flow.heartFC_utils import CycleDetail
 from src.chat.message_receive.chat_manager import BotChatSession, chat_manager
 from src.chat.message_receive.message import SessionMessage
 from src.chat.utils.utils import is_mentioned_bot_in_message
-from src.common.data_models.mai_message_data_model import GroupInfo, UserInfo
+from src.common.data_models.mai_message_data_model import GroupInfo, MessageInfo, UserInfo
+from src.common.data_models.message_component_data_model import MessageSequence, TextComponent
 from src.common.logger import get_logger
 from src.common.utils.utils_config import ChatConfigUtils, ExpressionConfigUtils, JargonConfigUtils
 from src.config.config import global_config
@@ -88,7 +89,8 @@ class MaisakaHeartFlowChatting:
         # Keep all original messages for batching and later learning.
         self.message_cache: list[SessionMessage] = []
         self._last_processed_index = 0
-        self._internal_turn_queue: asyncio.Queue[Literal["message", "timeout"]] = asyncio.Queue()
+        self._internal_turn_queue: asyncio.Queue[Literal["message", "timeout", "proactive"]] = asyncio.Queue()
+        self._proactive_anchor_message: Optional[SessionMessage] = None
 
         self._mcp_manager: Optional[MCPManager] = None
         self._mcp_host_bridge: Optional[MCPHostLLMBridge] = None
@@ -289,6 +291,83 @@ class MaisakaHeartFlowChatting:
                 f"message_id={message.message_id} error={exc}"
             )
             return False
+
+    async def enqueue_proactive_task(
+        self,
+        *,
+        plugin_id: str,
+        intent: str,
+        reason: str = "",
+        priority: str = "",
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """追加一个插件主动聊天任务，并唤醒 Maisaka 主循环。"""
+
+        normalized_plugin_id = str(plugin_id or "").strip() or "unknown"
+        normalized_intent = str(intent or "").strip()
+        if not normalized_intent:
+            raise ValueError("主动聊天任务缺少 intent")
+
+        task_id = f"proactive:{normalized_plugin_id}:{int(time.time() * 1000)}"
+        detail_lines = [
+            f'<plugin_proactive_task id="{task_id}" plugin_id="{normalized_plugin_id}">',
+            f"插件请求你主动处理一轮聊天：{normalized_intent}",
+        ]
+        if reason:
+            detail_lines.append(f"触发原因：{reason}")
+        if priority:
+            detail_lines.append(f"优先级：{priority}")
+        if metadata:
+            detail_lines.append(f"附加信息：{json.dumps(metadata, ensure_ascii=False, default=str)}")
+        detail_lines.extend(
+            [
+                "请结合当前聊天关系、记忆和上下文，自行决定是否回复以及如何表达。",
+                "</plugin_proactive_task>",
+            ]
+        )
+        visible_text = "\n".join(detail_lines)
+        self._chat_history.append(
+            SessionBackedMessage(
+                raw_message=MessageSequence([TextComponent(visible_text)]),
+                visible_text=visible_text,
+                timestamp=datetime.now(),
+                message_id=task_id,
+                source_kind=f"plugin_proactive:{normalized_plugin_id}",
+            )
+        )
+        self._proactive_anchor_message = self._build_proactive_anchor_message(task_id)
+        self._force_next_timing_continue = True
+        self._force_next_timing_message_id = task_id
+        self._force_next_timing_reason = "插件主动聊天任务"
+        if self._agent_state == self._STATE_WAIT:
+            self._agent_state = self._STATE_RUNNING
+            self._pending_wait_tool_call_id = None
+            self._cancel_wait_timeout_task()
+        self._internal_turn_queue.put_nowait("proactive")
+        logger.info(f"{self.log_prefix} 已接收插件主动聊天任务: plugin_id={normalized_plugin_id} task_id={task_id}")
+        return {
+            "stream_id": self.session_id,
+            "task_id": task_id,
+            "queued": True,
+        }
+
+    def _build_proactive_anchor_message(self, task_id: str) -> SessionMessage:
+        """构造仅供工具上下文使用的主动任务锚点消息，不写入消息数据库。"""
+
+        message = SessionMessage(
+            message_id=task_id,
+            timestamp=datetime.now(),
+            platform=self.chat_stream.platform,
+        )
+        message.session_id = self.session_id
+        message.message_info = MessageInfo(
+            user_info=self._build_runtime_user_info(),
+            group_info=self._build_group_info(),
+            additional_config={},
+        )
+        message.raw_message = MessageSequence([TextComponent("插件主动聊天任务")])
+        message.processed_plain_text = "插件主动聊天任务"
+        return message
 
     def _emit_monitor_message_sent(
         self,

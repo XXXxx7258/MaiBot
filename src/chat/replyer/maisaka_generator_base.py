@@ -473,6 +473,7 @@ class BaseMaisakaReplyGenerator:
         reply_reason: str,
         stream_id: Optional[str],
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]],
+        reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> MaisakaReplyContext:
         session_id = self._resolve_session_id(stream_id)
         if not session_id:
@@ -488,6 +489,7 @@ class BaseMaisakaReplyGenerator:
             chat_history=chat_history,
             reply_message=reply_message,
             reply_reason=reply_reason,
+            reply_tool_args=reply_tool_args or {},
             sub_agent_runner=sub_agent_runner,
         )
         return MaisakaReplyContext(
@@ -513,6 +515,7 @@ class BaseMaisakaReplyGenerator:
         expression_habits: str = "",
         selected_expression_ids: Optional[List[int]] = None,
         sub_agent_runner: Optional[Callable[[str], Awaitable[str]]] = None,
+        reply_tool_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, ReplyGenerationResult]:
         def finalize(success_value: bool) -> Tuple[bool, ReplyGenerationResult]:
             result.monitor_detail = build_reply_monitor_detail(result)
@@ -556,6 +559,7 @@ class BaseMaisakaReplyGenerator:
                 reply_reason=reply_reason or "",
                 stream_id=stream_id,
                 sub_agent_runner=sub_agent_runner,
+                reply_tool_args=reply_tool_args or {},
             )
         except Exception as exc:
             import traceback

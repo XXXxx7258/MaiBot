@@ -256,6 +256,22 @@ def _upgrade_expression_learning_defaults(data: dict[str, Any]) -> list[str]:
     return reasons
 
 
+def _add_precise_expression_selection_default(data: dict[str, Any]) -> list[str]:
+    """
+    8.12.9: 补齐精细表达选择开关，默认开启表达选择子代理。
+    """
+    expression = _as_dict(data.get("expression"))
+    if expression is None:
+        expression = {}
+        data["expression"] = expression
+
+    if "enable_precise_expression_selection" in expression:
+        return []
+
+    expression["enable_precise_expression_selection"] = True
+    return ["expression.enable_precise_expression_selection"]
+
+
 def _normalize_group_list_fields(section: dict[str, Any], list_key: str, old_inner_key: str) -> bool:
     group_list = _as_list(section.get(list_key))
     if group_list is None:
@@ -350,6 +366,11 @@ BOT_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = (
         target_version="8.12.1",
         config_names=("bot_config.toml",),
         migrate=_upgrade_expression_learning_defaults,
+    ),
+    ConfigUpgradeHook(
+        target_version="8.12.9",
+        config_names=("bot_config.toml",),
+        migrate=_add_precise_expression_selection_default,
     ),
 )
 MODEL_CONFIG_UPGRADE_HOOKS: tuple[ConfigUpgradeHook, ...] = ()
