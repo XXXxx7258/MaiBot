@@ -5,6 +5,8 @@
 
 import { openDB, type IDBPDatabase } from 'idb'
 
+import { generateId } from '@/lib/id'
+
 /**
  * 资源记录的类型定义
  */
@@ -55,7 +57,7 @@ export async function openAssetDB(): Promise<IDBPDatabase<unknown>> {
  */
 export async function addAsset(file: File): Promise<string> {
   const db = await openAssetDB()
-  const id = crypto.randomUUID()
+  const id = generateId()
 
   // 根据 file.type 判断资源类型
   const type: 'image' | 'video' = file.type.startsWith('video/') ? 'video' : 'image'
