@@ -100,7 +100,7 @@ MaiSaka 不仅仅是一个机器人，不仅仅是一个可以帮你完成任务
 ### 📚 部署教程
 <sub><sup>Deployment Guide</sup></sub>
 
-👉 **[🚀 最新版本部署教程](https://docs.mai-mai.org/manual/deployment/mmc_deploy_windows.html)**  
+👉 **[🚀 最新版本部署教程](https://docs.mai-mai.org/manual/deployment/)**  
 <sub><sup>Latest Deployment Guide</sup></sub>
 
 ---
