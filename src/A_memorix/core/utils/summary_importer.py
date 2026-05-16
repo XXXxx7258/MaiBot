@@ -161,7 +161,7 @@ class SummaryImporter:
         graph_store: GraphStore,
         metadata_store: MetadataStore,
         embedding_manager: EmbeddingAPIAdapter,
-        plugin_config: dict
+        plugin_config: dict,
     ):
         self.vector_store = vector_store
         self.graph_store = graph_store
@@ -169,9 +169,7 @@ class SummaryImporter:
         self.embedding_manager = embedding_manager
         self.plugin_config = plugin_config
         self.relation_write_service: Optional[RelationWriteService] = (
-            plugin_config.get("relation_write_service")
-            if isinstance(plugin_config, dict)
-            else None
+            plugin_config.get("relation_write_service") if isinstance(plugin_config, dict) else None
         )
 
     def _allow_metadata_only_write(self) -> bool:
@@ -200,11 +198,12 @@ class SummaryImporter:
                 return [selector]
             return ["auto"]
         raise ValueError(
-            "summarization.model_name 必须为 List[str] 或 str。"
-            " 请执行 scripts/release_vnext_migrate.py migrate。"
+            "summarization.model_name 必须为 List[str] 或 str。 请执行 scripts/release_vnext_migrate.py migrate。"
         )
 
-    def _pick_default_summary_task(self, available_tasks: Dict[str, TaskConfig]) -> Tuple[Optional[str], Optional[TaskConfig]]:
+    def _pick_default_summary_task(
+        self, available_tasks: Dict[str, TaskConfig]
+    ) -> Tuple[Optional[str], Optional[TaskConfig]]:
         """
         选择总结默认任务，避免错误落到 embedding/voice/vlm 等非文本生成任务。
         优先级：memory > utils > planner > tool_use > replyer > 其他文本生成任务。
@@ -282,7 +281,9 @@ class SummaryImporter:
                         "当前 LLM 服务按任务候选列表执行，不单独覆盖具体模型。"
                     )
                 else:
-                    logger.warning(f"总结模型选择器 '{selector}' 的模型 '{model_name}' 不在任务 '{task_name}' 中，已跳过")
+                    logger.warning(
+                        f"总结模型选择器 '{selector}' 的模型 '{model_name}' 不在任务 '{task_name}' 中，已跳过"
+                    )
                 continue
 
             task_cfg = available_tasks.get(selector)
@@ -329,6 +330,7 @@ class SummaryImporter:
             temperature=template_cfg.temperature,
             slow_threshold=template_cfg.slow_threshold,
             selection_strategy=template_cfg.selection_strategy,
+            hard_timeout=template_cfg.hard_timeout,
         )
 
     def _summary_review_count(self, metadata: Optional[Dict[str, Any]]) -> int:
@@ -435,7 +437,7 @@ class SummaryImporter:
             # 1. 获取配置
             if context_length is None:
                 context_length = self.plugin_config.get("summarization", {}).get("context_length", 50)
-            
+
             if include_personality is None:
                 include_personality = self.plugin_config.get("summarization", {}).get("include_personality", True)
 
@@ -459,7 +461,7 @@ class SummaryImporter:
                 stream_id,
                 limit=review_count,
             )
-            
+
             # 3. 准备提示词内容
             bot_name = global_config.bot.nickname or "机器人"
             personality_context = ""
@@ -473,7 +475,7 @@ class SummaryImporter:
                 bot_name=bot_name,
                 personality_context=personality_context,
                 previous_summary_context=previous_summary_context,
-                chat_history=chat_history_text
+                chat_history=chat_history_text,
             )
 
             resolved_model = self._resolve_summary_model_config()
@@ -627,10 +629,7 @@ class SummaryImporter:
         else:
             try:
                 embedding = await self.embedding_manager.encode(summary)
-                self.vector_store.add(
-                    vectors=embedding.reshape(1, -1),
-                    ids=[hash_value]
-                )
+                self.vector_store.add(vectors=embedding.reshape(1, -1), ids=[hash_value])
             except Exception as exc:
                 if not self._allow_metadata_only_write():
                     raise
@@ -661,11 +660,7 @@ class SummaryImporter:
                 else:
                     # 写入元数据
                     rel_hash = self.metadata_store.add_relation(
-                        subject=s,
-                        predicate=p,
-                        obj=o,
-                        confidence=1.0,
-                        source_paragraph=hash_value
+                        subject=s, predicate=p, obj=o, confidence=1.0, source_paragraph=hash_value
                     )
                     # 写入图数据库（写入 relation_hashes，确保后续可按关系精确修剪）
                     self.graph_store.add_edges([(s, o)], relation_hashes=[rel_hash])
@@ -673,5 +668,5 @@ class SummaryImporter:
                         self.metadata_store.set_relation_vector_state(rel_hash, "none")
                     except Exception:
                         pass
-                
+
         logger.info(f"总结导入完成: hash={hash_value[:8]}")

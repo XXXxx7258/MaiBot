@@ -902,9 +902,6 @@ class LLMOrchestrator:
             )
         except asyncio.TimeoutError as e:
             task_display = self.request_type or self.task_name or "未知任务"
-            logger.warning(
-                f"任务 '{task_display}' 模型 '{model_name}' 触发 hard_timeout={timeout_s}s，将切换到下一个模型"
-            )
             raise LLMTaskTimeoutError(
                 task_name=task_display,
                 model_name=model_name,
@@ -1140,6 +1137,7 @@ class LLMRequest(LLMOrchestrator):
             task_config.temperature,
             task_config.slow_threshold,
             task_config.selection_strategy,
+            task_config.hard_timeout,
         )
 
     @classmethod
