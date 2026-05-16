@@ -253,7 +253,7 @@ class LLMOrchestrator:
             )
             return [message_builder.build()]
 
-        execution_result = await self._execute_request_with_timeout(
+        execution_result = await self._execute_request(
             request_type=RequestType.RESPONSE,
             message_factory=message_factory,
             temperature=temperature,
@@ -297,7 +297,7 @@ class LLMOrchestrator:
             LLMAudioTranscriptionResult: 语音转写结果对象。
         """
         self._refresh_task_config()
-        execution_result = await self._execute_request_with_timeout(
+        execution_result = await self._execute_request(
             request_type=RequestType.AUDIO,
             audio_base64=voice_base64,
         )
@@ -338,7 +338,7 @@ class LLMOrchestrator:
 
         tool_built = self._build_tool_options(tools)
 
-        execution_result = await self._execute_request_with_timeout(
+        execution_result = await self._execute_request(
             request_type=RequestType.RESPONSE,
             message_factory=message_factory,
             temperature=temperature,
@@ -406,7 +406,7 @@ class LLMOrchestrator:
 
         tool_built = self._build_tool_options(tools)
 
-        execution_result = await self._execute_request_with_timeout(
+        execution_result = await self._execute_request(
             request_type=RequestType.RESPONSE,
             message_factory=message_factory,
             temperature=temperature,
@@ -457,7 +457,7 @@ class LLMOrchestrator:
         """
         self._refresh_task_config()
         start_time = time.time()
-        execution_result = await self._execute_request_with_timeout(
+        execution_result = await self._execute_request(
             request_type=RequestType.EMBEDDING,
             embedding_input=embedding_input,
         )
@@ -880,25 +880,34 @@ class LLMOrchestrator:
             f"任务 '{self.request_type or '未知任务'}' 的模型 '{model_info.name}' 未被尝试，因为重试次数已配置为0或更少。"
         )
 
-    async def _execute_request_with_timeout(self, **kwargs: Any) -> "LLMExecutionResult":
-        """对 `_execute_request` 套一层任务级 hard_timeout。
+    async def _attempt_request_on_model_with_timeout(
+        self,
+        api_provider: APIProvider,
+        client: BaseClient,
+        request: ClientRequest,
+        model_name: str,
+    ) -> APIResponse:
+        """对 `_attempt_request_on_model` 套一层任务级 hard_timeout。
 
-        触发超时时把所有进行中的模型尝试一并取消，并把超时事件转成 LLMTaskTimeoutError
-        （ModelAttemptFailed 的子类），让上层调用方接住后按"切下一个模型"的既有语义处理。
+        单次模型尝试超时时把 TimeoutError 转成 LLMTaskTimeoutError（继承 ModelAttemptFailed），
+        由 `_execute_request` 内既有的 `except ModelAttemptFailed` 分支接住，按"切下一个模型"
+        的既有语义处理（penalty +1、usage_penalty -1、failed_models_this_request 登记）。
+        全部模型都触发 hard_timeout 时，最后一个 LLMTaskTimeoutError 上抛给调用方。
         """
-        self._refresh_task_config()
         timeout_s = self.model_for_task.hard_timeout
         try:
             return await asyncio.wait_for(
-                self._execute_request(**kwargs),
+                self._attempt_request_on_model(api_provider, client, request=request),
                 timeout=timeout_s,
             )
         except asyncio.TimeoutError as e:
             task_display = self.request_type or self.task_name or "未知任务"
-            logger.warning(f"任务 '{task_display}' 触发 hard_timeout={timeout_s}s，已取消进行中的模型尝试")
+            logger.warning(
+                f"任务 '{task_display}' 模型 '{model_name}' 触发 hard_timeout={timeout_s}s，将切换到下一个模型"
+            )
             raise LLMTaskTimeoutError(
                 task_name=task_display,
-                model_name="(timeout)",
+                model_name=model_name,
                 timeout_s=timeout_s,
             ) from e
 
@@ -967,10 +976,11 @@ class LLMOrchestrator:
                         f"LLMOrchestrator[{self.request_type}] 正在向模型 model={model_info.name} 发送请求 "
                         f"(tool_options={len(tool_options or [])})"
                     )
-                response = await self._attempt_request_on_model(
+                response = await self._attempt_request_on_model_with_timeout(
                     api_provider,
                     client,
-                    request=request,
+                    request,
+                    model_info.name,
                 )
                 if self.request_type.startswith("maisaka_"):
                     logger.debug(f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 已返回 API 响应")

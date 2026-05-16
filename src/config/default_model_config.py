@@ -50,11 +50,11 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
         "selection_strategy": "random",
         "hard_timeout": 120.0,
     },
-    "learner": {"hard_timeout": 60.0},
-    "emoji": {"hard_timeout": 60.0},
-    "vlm": {"hard_timeout": 180.0},
-    "voice": {"hard_timeout": 60.0},
-    "embedding": {"hard_timeout": 30.0},
+    "learner": {"model_list": [], "hard_timeout": 60.0},
+    "emoji": {"model_list": [], "hard_timeout": 60.0},
+    "vlm": {"model_list": [], "hard_timeout": 180.0},
+    "voice": {"model_list": [], "hard_timeout": 60.0},
+    "embedding": {"model_list": [], "hard_timeout": 30.0},
 }
 
 DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
