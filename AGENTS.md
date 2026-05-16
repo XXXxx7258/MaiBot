@@ -68,3 +68,5 @@ https://github.com/Mai-with-u/maibot-plugin-sdk/blob/main/docs/guide.md
 
 # 如何提交maibot插件
 https://github.com/Mai-with-u/plugin-repo/blob/main/CONTRIBUTING.md
+
+# 对于changelog，建议分为两部分，一部分是用户感知功能侧，一部分是开发侧（包含修复和插件sdk,api改动）。最好一个功能一行，按模块分。
