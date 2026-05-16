@@ -102,10 +102,16 @@ class LLMTaskTimeoutError(ModelAttemptFailed):
     最后一次 LLMTaskTimeoutError 上抛给调用方。
     """
 
-    def __init__(self, task_name: str, model_name: str, timeout_s: float):
+    def __init__(
+        self,
+        task_name: str,
+        model_name: str,
+        timeout_s: float,
+        original_exception: Exception | None = None,
+    ):
         super().__init__(
             f"任务 '{task_name}' 模型 '{model_name}' 触发硬超时 {timeout_s}s",
-            original_exception=None,
+            original_exception=original_exception,
         )
         self.task_name = task_name
         self.model_name = model_name

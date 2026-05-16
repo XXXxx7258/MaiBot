@@ -906,6 +906,7 @@ class LLMOrchestrator:
                 task_name=task_display,
                 model_name=model_name,
                 timeout_s=timeout_s,
+                original_exception=e,
             ) from e
 
     async def _execute_request(

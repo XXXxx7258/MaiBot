@@ -59,14 +59,21 @@ async def await_task_with_interrupt(
     from src.llm_models.exceptions import ReqAbortException
 
     started_at = asyncio.get_running_loop().time()
-    while not task.done():
-        if interrupt_flag and interrupt_flag.is_set():
-            elapsed = asyncio.get_running_loop().time() - started_at
-            logger.info(f"LLM 请求检测到中断信号，准备取消底层任务，elapsed={elapsed:.3f}s")
+    try:
+        while not task.done():
+            if interrupt_flag and interrupt_flag.is_set():
+                elapsed = asyncio.get_running_loop().time() - started_at
+                logger.info(f"LLM 请求检测到中断信号，准备取消底层任务，elapsed={elapsed:.3f}s")
+                task.cancel()
+                raise ReqAbortException("请求被外部信号中断")
+            await asyncio.sleep(interval_seconds)
+        return await task
+    finally:
+        # 调用方协程被 CancelledError（如 asyncio.wait_for 命中 hard_timeout）打断时，
+        # 必须把 child task 也取消，否则上游 httpx 请求会继续在后台运行，
+        # 占用连接 / token 并使 hard_timeout 形同虚设。
+        if not task.done():
             task.cancel()
-            raise ReqAbortException("请求被外部信号中断")
-        await asyncio.sleep(interval_seconds)
-    return await task
 
 
 class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):
