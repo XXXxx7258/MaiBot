@@ -12,6 +12,7 @@ import random
 import re
 
 import asyncio
+import functools
 
 from src.common.data_models.message_component_data_model import (
     AtComponent,
@@ -37,18 +38,17 @@ if TYPE_CHECKING:
 
 logger = get_logger("message_utils")
 
+
 # 串行化 store_message_to_db_async / update_message_id_async 的写入：
 # 底层 SQLite WAL 仅允许单写，busy_timeout 1s，突发流量下多个 to_thread worker
 # 并发写会撞写锁触发 `database is locked`。
-# 用 lazy init 延迟到首次调用时再创建，避免 import 期在没有 running loop 时构造。
-_DB_WRITE_LOCK: asyncio.Lock | None = None
-
-
+# 用 functools.lru_cache 实现单例：首次调用时创建（此时 event loop 已存在），
+# CPython 内部用 thread lock 保证 lazy init 线程安全。
+# 假设：MaiBot 是单进程单 event loop 应用；多 loop 场景下 lock 仍绑定首次调用所在 loop，
+# 跨 loop 复用会 RuntimeError。如果未来引入多 loop 需求需改用 per-loop registry。
+@functools.lru_cache(maxsize=None)
 def _get_db_write_lock() -> asyncio.Lock:
-    global _DB_WRITE_LOCK
-    if _DB_WRITE_LOCK is None:
-        _DB_WRITE_LOCK = asyncio.Lock()
-    return _DB_WRITE_LOCK
+    return asyncio.Lock()
 
 
 class MessageUtils:
