@@ -74,6 +74,13 @@ class ReasoningPromptListResponse(BaseModel):
     selected_session: str = ""
 
 
+class ReasoningPromptStagesResponse(BaseModel):
+    """推理过程类型概览响应。"""
+
+    stages: list[str] = Field(default_factory=list)
+    stage_infos: list[ReasoningPromptStageInfo] = Field(default_factory=list)
+
+
 class ReasoningPromptContentResponse(BaseModel):
     """推理过程文本内容响应。"""
 
@@ -361,8 +368,9 @@ def _resolve_reasoning_session_info(
     )
 
 
-def _list_session_infos(stage: str) -> list[ReasoningPromptSessionInfo]:
-    session_names = _list_session_names(stage)
+def _list_session_infos(stage: str, session_names: list[str] | None = None) -> list[ReasoningPromptSessionInfo]:
+    if session_names is None:
+        session_names = _list_session_names(stage)
     if not session_names:
         return []
 
@@ -442,6 +450,17 @@ def _collect_prompt_files(
     return items
 
 
+@router.get("/stages", response_model=ReasoningPromptStagesResponse)
+async def list_reasoning_prompt_stages():
+    """只列出 logs/maisaka_prompt 下的推理过程类型概览。"""
+
+    stage_infos = _list_stage_infos()
+    return ReasoningPromptStagesResponse(
+        stages=[item.name for item in stage_infos],
+        stage_infos=stage_infos,
+    )
+
+
 @router.get("/files", response_model=ReasoningPromptListResponse)
 async def list_reasoning_prompt_files(
     stage: str = Query("planner"),
@@ -455,12 +474,13 @@ async def list_reasoning_prompt_files(
     stage_infos = _list_stage_infos()
     stages = [item.name for item in stage_infos]
     selected_stage = _resolve_stage_name(stage)
-    session_infos = _list_session_infos(selected_stage)
-    sessions = [item.name for item in session_infos]
-    session_info_map = {item.name: item for item in session_infos}
+    sessions = _list_session_names(selected_stage)
     selected_session = _resolve_session_name(session, sessions)
-    items = _collect_prompt_files(selected_stage, selected_session, session_info_map)
     normalized_search = search.strip().lower()
+    sessions_to_resolve = sessions if normalized_search else ([selected_session] if selected_session else [])
+    session_infos = _list_session_infos(selected_stage, sessions_to_resolve)
+    session_info_map = {item.name: item for item in session_infos}
+    items = _collect_prompt_files(selected_stage, selected_session, session_info_map)
 
     if normalized_search:
         items = [
