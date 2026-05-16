@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Coroutine, Generic, Tuple, TypeVar, cast
 
 import asyncio
+import contextlib
 
 from src.common.logger import get_logger
 from src.config.model_configs import ModelInfo
@@ -72,8 +73,12 @@ async def await_task_with_interrupt(
         # 调用方协程被 CancelledError（如 asyncio.wait_for 命中 hard_timeout）打断时，
         # 必须把 child task 也取消，否则上游 httpx 请求会继续在后台运行，
         # 占用连接 / token 并使 hard_timeout 形同虚设。
+        # cancel 后再 await 让子任务真正完成清理；抑制 CancelledError 与子任务
+        # 自身清理过程中可能抛出的异常，避免「Task exception was never retrieved」。
         if not task.done():
             task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
 
 class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):
