@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 
 logger = get_logger("message_utils")
 
+# 串行化 store_message_to_db_async 的写入：底层 SQLite WAL 仅允许单写，busy_timeout 1s，
+# 突发流量下多个 to_thread worker 并发写会撞写锁触发 `database is locked`。
+_DB_WRITE_LOCK = asyncio.Lock()
+
 
 class MessageUtils:
     @staticmethod
@@ -195,13 +199,15 @@ class MessageUtils:
 
     @staticmethod
     async def store_message_to_db_async(message: "SessionMessage") -> None:
-        """异步存储消息到数据库（事件循环不阻塞版本）。
+        """异步存储消息到数据库。
 
-        内部走线程池跑同步 SQLAlchemy session，与 chat_manager.save_all_sessions 同模式，
-        避免在 async 上下文里裸调 sync DB 操作导致主事件循环被卡，进而引发
-        host.route_message / plugin.health 链路超时。
+        通过 `_DB_WRITE_LOCK` 把多个并发协程的写入排队串行执行：底层是 SQLite WAL，
+        busy_timeout 仅 1s，若不加串行化、多个 `to_thread` worker 同时拿写锁，
+        突发消息流量下会触发 `database is locked`。在持有锁后再 `to_thread`
+        跑同步 SQLAlchemy session，仍然把阻塞工作移出事件循环。
         """
-        await asyncio.to_thread(MessageUtils.store_message_to_db, message)
+        async with _DB_WRITE_LOCK:
+            await asyncio.to_thread(MessageUtils.store_message_to_db, message)
 
     @staticmethod
     def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
