@@ -1,10 +1,6 @@
-/**
- * 插件统计组件
- * 显示点赞、点踩、评分和下载量
- */
+import { useEffect, useState } from 'react'
+import { Download, Star, ThumbsDown, ThumbsUp } from 'lucide-react'
 
-import { useState, useEffect } from 'react'
-import { ThumbsUp, ThumbsDown, Star, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -18,16 +14,18 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import {
-  getPluginStats,
-  likePlugin,
   dislikePlugin,
+  getPluginStats,
+  getPluginUserState,
+  likePlugin,
   ratePlugin,
   type PluginStatsData,
+  type VoteStatsResponse,
 } from '@/lib/plugin-stats'
 
 interface PluginStatsProps {
   pluginId: string
-  compact?: boolean // 紧凑模式（只显示数字）
+  compact?: boolean
 }
 
 export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
@@ -35,57 +33,90 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
   const [loading, setLoading] = useState(true)
   const [userRating, setUserRating] = useState(0)
   const [userComment, setUserComment] = useState('')
+  const [liked, setLiked] = useState(false)
+  const [disliked, setDisliked] = useState(false)
+  const [actionLoading, setActionLoading] = useState<'like' | 'dislike' | 'rating' | null>(null)
   const [isRatingDialogOpen, setIsRatingDialogOpen] = useState(false)
   const { toast } = useToast()
 
-  // 加载统计数据
   const loadStats = async () => {
     setLoading(true)
-    const data = await getPluginStats(pluginId)
-    if (data) {
-      setStats(data)
+    const [statsData, userState] = await Promise.all([
+      getPluginStats(pluginId),
+      getPluginUserState(pluginId),
+    ])
+
+    if (statsData) {
+      setStats(statsData)
+    }
+    if (userState) {
+      setLiked(userState.liked)
+      setDisliked(userState.disliked)
+      setUserRating(userState.rating)
+      setUserComment(userState.comment)
     }
     setLoading(false)
   }
 
   useEffect(() => {
-    loadStats()
+    void loadStats()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pluginId])
 
-  // 处理点赞
+  const updateVoteStats = (result: VoteStatsResponse) => {
+    setLiked(result.liked === true)
+    setDisliked(result.disliked === true)
+    setStats((currentStats) => currentStats
+      ? {
+        ...currentStats,
+        likes: Number(result.likes ?? currentStats.likes),
+        dislikes: Number(result.dislikes ?? currentStats.dislikes),
+      }
+      : currentStats)
+  }
+
   const handleLike = async () => {
+    setActionLoading('like')
     const result = await likePlugin(pluginId)
+    setActionLoading(null)
 
     if (result.success) {
-      toast({ title: '已点赞', description: '感谢你的支持！' })
-      loadStats() // 重新加载统计数据
-    } else {
+      updateVoteStats(result)
       toast({
-        title: '点赞失败',
-        description: result.error || '未知错误',
-        variant: 'destructive',
+        title: result.liked ? '已点赞' : '已取消点赞',
+        description: result.liked ? '感谢你的支持' : '已更新你的反馈状态',
       })
+      return
     }
+
+    toast({
+      title: '点赞失败',
+      description: result.error || '未知错误',
+      variant: 'destructive',
+    })
   }
 
-  // 处理点踩
   const handleDislike = async () => {
+    setActionLoading('dislike')
     const result = await dislikePlugin(pluginId)
+    setActionLoading(null)
 
     if (result.success) {
-      toast({ title: '已反馈', description: '感谢你的反馈！' })
-      loadStats()
-    } else {
+      updateVoteStats(result)
       toast({
-        title: '操作失败',
-        description: result.error || '未知错误',
-        variant: 'destructive',
+        title: result.disliked ? '已点踩' : '已取消点踩',
+        description: '已更新你的反馈状态',
       })
+      return
     }
+
+    toast({
+      title: '操作失败',
+      description: result.error || '未知错误',
+      variant: 'destructive',
+    })
   }
 
-  // 提交评分
   const handleSubmitRating = async () => {
     if (userRating === 0) {
       toast({
@@ -96,21 +127,29 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
       return
     }
 
+    setActionLoading('rating')
     const result = await ratePlugin(pluginId, userRating, userComment || undefined)
+    setActionLoading(null)
 
     if (result.success) {
-      toast({ title: '评分成功', description: '感谢你的评价！' })
+      setUserRating(Number(result.user_rating ?? userRating))
+      setStats((currentStats) => currentStats
+        ? {
+          ...currentStats,
+          rating: Number(result.rating ?? currentStats.rating),
+          rating_count: Number(result.rating_count ?? currentStats.rating_count),
+        }
+        : currentStats)
       setIsRatingDialogOpen(false)
-      setUserRating(0)
-      setUserComment('')
-      loadStats()
-    } else {
-      toast({
-        title: '评分失败',
-        description: result.error || '未知错误',
-        variant: 'destructive',
-      })
+      toast({ title: '评分已更新', description: '你的当前评分已覆盖保存' })
+      return
     }
+
+    toast({
+      title: '评分失败',
+      description: result.error || '未知错误',
+      variant: 'destructive',
+    })
   }
 
   if (loading) {
@@ -132,7 +171,6 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
     return null
   }
 
-  // 紧凑模式
   if (compact) {
     return (
       <div className="flex items-center gap-4 text-sm text-muted-foreground">
@@ -152,68 +190,75 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
     )
   }
 
-  // 完整模式
   return (
     <div className="space-y-4">
-      {/* 统计数字 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <Download className="h-5 w-5 text-muted-foreground mb-1" />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="flex flex-col items-center rounded-lg border bg-card p-3">
+          <Download className="mb-1 h-5 w-5 text-muted-foreground" />
           <span className="text-2xl font-bold">{stats.downloads.toLocaleString()}</span>
           <span className="text-xs text-muted-foreground">下载量</span>
         </div>
 
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <Star className="h-5 w-5 text-yellow-400 mb-1 fill-yellow-400" />
+        <div className="flex flex-col items-center rounded-lg border bg-card p-3">
+          <Star className="mb-1 h-5 w-5 fill-yellow-400 text-yellow-400" />
           <span className="text-2xl font-bold">{stats.rating.toFixed(1)}</span>
           <span className="text-xs text-muted-foreground">{stats.rating_count} 条评价</span>
         </div>
 
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <ThumbsUp className="h-5 w-5 text-green-500 mb-1" />
+        <div className="flex flex-col items-center rounded-lg border bg-card p-3">
+          <ThumbsUp className="mb-1 h-5 w-5 text-green-500" />
           <span className="text-2xl font-bold">{stats.likes}</span>
           <span className="text-xs text-muted-foreground">点赞</span>
         </div>
 
-        <div className="flex flex-col items-center p-3 rounded-lg border bg-card">
-          <ThumbsDown className="h-5 w-5 text-red-500 mb-1" />
+        <div className="flex flex-col items-center rounded-lg border bg-card p-3">
+          <ThumbsDown className="mb-1 h-5 w-5 text-red-500" />
           <span className="text-2xl font-bold">{stats.dislikes}</span>
           <span className="text-xs text-muted-foreground">点踩</span>
         </div>
       </div>
 
-      {/* 操作按钮 */}
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={handleLike}>
-          <ThumbsUp className="h-4 w-4 mr-1" />
-          点赞
+        <Button
+          variant={liked ? 'default' : 'outline'}
+          size="sm"
+          onClick={handleLike}
+          disabled={actionLoading !== null}
+        >
+          <ThumbsUp className="mr-1 h-4 w-4" />
+          {liked ? '已点赞' : '点赞'}
         </Button>
 
-        <Button variant="outline" size="sm" onClick={handleDislike}>
-          <ThumbsDown className="h-4 w-4 mr-1" />
-          点踩
+        <Button
+          variant={disliked ? 'destructive' : 'outline'}
+          size="sm"
+          onClick={handleDislike}
+          disabled={actionLoading !== null}
+        >
+          <ThumbsDown className="mr-1 h-4 w-4" />
+          {disliked ? '已点踩' : '点踩'}
         </Button>
 
         <Dialog open={isRatingDialogOpen} onOpenChange={setIsRatingDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="default" size="sm">
-              <Star className="h-4 w-4 mr-1" />
-              评分
+            <Button variant="default" size="sm" disabled={actionLoading !== null}>
+              <Star className="mr-1 h-4 w-4" />
+              {userRating > 0 ? '修改评分' : '评分'}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>为插件评分</DialogTitle>
-              <DialogDescription>分享你的使用体验，帮助其他用户</DialogDescription>
+              <DialogDescription>再次提交会覆盖你之前的评分。</DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-4">
-              {/* 星级评分 */}
               <div className="flex flex-col items-center gap-2">
                 <div className="flex gap-2">
                   {[1, 2, 3, 4, 5].map((star) => (
                     <button
                       key={star}
+                      type="button"
                       onClick={() => setUserRating(star)}
                       className="focus:outline-none"
                     >
@@ -237,18 +282,19 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
                 </span>
               </div>
 
-              {/* 评论 */}
               <div>
-                <label htmlFor="plugin-rating-comment" className="text-sm font-medium mb-2 block">评论（可选）</label>
+                <label htmlFor="plugin-rating-comment" className="mb-2 block text-sm font-medium">
+                  评论（可选）
+                </label>
                 <Textarea
                   value={userComment}
                   id="plugin-rating-comment"
-                  onChange={(e) => setUserComment(e.target.value)}
+                  onChange={(event) => setUserComment(event.target.value)}
                   placeholder="分享你的使用体验..."
                   rows={4}
                   maxLength={500}
                 />
-                <div className="text-xs text-muted-foreground mt-1 text-right">
+                <div className="mt-1 text-right text-xs text-muted-foreground">
                   {userComment.length} / 500
                 </div>
               </div>
@@ -258,22 +304,21 @@ export function PluginStats({ pluginId, compact = false }: PluginStatsProps) {
               <Button variant="outline" onClick={() => setIsRatingDialogOpen(false)}>
                 取消
               </Button>
-              <Button onClick={handleSubmitRating} disabled={userRating === 0}>
-                提交评分
+              <Button onClick={handleSubmitRating} disabled={userRating === 0 || actionLoading !== null}>
+                {actionLoading === 'rating' ? '提交中...' : '提交评分'}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* 最近评价 */}
       {stats.recent_ratings && stats.recent_ratings.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold">最近评价</h4>
           <div className="space-y-3">
             {stats.recent_ratings.map((rating, index) => (
-              <div key={index} className="p-3 rounded-lg border bg-muted/50">
-                <div className="flex items-center justify-between mb-2">
+              <div key={`${rating.user_id}-${rating.created_at}-${index}`} className="rounded-lg border bg-muted/50 p-3">
+                <div className="mb-2 flex items-center justify-between">
                   <div className="flex gap-1">
                     {[1, 2, 3, 4, 5].map((star) => (
                       <Star

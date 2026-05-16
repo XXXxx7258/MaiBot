@@ -28,12 +28,17 @@ import {
   updatePlugin,
   type InstalledPlugin,
 } from '@/lib/plugin-api'
-import { getPluginStatsSummary, recordPluginDownload, type PluginStatsData } from '@/lib/plugin-stats'
+import {
+  getCachedPluginStatsSummary,
+  getPluginStatsSummary,
+  recordPluginDownload,
+  type PluginStatsData,
+} from '@/lib/plugin-stats'
 
 import { InstallDialog } from './InstallDialog'
 import { InstalledTab } from './InstalledTab'
 import { MarketplaceTab } from './MarketplaceTab'
-import type { GitStatus, MaimaiVersion, PluginInfo, PluginLoadProgress } from './types'
+import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress } from './types'
 
 // 主导出组件：包装 RestartProvider
 export function PluginsPage() {
@@ -53,6 +58,7 @@ function PluginsPageContent() {
   )
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
+  const [marketplaceSortBy, setMarketplaceSortBy] = useState<MarketplaceSortKey>('default')
   const [activeTab, setActiveTab] = useState('all')  // all | installed | updates
   const [showCompatibleOnly, setShowCompatibleOnly] = useState(true)  // 默认只显示兼容的
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
@@ -69,6 +75,7 @@ function PluginsPageContent() {
   const [installingPlugin, setInstallingPlugin] = useState<PluginInfo | null>(null)
   
   const { toast } = useToast()
+  const isFetchingMarketplace = loadProgress?.stage === 'loading' && loadProgress.operation === 'fetch'
 
   const dismissRestartNotice = () => {
     localStorage.setItem('plugins-restart-notice-dismissed', 'true')
@@ -118,8 +125,12 @@ function PluginsPageContent() {
 
     const init = async () => {
       const cachedPluginList = getCachedPluginList()
+      const cachedStatsSummary = getCachedPluginStatsSummary()
       if (cachedPluginList?.length && !isUnmounted) {
         setPlugins(cachedPluginList)
+        if (cachedStatsSummary) {
+          setPluginStats(buildPluginStatsMap(cachedPluginList, cachedStatsSummary))
+        }
         setLoading(false)
       }
 
@@ -213,10 +224,7 @@ function PluginsPageContent() {
           
           if (!isUnmounted) {
             // 获取已安装插件列表
-            const [installedResult, statsSummary] = await Promise.all([
-              getInstalledPlugins(),
-              getPluginStatsSummary(),
-            ])
+            const installedResult = await getInstalledPlugins()
             if (!installedResult.success) {
               toast({
                 title: '获取已安装插件失败',
@@ -279,8 +287,20 @@ function PluginsPageContent() {
               }
             }
             
-            setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
+            if (cachedStatsSummary) {
+              setPluginStats(buildPluginStatsMap(mergedData, cachedStatsSummary))
+            }
             setPlugins(mergedData)
+
+            getPluginStatsSummary({ forceRefresh: Boolean(cachedStatsSummary) })
+              .then((statsSummary) => {
+                if (!isUnmounted) {
+                  setPluginStats(buildPluginStatsMap(mergedData, statsSummary))
+                }
+              })
+              .catch((statsError) => {
+                console.warn('刷新插件统计失败:', statsError)
+              })
           }
         } finally {
           if (!isUnmounted) {
@@ -783,20 +803,6 @@ function PluginsPageContent() {
         {/* 搜索和筛选栏 */}
         <Card className="p-4">
           <div className="flex flex-col gap-4">
-            <div className="min-h-11">
-              {loadProgress && loadProgress.stage === 'loading' && loadProgress.operation === 'fetch' && (
-                <div className="flex items-start gap-3 rounded-lg border bg-background/70 px-3 py-2">
-                  <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-muted-foreground" />
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium">加载插件市场</div>
-                    <div className="text-xs text-muted-foreground">
-                      {loadProgress.message || '正在获取插件清单，统计数据将通过轻量摘要接口加载'}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
             <div className="flex flex-col sm:flex-row gap-4">
               {/* 搜索框 */}
               <div className="flex-1 relative">
@@ -826,21 +832,51 @@ function PluginsPageContent() {
                   <SelectItem value="Other">其他</SelectItem>
                 </SelectContent>
               </Select>
+
+              {/* 排序 */}
+              <Select
+                value={marketplaceSortBy}
+                onValueChange={(value) => setMarketplaceSortBy(value as MarketplaceSortKey)}
+              >
+                <SelectTrigger className="w-full sm:w-[160px]">
+                  <SelectValue placeholder="排序" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">推荐排序</SelectItem>
+                  <SelectItem value="downloads">下载最多</SelectItem>
+                  <SelectItem value="likes">点赞最多</SelectItem>
+                  <SelectItem value="rating">评分最高</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             
             {/* 兼容性筛选 */}
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="compatible-only" 
-                checked={showCompatibleOnly}
-                onCheckedChange={(checked) => setShowCompatibleOnly(checked === true)}
-              />
-              <label
-                htmlFor="compatible-only"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-              >
-                只显示兼容当前版本的插件
-              </label>
+            <div className="flex items-center">
+              <div className="relative flex items-center space-x-2">
+                <Checkbox
+                  id="compatible-only"
+                  checked={showCompatibleOnly}
+                  onCheckedChange={(checked) => setShowCompatibleOnly(checked === true)}
+                />
+                <label
+                  htmlFor="compatible-only"
+                  className="cursor-pointer text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  只显示兼容当前版本的插件
+                </label>
+                {isFetchingMarketplace && (
+                  <div
+                    className="absolute top-1/2 left-[calc(100%+0.75rem)] z-10 flex max-w-[34rem] -translate-y-1/2 items-center gap-2 rounded-md border bg-background/85 px-2 py-0.5 text-xs whitespace-nowrap shadow-sm backdrop-blur"
+                    aria-live="polite"
+                  >
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                    <span className="shrink-0 font-medium">加载插件市场</span>
+                    <span className="min-w-0 truncate text-muted-foreground">
+                      {loadProgress.message || '正在获取插件清单'}
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </Card>
@@ -902,6 +938,7 @@ function PluginsPageContent() {
             searchQuery={searchQuery}
             categoryFilter={categoryFilter}
             showCompatibleOnly={showCompatibleOnly}
+            sortBy={marketplaceSortBy}
             gitStatus={gitStatus}
             maimaiVersion={maimaiVersion}
             pluginStats={pluginStats}

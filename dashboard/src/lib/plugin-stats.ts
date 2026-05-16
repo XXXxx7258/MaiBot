@@ -7,6 +7,11 @@
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
 
 const STATS_API_BASE_URL = '/api/webui/plugins/stats-proxy'
+const PLUGIN_STATS_SUMMARY_CACHE_TTL = 5 * 60 * 1000
+const PLUGIN_STATS_SUMMARY_STORAGE_KEY = 'maibot-plugin-stats-summary-cache'
+
+let pluginStatsSummaryCache: { timestamp: number; data: Record<string, PluginStatsData> } | null = null
+let pluginStatsSummaryRequest: Promise<Record<string, PluginStatsData>> | null = null
 
 export interface PluginStatsData {
   plugin_id: string
@@ -30,10 +35,40 @@ export interface StatsResponse {
   [key: string]: unknown
 }
 
+export interface VoteStatsResponse extends StatsResponse {
+  liked?: boolean
+  disliked?: boolean
+  likes?: number
+  dislikes?: number
+}
+
+export interface RatingStatsResponse extends StatsResponse {
+  user_rating?: number
+  rating?: number
+  rating_count?: number
+}
+
+export interface DownloadStatsResponse extends StatsResponse {
+  counted?: boolean
+  downloads?: number
+}
+
+export interface PluginUserState {
+  liked: boolean
+  disliked: boolean
+  rating: number
+  comment: string
+}
+
 interface PluginStatsSummaryResponse {
   success?: boolean
   stats?: Record<string, Partial<PluginStatsData>>
   error?: string
+}
+
+interface PluginStatsSummaryStorageCache {
+  timestamp: number
+  data: Record<string, PluginStatsData>
 }
 
 function createEmptyStats(pluginId: string): PluginStatsData {
@@ -70,6 +105,92 @@ function normalizePluginStatsResponse(data: unknown, pluginId: string): PluginSt
   }
 }
 
+function readPluginStatsSummaryStorageCache(): PluginStatsSummaryStorageCache | null {
+  if (typeof localStorage === 'undefined') {
+    return null
+  }
+
+  try {
+    const rawCache = localStorage.getItem(PLUGIN_STATS_SUMMARY_STORAGE_KEY)
+    if (!rawCache) {
+      return null
+    }
+
+    const cache = JSON.parse(rawCache) as Partial<PluginStatsSummaryStorageCache>
+    if (!cache.timestamp || !cache.data || typeof cache.data !== 'object') {
+      return null
+    }
+
+    return {
+      timestamp: Number(cache.timestamp),
+      data: Object.fromEntries(
+        Object.entries(cache.data).map(([pluginId, stats]) => [
+          pluginId,
+          normalizePluginStatsResponse(stats, pluginId) ?? createEmptyStats(pluginId),
+        ])
+      ),
+    }
+  } catch (error) {
+    console.warn('读取插件统计缓存失败:', error)
+    return null
+  }
+}
+
+function writePluginStatsSummaryStorageCache(data: Record<string, PluginStatsData>): void {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+
+  try {
+    localStorage.setItem(
+      PLUGIN_STATS_SUMMARY_STORAGE_KEY,
+      JSON.stringify({
+        timestamp: Date.now(),
+        data,
+      })
+    )
+  } catch (error) {
+    console.warn('写入插件统计缓存失败:', error)
+  }
+}
+
+function updateCachedPluginStats(pluginId: string, partialStats: Partial<PluginStatsData>): void {
+  const currentCache = pluginStatsSummaryCache ?? readPluginStatsSummaryStorageCache()
+  if (!currentCache) {
+    return
+  }
+
+  const currentStats = currentCache.data[pluginId] ?? createEmptyStats(pluginId)
+  const nextData = {
+    ...currentCache.data,
+    [pluginId]: normalizePluginStatsResponse(
+      {
+        ...currentStats,
+        ...partialStats,
+        plugin_id: pluginId,
+      },
+      pluginId
+    ) ?? currentStats,
+  }
+
+  pluginStatsSummaryCache = { timestamp: Date.now(), data: nextData }
+  writePluginStatsSummaryStorageCache(nextData)
+}
+
+export function getCachedPluginStatsSummary(): Record<string, PluginStatsData> | null {
+  if (pluginStatsSummaryCache) {
+    return pluginStatsSummaryCache.data
+  }
+
+  const storedCache = readPluginStatsSummaryStorageCache()
+  if (!storedCache) {
+    return null
+  }
+
+  pluginStatsSummaryCache = storedCache
+  return storedCache.data
+}
+
 /**
  * 閼惧嘲褰囬幓鎺嶆缂佺喕顓搁弫鐗堝祦
  */
@@ -91,7 +212,7 @@ export async function getPluginStats(pluginId: string): Promise<PluginStatsData 
 
 /**
  * 閼惧嘲褰囬幓鎺嶆鐢倸婧€閻ㄥ嫯浜ら柌蹇曠埠鐠佲剝鎲崇憰渚婄礄娑撳秴瀵橀崥顐ョ槑鐠佺尨绱氶妴? */
-export async function getPluginStatsSummary(): Promise<Record<string, PluginStatsData>> {
+async function fetchPluginStatsSummaryUncached(): Promise<Record<string, PluginStatsData>> {
   try {
     const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/summary`)
 
@@ -117,11 +238,78 @@ export async function getPluginStatsSummary(): Promise<Record<string, PluginStat
   }
 }
 
+export async function getPluginUserState(
+  pluginId: string,
+  userId: string = getUserId()
+): Promise<PluginUserState | null> {
+  try {
+    const queryParams = new URLSearchParams({
+      plugin_id: pluginId,
+      user_id: userId,
+    })
+    const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/user-state?${queryParams}`)
+
+    if (!response.ok) {
+      console.error('Failed to fetch plugin user state:', response.statusText)
+      return null
+    }
+
+    const data = await response.json() as Partial<PluginUserState> & { success?: boolean }
+    if (data.success === false) {
+      return null
+    }
+
+    return {
+      liked: data.liked === true,
+      disliked: data.disliked === true,
+      rating: Number(data.rating ?? 0),
+      comment: typeof data.comment === 'string' ? data.comment : '',
+    }
+  } catch (error) {
+    console.error('Error fetching plugin user state:', error)
+    return null
+  }
+}
+
+export async function getPluginStatsSummary(
+  options: { forceRefresh?: boolean } = {}
+): Promise<Record<string, PluginStatsData>> {
+  if (
+    !options.forceRefresh
+    && pluginStatsSummaryCache
+    && Date.now() - pluginStatsSummaryCache.timestamp < PLUGIN_STATS_SUMMARY_CACHE_TTL
+  ) {
+    return pluginStatsSummaryCache.data
+  }
+
+  if (!options.forceRefresh && !pluginStatsSummaryCache) {
+    const storedCache = readPluginStatsSummaryStorageCache()
+    if (storedCache && Date.now() - storedCache.timestamp < PLUGIN_STATS_SUMMARY_CACHE_TTL) {
+      pluginStatsSummaryCache = storedCache
+      return storedCache.data
+    }
+  }
+
+  if (!pluginStatsSummaryRequest || options.forceRefresh) {
+    pluginStatsSummaryRequest = fetchPluginStatsSummaryUncached()
+      .then((data) => {
+        pluginStatsSummaryCache = { timestamp: Date.now(), data }
+        writePluginStatsSummaryStorageCache(data)
+        return data
+      })
+      .finally(() => {
+        pluginStatsSummaryRequest = null
+      })
+  }
+
+  return pluginStatsSummaryRequest
+}
+
 
 /**
  * 閻愮绂愰幓鎺嶆
  */
-export async function likePlugin(pluginId: string, userId?: string): Promise<StatsResponse> {
+export async function likePlugin(pluginId: string, userId?: string): Promise<VoteStatsResponse> {
   try {
     const finalUserId = userId || getUserId()
     
@@ -143,7 +331,12 @@ export async function likePlugin(pluginId: string, userId?: string): Promise<Sta
       return { success: false, error: data.error || '閻愮绂愭径杈Е' }
     }
     
-    return { success: true, ...data }
+    const result: VoteStatsResponse = { success: true, ...data }
+    updateCachedPluginStats(pluginId, {
+      likes: Number(result.likes ?? 0),
+      dislikes: Number(result.dislikes ?? 0),
+    })
+    return result
   } catch (error) {
     console.error('Error liking plugin:', error)
     return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
@@ -153,7 +346,7 @@ export async function likePlugin(pluginId: string, userId?: string): Promise<Sta
 /**
  * 閻愮淇幓鎺嶆
  */
-export async function dislikePlugin(pluginId: string, userId?: string): Promise<StatsResponse> {
+export async function dislikePlugin(pluginId: string, userId?: string): Promise<VoteStatsResponse> {
   try {
     const finalUserId = userId || getUserId()
     
@@ -175,7 +368,12 @@ export async function dislikePlugin(pluginId: string, userId?: string): Promise<
       return { success: false, error: data.error || '閻愮淇径杈Е' }
     }
     
-    return { success: true, ...data }
+    const result: VoteStatsResponse = { success: true, ...data }
+    updateCachedPluginStats(pluginId, {
+      likes: Number(result.likes ?? 0),
+      dislikes: Number(result.dislikes ?? 0),
+    })
+    return result
   } catch (error) {
     console.error('Error disliking plugin:', error)
     return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
@@ -190,7 +388,7 @@ export async function ratePlugin(
   rating: number,
   comment?: string,
   userId?: string
-): Promise<StatsResponse> {
+): Promise<RatingStatsResponse> {
   if (rating < 1 || rating > 5) {
     return { success: false, error: '评分必须在 1-5 之间' }
   }
@@ -216,7 +414,12 @@ export async function ratePlugin(
       return { success: false, error: data.error || '鐠囧嫬鍨庢径杈Е' }
     }
     
-    return { success: true, ...data }
+    const result: RatingStatsResponse = { success: true, ...data }
+    updateCachedPluginStats(pluginId, {
+      rating: Number(result.rating ?? 0),
+      rating_count: Number(result.rating_count ?? 0),
+    })
+    return result
   } catch (error) {
     console.error('Error rating plugin:', error)
     return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
@@ -226,14 +429,16 @@ export async function ratePlugin(
 /**
  * 鐠佹澘缍嶉幓鎺嶆娑撳娴?
  */
-export async function recordPluginDownload(pluginId: string): Promise<StatsResponse> {
+export async function recordPluginDownload(pluginId: string): Promise<DownloadStatsResponse> {
   try {
+    const userId = getUserId()
+    const fingerprint = generateUserFingerprint()
     const response = await fetchWithAuth(`${STATS_API_BASE_URL}/stats/download`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ plugin_id: pluginId }),
+      body: JSON.stringify({ plugin_id: pluginId, user_id: userId, fingerprint }),
     })
     
     const data = await response.json()
@@ -249,7 +454,11 @@ export async function recordPluginDownload(pluginId: string): Promise<StatsRespo
       return { success: false, error: data.error }
     }
     
-    return { success: true, ...data }
+    const result: DownloadStatsResponse = { success: true, ...data }
+    if (typeof result.downloads === 'number') {
+      updateCachedPluginStats(pluginId, { downloads: result.downloads })
+    }
+    return result
   } catch (error) {
     console.error('Error recording download:', error)
     return { success: false, error: '缂冩垹绮堕柨娆掝嚖' }
