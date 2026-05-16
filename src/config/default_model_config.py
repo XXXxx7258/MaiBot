@@ -24,6 +24,7 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
         "temperature": 0.5,
         "slow_threshold": 15.0,
         "selection_strategy": "random",
+        "hard_timeout": 60.0,
     },
     "memory": {
         "model_list": [],
@@ -31,6 +32,7 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
         "temperature": 0.5,
         "slow_threshold": 30.0,
         "selection_strategy": "random",
+        "hard_timeout": 180.0,
     },
     "replyer": {
         "model_list": ["deepseek-v4-pro-think", "deepseek-v4-pro-nonthink"],
@@ -38,6 +40,7 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
         "temperature": 1,
         "slow_threshold": 120.0,
         "selection_strategy": "random",
+        "hard_timeout": 180.0,
     },
     "planner": {
         "model_list": ["deepseek-v4-flash"],
@@ -45,7 +48,13 @@ DEFAULT_TASK_CONFIG_TEMPLATES: dict[str, dict[str, Any]] = {
         "temperature": 0.7,
         "slow_threshold": 12.0,
         "selection_strategy": "random",
+        "hard_timeout": 120.0,
     },
+    "learner": {"hard_timeout": 60.0},
+    "emoji": {"hard_timeout": 60.0},
+    "vlm": {"hard_timeout": 180.0},
+    "voice": {"hard_timeout": 60.0},
+    "embedding": {"hard_timeout": 30.0},
 }
 
 DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
@@ -75,7 +84,7 @@ DEFAULT_MODEL_TEMPLATES: list[dict[str, Any]] = [
         "price_out": 2.0,
         "visual": False,
         "extra_params": {"enable_thinking": "false"},
-    }
+    },
 ]
 
 

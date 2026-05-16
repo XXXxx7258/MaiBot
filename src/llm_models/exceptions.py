@@ -90,3 +90,21 @@ class ModelAttemptFailed(Exception):
 
     def __str__(self):
         return self.message
+
+
+class LLMTaskTimeoutError(ModelAttemptFailed):
+    """任务级 hard_timeout 触发的异常。
+
+    继承 ModelAttemptFailed 以复用调度器的“切到下一个模型”链路：当任务级硬超时被触发，
+    `asyncio.wait_for` 会取消正在进行中的模型尝试，外层 `_execute_request` 会接住此异常
+    并继续尝试任务 model_list 中的其它模型。若所有模型都触发超时，最终上抛给调用方。
+    """
+
+    def __init__(self, task_name: str, model_name: str, timeout_s: float):
+        super().__init__(
+            f"任务 '{task_name}' 模型 '{model_name}' 触发硬超时 {timeout_s}s",
+            original_exception=None,
+        )
+        self.task_name = task_name
+        self.model_name = model_name
+        self.timeout_s = timeout_s

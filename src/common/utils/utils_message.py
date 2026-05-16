@@ -11,6 +11,8 @@ import msgpack
 import random
 import re
 
+import asyncio
+
 from src.common.data_models.message_component_data_model import (
     AtComponent,
     DictComponent,
@@ -192,6 +194,16 @@ class MessageUtils:
             session.add(db_message)
 
     @staticmethod
+    async def store_message_to_db_async(message: "SessionMessage") -> None:
+        """异步存储消息到数据库（事件循环不阻塞版本）。
+
+        内部走线程池跑同步 SQLAlchemy session，与 chat_manager.save_all_sessions 同模式，
+        避免在 async 上下文里裸调 sync DB 操作导致主事件循环被卡，进而引发
+        host.route_message / plugin.health 链路超时。
+        """
+        await asyncio.to_thread(MessageUtils.store_message_to_db, message)
+
+    @staticmethod
     def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
         """将消息中仍携带二进制数据的图片组件保存到图片库。"""
         from src.common.database.database_model import Images, ImageType
@@ -204,7 +216,9 @@ class MessageUtils:
                     MessageUtils._persist_image_components(forward_component.content, session)
 
     @staticmethod
-    def _persist_image_component(component: ImageComponent, session: Any, images_model: Any, image_type_model: Any) -> None:
+    def _persist_image_component(
+        component: ImageComponent, session: Any, images_model: Any, image_type_model: Any
+    ) -> None:
         """保存图片文件和图片库记录，确保后续可以通过消息 hash 回读原图。"""
         if not component.binary_data:
             return
@@ -297,9 +311,7 @@ class MessageUtils:
                 )
                 return False
 
-            source_messages = session.exec(
-                select(Messages).filter_by(message_id=normalized_old_message_id)
-            ).all()
+            source_messages = session.exec(select(Messages).filter_by(message_id=normalized_old_message_id)).all()
             if not source_messages:
                 return False
 
@@ -307,9 +319,7 @@ class MessageUtils:
                 source_message.message_id = normalized_new_message_id
                 session.add(source_message)
 
-            reply_target_messages = session.exec(
-                select(Messages).filter_by(reply_to=normalized_old_message_id)
-            ).all()
+            reply_target_messages = session.exec(select(Messages).filter_by(reply_to=normalized_old_message_id)).all()
             for reply_target_message in reply_target_messages:
                 reply_target_message.reply_to = normalized_new_message_id
                 session.add(reply_target_message)

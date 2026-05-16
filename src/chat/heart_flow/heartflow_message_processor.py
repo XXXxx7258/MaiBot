@@ -56,7 +56,7 @@ class HeartFCMessageReceiver:
             # message.is_mentioned = is_mentioned
             # message.is_at = is_at
 
-            MessageUtils.store_message_to_db(message)  # 存储消息到数据库
+            await MessageUtils.store_message_to_db_async(message)  # 存储消息到数据库
             try:
                 chat = await heartflow_manager.get_or_create_heartflow_chat(message.session_id)
                 await chat.register_message(message)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 发送服务模块。
 
 统一封装内部模块的出站消息发送逻辑：
@@ -331,9 +331,7 @@ def _build_message_sequence_from_custom_message(
         return MessageSequence(components=[TextComponent(text=str(content))])
 
     if normalized_type in {"image", "emoji", "voice"}:
-        return MessageSequence(
-            components=[_build_binary_component_from_base64(normalized_type, str(content))]
-        )
+        return MessageSequence(components=[_build_binary_component_from_base64(normalized_type, str(content))])
 
     if normalized_type == "at":
         return MessageSequence(components=[AtComponent(target_user_id=str(content))])
@@ -571,7 +569,9 @@ def _build_outbound_session_message(
     )
     outbound_message.raw_message = _clone_message_sequence(message_sequence)
     outbound_message.session_id = target_stream.session_id
-    outbound_message.processed_plain_text = processed_plain_text.strip() or _build_processed_plain_text(outbound_message)
+    outbound_message.processed_plain_text = processed_plain_text.strip() or _build_processed_plain_text(
+        outbound_message
+    )
     outbound_message.reply_to = anchor_message.message_id if anchor_message is not None else None
     message_flags = _detect_outbound_message_flags(outbound_message.raw_message)
     outbound_message.is_emoji = message_flags["is_emoji"]
@@ -629,13 +629,13 @@ async def _prepare_message_for_platform_io(
         await asyncio.sleep(typing_time)
 
 
-def _store_sent_message(message: SessionMessage) -> None:
+async def _store_sent_message(message: SessionMessage) -> None:
     """将已成功发送的消息写入数据库。
 
     Args:
         message: 已成功发送的内部消息对象。
     """
-    MessageUtils.store_message_to_db(message)
+    await MessageUtils.store_message_to_db_async(message)
 
 
 async def _apply_successful_delivery_receipt(message: SessionMessage, delivery_batch: DeliveryBatch) -> None:
@@ -736,10 +736,13 @@ def _log_platform_io_failures(delivery_batch: DeliveryBatch) -> None:
     Args:
         delivery_batch: Platform IO 返回的批量回执。
     """
-    failed_details = "; ".join(
-        f"driver={receipt.driver_id} status={receipt.status} error={receipt.error}"
-        for receipt in delivery_batch.failed_receipts
-    ) or "未命中任何发送路由"
+    failed_details = (
+        "; ".join(
+            f"driver={receipt.driver_id} status={receipt.status} error={receipt.error}"
+            for receipt in delivery_batch.failed_receipts
+        )
+        or "未命中任何发送路由"
+    )
     logger.warning(f"[SendService] Platform IO 发送失败: platform={delivery_batch.route_key.platform} {failed_details}")
 
 
@@ -834,13 +837,10 @@ async def _send_via_platform_io(
 
     if delivery_batch.has_success:
         if storage_message:
-            _store_sent_message(message)
+            await _store_sent_message(message)
         await _notify_memory_automation_on_message_sent(message)
         if show_log:
-            successful_driver_ids = [
-                receipt.driver_id or "unknown"
-                for receipt in delivery_batch.sent_receipts
-            ]
+            successful_driver_ids = [receipt.driver_id or "unknown" for receipt in delivery_batch.sent_receipts]
             logger.info(
                 f"[SendService] 已通过 Platform IO 将消息发往平台 '{route_key.platform}' "
                 f"(drivers: {', '.join(successful_driver_ids)}) "

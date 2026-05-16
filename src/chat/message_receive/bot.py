@@ -351,14 +351,14 @@ class ChatBot:
         message.message_info.additional_config["intercept_message_level"] = intercept_message_level
 
     @staticmethod
-    def _store_intercepted_command_message(message: SessionMessage) -> None:
+    async def _store_intercepted_command_message(message: SessionMessage) -> None:
         """将被命令链拦截的消息写入数据库。
 
         Args:
             message: 已完成命令处理的会话消息。
         """
 
-        MessageUtils.store_message_to_db(message)
+        await MessageUtils.store_message_to_db_async(message)
 
     async def _handle_command_processing_result(
         self,
@@ -380,7 +380,7 @@ class ChatBot:
         if continue_process:
             return False
 
-        self._store_intercepted_command_message(message)
+        await self._store_intercepted_command_message(message)
         logger.info(f"命令处理完成，跳过后续消息处理: {cmd_result}")
         return True
 
@@ -479,8 +479,7 @@ class ChatBot:
             return
 
         logger.debug(
-            "收到回送消息 ID，但未找到可回填的本地消息: "
-            f"{normalized_mmc_message_id} -> {normalized_actual_message_id}"
+            f"收到回送消息 ID，但未找到可回填的本地消息: {normalized_mmc_message_id} -> {normalized_actual_message_id}"
         )
 
     async def message_process(self, message_data: Dict[str, Any]) -> None:
