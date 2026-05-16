@@ -21,10 +21,6 @@ export function NavItem({ item, sidebarOpen, tooltipsEnabled, onMobileMenuClose 
 
   const menuItemContent = (
     <>
-      {/* 左侧高亮条 */}
-      {isActive && (
-        <div className="absolute left-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity duration-300" />
-      )}
       <div className={cn(
         'flex items-center transition-all duration-300',
         sidebarOpen ? 'gap-3' : 'gap-3 lg:gap-0'
