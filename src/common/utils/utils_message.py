@@ -12,7 +12,7 @@ import random
 import re
 
 import asyncio
-import functools
+import threading
 
 from src.common.data_models.message_component_data_model import (
     AtComponent,
@@ -39,16 +39,14 @@ if TYPE_CHECKING:
 logger = get_logger("message_utils")
 
 
-# 串行化 store_message_to_db_async / update_message_id_async 的写入：
-# 底层 SQLite WAL 仅允许单写，busy_timeout 1s，突发流量下多个 to_thread worker
-# 并发写会撞写锁触发 `database is locked`。
-# 用 functools.lru_cache 实现单例：首次调用时创建（此时 event loop 已存在），
-# CPython 内部用 thread lock 保证 lazy init 线程安全。
-# 假设：MaiBot 是单进程单 event loop 应用；多 loop 场景下 lock 仍绑定首次调用所在 loop，
-# 跨 loop 复用会 RuntimeError。如果未来引入多 loop 需求需改用 per-loop registry。
-@functools.lru_cache(maxsize=None)
-def _get_db_write_lock() -> asyncio.Lock:
-    return asyncio.Lock()
+# 串行化 store_message_to_db_async / update_message_id_async 的 SQLite 写入：
+# 底层 SQLite WAL 仅允许单写，busy_timeout 1s。bot 进程不只一个 event loop
+# （bot.py 主 loop、WebUI 在另一个线程的独立 loop、临时 asyncio.run 调用等），
+# 因此 lock 必须是进程级的 threading.Lock 而不是 asyncio.Lock；后者只能互斥
+# 同一个 loop 内的协程，跨 loop / 跨线程时形同虚设。
+# threading.Lock 不依赖 event loop，可在 to_thread worker 线程里同步持有，
+# 保证任意 loop / 任意线程的 SQLite 写都被串行化。
+_DB_WRITE_THREAD_LOCK = threading.Lock()
 
 
 class MessageUtils:
@@ -210,13 +208,17 @@ class MessageUtils:
     async def store_message_to_db_async(message: "SessionMessage") -> None:
         """异步存储消息到数据库。
 
-        通过 `_get_db_write_lock()` 把多个并发协程的写入排队串行执行：底层是 SQLite WAL，
-        busy_timeout 仅 1s，若不加串行化、多个 `to_thread` worker 同时拿写锁，
-        突发消息流量下会触发 `database is locked`。在持有锁后再 `to_thread`
-        跑同步 SQLAlchemy session，仍然把阻塞工作移出事件循环。
+        通过 `_DB_WRITE_THREAD_LOCK` 在 `to_thread` worker 内部以同步方式串行化
+        SQLite 写入：底层 SQLite WAL 仅允许单写、busy_timeout 1s，跨 loop / 跨线程
+        并发写会撞写锁触发 `database is locked`；threading.Lock 是进程级互斥，
+        与触发写的协程位于哪个 event loop 无关。
         """
-        async with _get_db_write_lock():
-            await asyncio.to_thread(MessageUtils.store_message_to_db, message)
+
+        def _do_locked_write() -> None:
+            with _DB_WRITE_THREAD_LOCK:
+                MessageUtils.store_message_to_db(message)
+
+        await asyncio.to_thread(_do_locked_write)
 
     @staticmethod
     def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
@@ -345,11 +347,15 @@ class MessageUtils:
     async def update_message_id_async(old_message_id: str, new_message_id: str) -> bool:
         """异步回填消息 ID。
 
-        与 `store_message_to_db_async` 共用 `_get_db_write_lock()` 串行化 SQLite 写入，
-        避免在 async 上下文中裸调同步 SQLAlchemy session 阻塞事件循环。
+        与 `store_message_to_db_async` 共用 `_DB_WRITE_THREAD_LOCK`，保证整个进程
+        内任意 loop / 任意线程发起的 SQLite 写都串行执行。
         """
-        async with _get_db_write_lock():
-            return await asyncio.to_thread(MessageUtils.update_message_id, old_message_id, new_message_id)
+
+        def _do_locked_update() -> bool:
+            with _DB_WRITE_THREAD_LOCK:
+                return MessageUtils.update_message_id(old_message_id, new_message_id)
+
+        return await asyncio.to_thread(_do_locked_update)
 
     @staticmethod
     async def build_readable_message(
