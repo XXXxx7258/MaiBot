@@ -1,4 +1,4 @@
-import type { GitStatus, MaimaiVersion, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
+import type { GitStatus, MaimaiVersion, MarketplaceSortKey, PluginInfo, PluginLoadProgress, PluginStatsData } from './types'
 import { PluginCard } from './PluginCard'
 
 interface MarketplaceTabProps {
@@ -6,6 +6,7 @@ interface MarketplaceTabProps {
   searchQuery: string
   categoryFilter: string
   showCompatibleOnly: boolean
+  sortBy: MarketplaceSortKey
   gitStatus: GitStatus | null
   maimaiVersion: MaimaiVersion | null
   pluginStats: Record<string, PluginStatsData>
@@ -24,6 +25,7 @@ export function MarketplaceTab({
   searchQuery,
   categoryFilter,
   showCompatibleOnly,
+  sortBy,
   gitStatus,
   maimaiVersion,
   pluginStats,
@@ -37,6 +39,41 @@ export function MarketplaceTab({
   getIncompatibleReason,
 }: MarketplaceTabProps) {
   // 过滤插件
+  const getPluginStats = (plugin: PluginInfo): PluginStatsData | undefined => {
+    const statsIds = [
+      plugin.manifest?.id,
+      plugin.id,
+    ].filter((id): id is string => Boolean(id))
+
+    return statsIds.map((id) => pluginStats[id]).find(Boolean)
+  }
+
+  const getSortValue = (plugin: PluginInfo): number => {
+    const stats = getPluginStats(plugin)
+
+    if (sortBy === 'default') {
+      const downloads = stats?.downloads ?? plugin.downloads ?? 0
+      const likes = stats?.likes ?? 0
+      const rating = stats?.rating ?? plugin.rating ?? 0
+      const ratingCount = stats?.rating_count ?? 0
+
+      return Math.log10(downloads + 1) * 4
+        + Math.log10(likes + 1) * 3
+        + rating * Math.log10(ratingCount + 2) * 2
+    }
+    if (sortBy === 'downloads') {
+      return stats?.downloads ?? plugin.downloads ?? 0
+    }
+    if (sortBy === 'likes') {
+      return stats?.likes ?? 0
+    }
+    if (sortBy === 'rating') {
+      return stats?.rating ?? plugin.rating ?? 0
+    }
+
+    return 0
+  }
+
   const filteredPlugins = plugins.filter(plugin => {
     // 跳过没有 manifest 的插件
     if (!plugin.manifest) {
@@ -65,6 +102,13 @@ export function MarketplaceTab({
       checkPluginCompatibility(plugin)
     
     return matchesSearch && matchesCategory && matchesCompatibility
+  }).sort((left, right) => {
+    const valueDiff = getSortValue(right) - getSortValue(left)
+    if (valueDiff !== 0) {
+      return valueDiff
+    }
+
+    return (left.manifest?.name || left.id).localeCompare(right.manifest?.name || right.id)
   })
 
   return (

@@ -2,6 +2,7 @@
  * 表达方式管理 API
  */
 import { fetchWithAuth } from '@/lib/fetch-with-auth'
+import { formatApiError } from '@/lib/api-error'
 import type {
   BatchReviewItem,
   BatchReviewResponse,
@@ -46,7 +47,7 @@ export async function getChatList(params: { include_legacy?: boolean } = {}): Pr
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取聊天列表失败',
+        error: formatApiError(errorData, '获取聊天列表失败'),
       }
     } catch {
       return {
@@ -92,7 +93,7 @@ export async function getExpressionChatTargets(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取导入目标聊天流失败',
+        error: formatApiError(errorData, '获取导入目标聊天流失败'),
       }
     } catch {
       return {
@@ -137,7 +138,7 @@ export async function getExpressionGroups(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取表达互通组失败',
+        error: formatApiError(errorData, '获取表达互通组失败'),
       }
     } catch {
       return {
@@ -196,7 +197,7 @@ export async function getExpressionList(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取表达方式列表失败',
+        error: formatApiError(errorData, '获取表达方式列表失败'),
       }
     } catch {
       return {
@@ -244,7 +245,7 @@ export async function exportExpressions(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '导出表达方式失败',
+        error: formatApiError(errorData, '导出表达方式失败'),
       }
     } catch {
       return {
@@ -285,7 +286,7 @@ export async function importExpressions(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '导入表达方式失败',
+        error: formatApiError(errorData, '导入表达方式失败'),
       }
     } catch {
       return {
@@ -325,7 +326,7 @@ export async function clearExpressions(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '清除表达方式失败',
+        error: formatApiError(errorData, '清除表达方式失败'),
       }
     } catch {
       return {
@@ -365,7 +366,7 @@ export async function previewLegacyExpressionImport(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '预览旧版导入失败',
+        error: formatApiError(errorData, '预览旧版导入失败'),
       }
     } catch {
       return {
@@ -407,7 +408,7 @@ export async function previewLegacyExpressionImportFile(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '预览旧版导入失败',
+        error: formatApiError(errorData, '预览旧版导入失败'),
       }
     } catch {
       return {
@@ -448,7 +449,7 @@ export async function importLegacyExpressions(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '旧版导入失败',
+        error: formatApiError(errorData, '旧版导入失败'),
       }
     } catch {
       return {
@@ -485,7 +486,7 @@ export async function getExpressionDetail(expressionId: number): Promise<ApiResp
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取表达方式详情失败',
+        error: formatApiError(errorData, '获取表达方式详情失败'),
       }
     } catch {
       return {
@@ -533,7 +534,7 @@ export async function createExpression(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '创建表达方式失败',
+        error: formatApiError(errorData, '创建表达方式失败'),
       }
     } catch {
       return {
@@ -582,7 +583,7 @@ export async function updateExpression(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '更新表达方式失败',
+        error: formatApiError(errorData, '更新表达方式失败'),
       }
     } catch {
       return {
@@ -627,7 +628,7 @@ export async function deleteExpression(expressionId: number): Promise<ApiRespons
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '删除表达方式失败',
+        error: formatApiError(errorData, '删除表达方式失败'),
       }
     } catch {
       return {
@@ -673,7 +674,7 @@ export async function batchDeleteExpressions(expressionIds: number[]): Promise<A
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '批量删除表达方式失败',
+        error: formatApiError(errorData, '批量删除表达方式失败'),
       }
     } catch {
       return {
@@ -719,7 +720,7 @@ export async function getExpressionStats(params: { include_legacy?: boolean } = 
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取统计数据失败',
+        error: formatApiError(errorData, '获取统计数据失败'),
       }
     } catch {
       return {
@@ -763,7 +764,7 @@ export async function getReviewStats(): Promise<ApiResponse<ReviewStats>> {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取审核统计失败',
+        error: formatApiError(errorData, '获取审核统计失败'),
       }
     } catch {
       return {
@@ -816,7 +817,7 @@ export async function getReviewList(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取审核列表失败',
+        error: formatApiError(errorData, '获取审核列表失败'),
       }
     } catch {
       return {
@@ -863,7 +864,7 @@ export async function batchReviewExpressions(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '批量审核失败',
+        error: formatApiError(errorData, '批量审核失败'),
       }
     } catch {
       return {
@@ -909,7 +910,7 @@ export async function getExpressionReviewLogs(params: {
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '获取 AI 审核记录失败',
+        error: formatApiError(errorData, '获取 AI 审核记录失败'),
       }
     } catch {
       return {
@@ -945,7 +946,7 @@ export async function approveExpressionReviewLog(
       const errorData = await response.json()
       return {
         success: false,
-        error: errorData.detail || errorData.message || '恢复表达方式失败',
+        error: formatApiError(errorData, '恢复表达方式失败'),
       }
     } catch {
       return {

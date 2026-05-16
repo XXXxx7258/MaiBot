@@ -15,4 +15,6 @@ export const CATEGORY_NAMES: Record<string, string> = {
 }
 
 // 导出类型
+export type MarketplaceSortKey = 'default' | 'downloads' | 'likes' | 'rating'
+
 export type { PluginInfo, GitStatus, MaimaiVersion, PluginLoadProgress, PluginStatsData }

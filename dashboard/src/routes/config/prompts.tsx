@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Eye, FileText, Loader2, RefreshCw, RotateCcw, Save, Search, SlidersHorizontal } from 'lucide-react'
+import { Eye, Loader2, RefreshCw, RotateCcw, Save, Search, SlidersHorizontal } from 'lucide-react'
 
 import { CodeEditor } from '@/components/CodeEditor'
 import { Badge } from '@/components/ui/badge'
@@ -252,7 +252,6 @@ export function PromptManagementPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl md:text-3xl">Prompt 管理</h1>
-          <p className="mt-1 text-sm text-muted-foreground">编辑 prompts 目录下不同语言的系统提示词模板</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={language} onValueChange={handleLanguageChange} disabled={loadingCatalog}>
@@ -265,9 +264,15 @@ export function PromptManagementPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" size="sm" onClick={() => void loadCatalog()} disabled={loadingCatalog}>
-            <RefreshCw className={cn('mr-2 h-4 w-4', loadingCatalog && 'animate-spin')} />
-            刷新
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => void loadCatalog()}
+            disabled={loadingCatalog}
+            title="刷新"
+            aria-label="刷新"
+          >
+            <RefreshCw className={cn('h-4 w-4', loadingCatalog && 'animate-spin')} />
           </Button>
           <Button
             variant={showAdvancedPrompts ? 'default' : 'outline'}
@@ -276,24 +281,6 @@ export function PromptManagementPage() {
           >
             <SlidersHorizontal className="mr-2 h-4 w-4" />
             {showAdvancedPrompts ? '隐藏高级' : '显示高级'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleReset}
-            disabled={!isCustomized || resetting || loadingFile || !filename}
-          >
-            <RotateCcw className={cn('mr-2 h-4 w-4', resetting && 'animate-spin')} />
-            恢复默认
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleShowDefault}
-            disabled={loadingDefaultPrompt || loadingFile || !filename}
-          >
-            <Eye className={cn('mr-2 h-4 w-4', loadingDefaultPrompt && 'animate-pulse')} />
-            查看默认
           </Button>
           <Button size="sm" onClick={handleSave} disabled={!hasUnsavedChanges || saving || loadingFile || !filename}>
             <Save className="mr-2 h-4 w-4" />
@@ -304,20 +291,18 @@ export function PromptManagementPage() {
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <Card className="flex min-h-0 flex-col overflow-hidden">
-          <CardHeader className="shrink-0 space-y-3 pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <FileText className="h-4 w-4" />
-              Prompt 文件
-              <Badge variant="secondary" className="ml-auto">{filteredFiles.length}</Badge>
-            </CardTitle>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索文件"
-                className="pl-8"
-              />
+          <CardHeader className="shrink-0 pb-3">
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="shrink-0">{filteredFiles.length}</Badge>
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索"
+                  className="pl-8"
+                />
+              </div>
             </div>
           </CardHeader>
           <Separator />
@@ -347,7 +332,7 @@ export function PromptManagementPage() {
                       {file.advanced && <Badge variant="outline" className="shrink-0 text-[10px]">高级</Badge>}
                       {file.customized && <Badge variant="secondary" className="shrink-0 text-[10px]">自定义</Badge>}
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-muted-foreground">{file.name} · {formatFileSize(file.size)}</div>
+                    <div className="mt-0.5 truncate text-xs text-muted-foreground">{file.name}</div>
                     {file.description && (
                       <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{file.description}</div>
                     )}
@@ -361,7 +346,7 @@ export function PromptManagementPage() {
         </Card>
 
         <Card className="min-h-0 overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 truncate text-sm">
                 <span className="truncate">{selectedFile?.display_name || filename || '未选择文件'}</span>
@@ -376,6 +361,26 @@ export function PromptManagementPage() {
               {selectedFile?.description && (
                 <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{selectedFile.description}</p>
               )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReset}
+                disabled={!isCustomized || resetting || loadingFile || !filename}
+              >
+                <RotateCcw className={cn('mr-2 h-4 w-4', resetting && 'animate-spin')} />
+                恢复默认
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleShowDefault}
+                disabled={loadingDefaultPrompt || loadingFile || !filename}
+              >
+                <Eye className={cn('mr-2 h-4 w-4', loadingDefaultPrompt && 'animate-pulse')} />
+                查看默认
+              </Button>
             </div>
           </CardHeader>
           <CardContent className="min-h-0 p-0">

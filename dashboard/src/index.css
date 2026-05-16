@@ -136,15 +136,15 @@
 @layer base {
   :root {
     /* Color Tokens */
-    --color-primary: 35 100% 45.1%;
+    --color-primary: 28.9 94.8% 45.1%;
     --color-primary-foreground: 210 40% 98%;
     --color-primary-gradient: none;
     --color-secondary: 188.5 35% 96%;
     --color-secondary-foreground: 222.2 47.4% 11.2%;
     --color-muted: 188.5 12% 96%;
     --color-muted-foreground: 188.5 20% 46.9%;
-    --color-accent: 223.5 60% 50.4%;
-    --color-accent-foreground: 222.2 47.4% 11.2%;
+    --color-accent: 112.7 40.2% 47.8%;
+    --color-accent-foreground: 210 40% 98%;
     --color-destructive: 0 84.2% 45%;
     --color-destructive-foreground: 210 40% 98%;
     --color-background: 0 0% 100%;
@@ -155,8 +155,8 @@
     --color-popover-foreground: 222.2 84% 4.9%;
     --color-border: 188.5 20% 91.4%;
     --color-input: 188.5 20% 91.4%;
-    --color-ring: 35 100% 45.1%;
-    --color-chart-1: 35 100% 45.1%;
+    --color-ring: 28.9 94.8% 45.1%;
+    --color-chart-1: 28.9 94.8% 45.1%;
     --color-chart-2: 160 60% 45%;
     --color-chart-3: 30 80% 55%;
     --color-chart-4: 280 65% 60%;
@@ -254,14 +254,14 @@
 
   .dark {
     /* Color Tokens */
-    --color-primary: 35 100% 45.1%;
+    --color-primary: 28.9 94.8% 45.1%;
     --color-primary-foreground: 210 40% 98%;
     --color-primary-gradient: none;
     --color-secondary: 188.5 35% 17.5%;
     --color-secondary-foreground: 210 40% 98%;
     --color-muted: 188.5 12% 17.5%;
     --color-muted-foreground: 188.5 20% 65.1%;
-    --color-accent: 223.5 60% 35.3%;
+    --color-accent: 112.7 40.2% 34%;
     --color-accent-foreground: 210 40% 98%;
     --color-destructive: 0 62.8% 30.6%;
     --color-destructive-foreground: 210 40% 98%;
@@ -273,8 +273,8 @@
     --color-popover-foreground: 210 40% 98%;
     --color-border: 188.5 20% 17.5%;
     --color-input: 188.5 20% 17.5%;
-    --color-ring: 35 100% 45.1%;
-    --color-chart-1: 35 100% 45.1%;
+    --color-ring: 28.9 94.8% 45.1%;
+    --color-chart-1: 28.9 94.8% 45.1%;
     --color-chart-2: 160 60% 50%;
     --color-chart-3: 30 80% 60%;
     --color-chart-4: 280 65% 65%;

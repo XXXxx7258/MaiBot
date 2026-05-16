@@ -50,6 +50,11 @@ export type ReasoningPromptListResponse = {
   selected_session: string
 }
 
+export type ReasoningPromptStagesResponse = {
+  stages: string[]
+  stage_infos: ReasoningPromptStageInfo[]
+}
+
 export type ReasoningPromptContentResponse = {
   path: string
   content: string
@@ -77,6 +82,11 @@ export async function listReasoningPromptFiles(
 
   const response = await fetchWithAuth(`${API_BASE}/files?${queryParams}`, { cache: 'no-store' })
   return throwIfError(await parseResponse<ReasoningPromptListResponse>(response))
+}
+
+export async function listReasoningPromptStages(): Promise<ReasoningPromptStagesResponse> {
+  const response = await fetchWithAuth(`${API_BASE}/stages`, { cache: 'no-store' })
+  return throwIfError(await parseResponse<ReasoningPromptStagesResponse>(response))
 }
 
 export async function getReasoningPromptFile(

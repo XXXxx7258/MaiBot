@@ -28,6 +28,7 @@ import {
   getReasoningPromptFile,
   getReasoningPromptHtmlUrl,
   listReasoningPromptFiles,
+  listReasoningPromptStages,
   type ReasoningPromptFile,
   type ReasoningPromptSessionInfo,
   type ReasoningPromptStageInfo,
@@ -131,7 +132,35 @@ export function ReasoningProcessPage() {
   useEffect(() => {
     let ignore = false
 
+    async function loadStages() {
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await listReasoningPromptStages()
+        if (ignore) return
+        setStages(data.stages)
+        setStageInfos(data.stage_infos ?? [])
+      } catch (err) {
+        if (!ignore) setError(err instanceof Error ? err.message : '加载推理过程类型失败')
+      } finally {
+        if (!ignore) setLoading(false)
+      }
+    }
+
+    if (!browsingStage) {
+      void loadStages()
+    }
+
+    return () => {
+      ignore = true
+    }
+  }, [browsingStage, refreshKey])
+
+  useEffect(() => {
+    let ignore = false
+
     async function loadFiles() {
+      if (!browsingStage) return
       setLoading(true)
       setError(null)
       try {
@@ -164,7 +193,7 @@ export function ReasoningProcessPage() {
           ) {
             return current
           }
-          return data.items[0] ?? null
+          return null
         })
       } catch (err) {
         if (!ignore) setError(err instanceof Error ? err.message : '加载推理过程失败')
@@ -173,11 +202,11 @@ export function ReasoningProcessPage() {
       }
     }
 
-    loadFiles()
+    void loadFiles()
     return () => {
       ignore = true
     }
-  }, [page, refreshKey, search, session, stage])
+  }, [browsingStage, page, refreshKey, search, session, stage])
 
   useEffect(() => {
     let ignore = false

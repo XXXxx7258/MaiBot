@@ -27,6 +27,7 @@ import { RestartOverlay } from '@/components/restart-overlay'
 import { useToast } from '@/hooks/use-toast'
 import { getBotConfig, getBotConfigSchema, updateBotConfigSection } from '@/lib/config-api'
 import { fieldHooks } from '@/lib/field-hooks'
+import { generateId } from '@/lib/id'
 import { RestartProvider, useRestart } from '@/lib/restart-context'
 import type { ConfigSchema } from '@/types/config-schema'
 import { Copy, Info, Plus, Power, Save, Server, Trash2 } from 'lucide-react'
@@ -101,7 +102,7 @@ function normalizeMCPServer(value: unknown, index: number): MCPServerConfig {
 
   return {
     ...DEFAULT_MCP_SERVER,
-    _uuid: typeof source._uuid === 'string' ? source._uuid : crypto.randomUUID(),
+    _uuid: typeof source._uuid === 'string' ? source._uuid : generateId(),
     name: typeof source.name === 'string' ? source.name : `mcp-server-${index + 1}`,
     enabled: typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_MCP_SERVER.enabled,
     transport,
@@ -189,7 +190,7 @@ function MCPServersBlockEditor({
       ...servers,
       {
         ...DEFAULT_MCP_SERVER,
-        _uuid: crypto.randomUUID(),
+        _uuid: generateId(),
         name: `mcp-server-${servers.length + 1}`,
       },
     ])
@@ -202,7 +203,7 @@ function MCPServersBlockEditor({
     }
     const nextServer = {
       ...server,
-      _uuid: crypto.randomUUID(),
+      _uuid: generateId(),
       name: `${server.name || 'mcp-server'}-copy`,
       args: [...server.args],
       env: { ...server.env },

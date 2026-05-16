@@ -12,14 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-
-// 生成唯一 ID
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID()
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 11)}`
-}
+import { generateId } from "@/lib/id"
 
 type ValueType = 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null'
 

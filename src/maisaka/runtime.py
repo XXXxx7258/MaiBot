@@ -1322,9 +1322,13 @@ class MaisakaHeartFlowChatting:
 
     def _build_runtime_user_info(self) -> UserInfo:
         if self.chat_stream.user_id:
+            user_nickname = "用户"
+            if self.chat_stream.context and self.chat_stream.context.message:
+                context_user_info = self.chat_stream.context.message.message_info.user_info
+                user_nickname = context_user_info.user_nickname or context_user_info.user_id or user_nickname
             return UserInfo(
                 user_id=self.chat_stream.user_id,
-                user_nickname=global_config.maisaka.cli_user_name.strip() or "用户",
+                user_nickname=user_nickname,
                 user_cardname=None,
             )
         return UserInfo(user_id="maisaka_user", user_nickname="用户", user_cardname=None)

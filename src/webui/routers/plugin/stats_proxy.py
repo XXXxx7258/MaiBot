@@ -31,6 +31,8 @@ class RatingRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     plugin_id: str = Field(..., min_length=1, max_length=200)
+    user_id: str | None = Field(None, min_length=1, max_length=300)
+    fingerprint: str | None = Field(None, min_length=1, max_length=300)
 
 
 async def _request_stats_service(method: str, path: str, payload: Dict[str, Any] | None = None) -> JSONResponse:
@@ -49,6 +51,12 @@ async def _request_stats_service(method: str, path: str, payload: Dict[str, Any]
         raise HTTPException(status_code=502, detail="插件统计服务响应格式无效") from exc
 
     return JSONResponse(status_code=response.status_code, content=data)
+
+
+@router.get("/stats-proxy/stats/user-state")
+async def get_plugin_user_state(plugin_id: str, user_id: str) -> JSONResponse:
+    query = f"plugin_id={quote(plugin_id, safe='')}&user_id={quote(user_id, safe='')}"
+    return await _request_stats_service("GET", f"/stats/user-state?{query}")
 
 
 @router.get("/stats-proxy/stats/{plugin_id}")

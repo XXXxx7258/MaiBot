@@ -217,6 +217,11 @@ export function migrateOldKeys(): void {
 
   if (accentColor && !newAccent) {
     localStorage.setItem(THEME_STORAGE_KEYS.ACCENT, normalizeAccentColor(accentColor))
+  } else if (newAccent) {
+    const normalizedAccent = normalizeAccentColor(newAccent)
+    if (normalizedAccent !== newAccent) {
+      localStorage.setItem(THEME_STORAGE_KEYS.ACCENT, normalizedAccent)
+    }
   }
 
   // 删除旧 key
