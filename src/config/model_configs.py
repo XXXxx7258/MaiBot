@@ -418,6 +418,18 @@ class TaskConfig(ConfigBase):
     )
     """模型选择策略：balance（负载均衡）、random（随机选择）或 sequential（按配置顺序优先选择）"""
 
+    hard_timeout: float = Field(
+        default=180.0,
+        ge=1.0,
+        json_schema_extra={
+            "x-widget": "input",
+            "x-icon": "clock",
+            "step": 1.0,
+            "advanced": True,
+        },
+    )
+    """任务硬超时（秒），到点未返回则取消请求并尝试切换下一个模型；防止上游代理静默排队导致主循环饥饿"""
+
 
 class ModelTaskConfig(ConfigBase):
     """模型配置类"""

@@ -59,14 +59,30 @@ async def await_task_with_interrupt(
     from src.llm_models.exceptions import ReqAbortException
 
     started_at = asyncio.get_running_loop().time()
-    while not task.done():
-        if interrupt_flag and interrupt_flag.is_set():
-            elapsed = asyncio.get_running_loop().time() - started_at
-            logger.info(f"LLM 请求检测到中断信号，准备取消底层任务，elapsed={elapsed:.3f}s")
+    try:
+        while not task.done():
+            if interrupt_flag and interrupt_flag.is_set():
+                elapsed = asyncio.get_running_loop().time() - started_at
+                logger.info(f"LLM 请求检测到中断信号，准备取消底层任务，elapsed={elapsed:.3f}s")
+                task.cancel()
+                raise ReqAbortException("请求被外部信号中断")
+            await asyncio.sleep(interval_seconds)
+        return await task
+    finally:
+        # 调用方协程被 CancelledError（如 asyncio.wait_for 命中 hard_timeout）打断时，
+        # 必须把 child task 也取消，否则上游 httpx 请求会继续在后台运行，
+        # 占用连接 / token 并使 hard_timeout 形同虚设。
+        # cancel 后再 await 让子任务真正完成清理。
+        if not task.done():
             task.cancel()
-            raise ReqAbortException("请求被外部信号中断")
-        await asyncio.sleep(interval_seconds)
-    return await task
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # 子任务清理过程中的异常（httpx 内部、SDK 等）已不影响主流程的取消语义，
+                # 但仍以 debug 级别记录，避免编程错误被完全静默。
+                logger.debug("await_task_with_interrupt: 取消子任务后清理时抛出异常", exc_info=True)
 
 
 class AdapterClient(BaseClient, ABC, Generic[RawStreamT, RawResponseT]):

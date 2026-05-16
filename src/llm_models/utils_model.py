@@ -21,6 +21,7 @@ from src.config.config import config_manager
 from src.config.model_configs import APIProvider, ModelInfo, TaskConfig
 from src.llm_models.exceptions import (
     EmptyResponseException,
+    LLMTaskTimeoutError,
     ModelAttemptFailed,
     NetworkConnectionError,
     ReqAbortException,
@@ -830,10 +831,7 @@ class LLMOrchestrator:
                     active_request = active_request.copy_with(message_list=compressed_messages)
                     continue
 
-                if (
-                    e.status_code == 413
-                    and can_retry_with_compression
-                ):
+                if e.status_code == 413 and can_retry_with_compression:
                     logger.warning(
                         f"任务 '{task_display}' 的模型 '{model_info.name}' 返回413请求体过大，尝试压缩后重试..."
                     )
@@ -881,6 +879,34 @@ class LLMOrchestrator:
         raise ModelAttemptFailed(
             f"任务 '{self.request_type or '未知任务'}' 的模型 '{model_info.name}' 未被尝试，因为重试次数已配置为0或更少。"
         )
+
+    async def _attempt_request_on_model_with_timeout(
+        self,
+        api_provider: APIProvider,
+        client: BaseClient,
+        request: ClientRequest,
+        model_name: str,
+    ) -> APIResponse:
+        """对 `_attempt_request_on_model` 套一层任务级 hard_timeout。
+
+        单次模型尝试超时时把 TimeoutError 转成 LLMTaskTimeoutError（继承 ModelAttemptFailed），
+        由 `_execute_request` 内既有的 `except ModelAttemptFailed` 分支接住，按"切下一个模型"
+        的既有语义处理（penalty +1、usage_penalty -1、failed_models_this_request 登记）。
+        全部模型都触发 hard_timeout 时，最后一个 LLMTaskTimeoutError 上抛给调用方。
+        """
+        timeout_s = self.model_for_task.hard_timeout
+        try:
+            return await asyncio.wait_for(
+                self._attempt_request_on_model(api_provider, client, request=request),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError as e:
+            task_display = self.request_type or self.task_name or "未知任务"
+            raise LLMTaskTimeoutError(
+                task_name=task_display,
+                model_name=model_name,
+                timeout_s=timeout_s,
+            ) from e
 
     async def _execute_request(
         self,
@@ -947,15 +973,14 @@ class LLMOrchestrator:
                         f"LLMOrchestrator[{self.request_type}] 正在向模型 model={model_info.name} 发送请求 "
                         f"(tool_options={len(tool_options or [])})"
                     )
-                response = await self._attempt_request_on_model(
+                response = await self._attempt_request_on_model_with_timeout(
                     api_provider,
                     client,
-                    request=request,
+                    request,
+                    model_info.name,
                 )
                 if self.request_type.startswith("maisaka_"):
-                    logger.debug(
-                        f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 已返回 API 响应"
-                    )
+                    logger.debug(f"LLMOrchestrator[{self.request_type}] 模型 model={model_info.name} 已返回 API 响应")
                 total_tokens, penalty, usage_penalty = self.model_usage[model_info.name]
                 if response_usage := response.usage:
                     total_tokens += response_usage.total_tokens
@@ -1112,6 +1137,7 @@ class LLMRequest(LLMOrchestrator):
             task_config.temperature,
             task_config.slow_threshold,
             task_config.selection_strategy,
+            task_config.hard_timeout,
         )
 
     @classmethod

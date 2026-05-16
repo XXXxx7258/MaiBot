@@ -110,6 +110,7 @@ def build_single_model_task(model_name: str, template: Any) -> Any:
         temperature=template.temperature,
         slow_threshold=template.slow_threshold,
         selection_strategy=template.selection_strategy,
+        hard_timeout=template.hard_timeout,
     )
 
 
@@ -215,16 +216,12 @@ def resolve_text_generation_task_name_from_model_config(
             return task_name
 
     requested_model_list = [
-        str(item).strip()
-        for item in (getattr(model_config, "model_list", []) or [])
-        if str(item).strip()
+        str(item).strip() for item in (getattr(model_config, "model_list", []) or []) if str(item).strip()
     ]
     if requested_model_list:
         for task_name, task_config in available_tasks.items():
             candidate_model_list = [
-                str(item).strip()
-                for item in (getattr(task_config, "model_list", []) or [])
-                if str(item).strip()
+                str(item).strip() for item in (getattr(task_config, "model_list", []) or []) if str(item).strip()
             ]
             if requested_model_list == candidate_model_list:
                 return task_name
@@ -232,9 +229,7 @@ def resolve_text_generation_task_name_from_model_config(
         for requested_model in requested_model_list:
             task_name, _ = find_text_generation_task_for_model(available_tasks, requested_model)
             if task_name:
-                logger.info(
-                    f"旧版文本生成 model_config 按模型 `{requested_model}` 近似映射到任务 `{task_name}`"
-                )
+                logger.info(f"旧版文本生成 model_config 按模型 `{requested_model}` 近似映射到任务 `{task_name}`")
                 return task_name
 
     fallback_task_name, _ = pick_text_generation_task(available_tasks)

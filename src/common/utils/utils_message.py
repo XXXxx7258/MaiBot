@@ -11,6 +11,9 @@ import msgpack
 import random
 import re
 
+import asyncio
+import threading
+
 from src.common.data_models.message_component_data_model import (
     AtComponent,
     DictComponent,
@@ -34,6 +37,16 @@ if TYPE_CHECKING:
     from src.chat.message_receive.message import SessionMessage
 
 logger = get_logger("message_utils")
+
+
+# 串行化 store_message_to_db / update_message_id 的 SQLite 写入：
+# 底层 SQLite WAL 仅允许单写，busy_timeout 1s。bot 进程不只一个 event loop
+# （bot.py 主 loop、WebUI 在另一个线程的独立 loop、临时 asyncio.run 调用等），
+# 因此 lock 必须是进程级的 threading.Lock 而不是 asyncio.Lock；后者只能互斥
+# 同一个 loop 内的协程，跨 loop / 跨线程时形同虚设。
+# 锁直接持有在同步方法本体里，所有调用路径（同步直调、async wrapper 经 to_thread、
+# 测试 / 迁移脚本直调）都被串行化，不存在绕过路径。
+_DB_WRITE_THREAD_LOCK = threading.Lock()
 
 
 class MessageUtils:
@@ -183,13 +196,27 @@ class MessageUtils:
 
     @staticmethod
     def store_message_to_db(message: "SessionMessage"):
-        """存储消息到数据库，此方法没有update机制"""
+        """存储消息到数据库，此方法没有update机制。
+
+        加锁在同步方法本体，保证所有写入路径（包括同步直接调用与 async wrapper）
+        都被串行化，参见 `_DB_WRITE_THREAD_LOCK` 注释。
+        """
         from src.common.database.database import get_db_session
 
-        with get_db_session() as session:
-            MessageUtils._persist_image_components(message.raw_message.components, session)
-            db_message = message.to_db_instance()
-            session.add(db_message)
+        with _DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                MessageUtils._persist_image_components(message.raw_message.components, session)
+                db_message = message.to_db_instance()
+                session.add(db_message)
+
+    @staticmethod
+    async def store_message_to_db_async(message: "SessionMessage") -> None:
+        """异步存储消息到数据库。
+
+        把同步 SQLAlchemy session 移出事件循环；锁逻辑在 `store_message_to_db`
+        本体里持有，本方法仅做 `to_thread` 透传。
+        """
+        await asyncio.to_thread(MessageUtils.store_message_to_db, message)
 
     @staticmethod
     def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
@@ -204,7 +231,9 @@ class MessageUtils:
                     MessageUtils._persist_image_components(forward_component.content, session)
 
     @staticmethod
-    def _persist_image_component(component: ImageComponent, session: Any, images_model: Any, image_type_model: Any) -> None:
+    def _persist_image_component(
+        component: ImageComponent, session: Any, images_model: Any, image_type_model: Any
+    ) -> None:
         """保存图片文件和图片库记录，确保后续可以通过消息 hash 回读原图。"""
         if not component.binary_data:
             return
@@ -286,35 +315,43 @@ class MessageUtils:
         from src.common.database.database import get_db_session
         from src.common.database.database_model import Messages
 
-        with get_db_session() as session:
-            existing_target = session.exec(
-                select(Messages).filter_by(message_id=normalized_new_message_id).limit(1)
-            ).first()
-            if existing_target is not None:
-                logger.warning(
-                    "消息 ID 回填时发现真实 ID 已存在，已跳过更新: "
-                    f"{normalized_old_message_id} -> {normalized_new_message_id}"
-                )
-                return False
+        with _DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                existing_target = session.exec(
+                    select(Messages).filter_by(message_id=normalized_new_message_id).limit(1)
+                ).first()
+                if existing_target is not None:
+                    logger.warning(
+                        "消息 ID 回填时发现真实 ID 已存在，已跳过更新: "
+                        f"{normalized_old_message_id} -> {normalized_new_message_id}"
+                    )
+                    return False
 
-            source_messages = session.exec(
-                select(Messages).filter_by(message_id=normalized_old_message_id)
-            ).all()
-            if not source_messages:
-                return False
+                source_messages = session.exec(select(Messages).filter_by(message_id=normalized_old_message_id)).all()
+                if not source_messages:
+                    return False
 
-            for source_message in source_messages:
-                source_message.message_id = normalized_new_message_id
-                session.add(source_message)
+                for source_message in source_messages:
+                    source_message.message_id = normalized_new_message_id
+                    session.add(source_message)
 
-            reply_target_messages = session.exec(
-                select(Messages).filter_by(reply_to=normalized_old_message_id)
-            ).all()
-            for reply_target_message in reply_target_messages:
-                reply_target_message.reply_to = normalized_new_message_id
-                session.add(reply_target_message)
+                reply_target_messages = session.exec(
+                    select(Messages).filter_by(reply_to=normalized_old_message_id)
+                ).all()
+                for reply_target_message in reply_target_messages:
+                    reply_target_message.reply_to = normalized_new_message_id
+                    session.add(reply_target_message)
 
         return True
+
+    @staticmethod
+    async def update_message_id_async(old_message_id: str, new_message_id: str) -> bool:
+        """异步回填消息 ID。
+
+        把同步 SQLAlchemy session 移出事件循环；锁逻辑在 `update_message_id`
+        本体里持有，本方法仅做 `to_thread` 透传。
+        """
+        return await asyncio.to_thread(MessageUtils.update_message_id, old_message_id, new_message_id)
 
     @staticmethod
     async def build_readable_message(

@@ -108,7 +108,7 @@ class MessageGateway:
             try:
                 from src.common.utils.utils_message import MessageUtils
 
-                MessageUtils.store_message_to_db(internal_message)
+                await MessageUtils.store_message_to_db_async(internal_message)
             except Exception as e:
                 logger.error(f"保存消息到数据库失败: {e}")
         return True
