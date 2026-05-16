@@ -333,6 +333,16 @@ class MessageUtils:
         return True
 
     @staticmethod
+    async def update_message_id_async(old_message_id: str, new_message_id: str) -> bool:
+        """异步回填消息 ID。
+
+        与 `store_message_to_db_async` 共用 `_DB_WRITE_LOCK` 串行化 SQLite 写入，
+        避免在 async 上下文中裸调同步 SQLAlchemy session 阻塞事件循环。
+        """
+        async with _DB_WRITE_LOCK:
+            return await asyncio.to_thread(MessageUtils.update_message_id, old_message_id, new_message_id)
+
+    @staticmethod
     async def build_readable_message(
         messages: List["SessionMessage"],
         *,

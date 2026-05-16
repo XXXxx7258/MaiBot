@@ -470,7 +470,7 @@ class ChatBot:
         if not normalized_mmc_message_id or not normalized_actual_message_id:
             return
 
-        updated = MessageUtils.update_message_id(
+        updated = await MessageUtils.update_message_id_async(
             old_message_id=normalized_mmc_message_id,
             new_message_id=normalized_actual_message_id,
         )
