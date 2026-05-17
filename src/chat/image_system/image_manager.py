@@ -10,7 +10,7 @@ import base64
 import hashlib
 
 from src.common.logger import get_logger
-from src.common.database.database import get_db_session
+from src.common.database.database import DB_WRITE_THREAD_LOCK, get_db_session
 from src.common.database.database_model import Images, ImageType
 from src.common.data_models.image_data_model import MaiImage
 from src.config.config import config_manager
@@ -230,15 +230,16 @@ class ImageManager:
             return False
 
         try:
-            with get_db_session() as session:
-                record = image.to_db_instance()
-                record.is_registered = False
-                record.register_time = None
-                record.last_used_time = datetime.now()
-                session.add(record)
-                session.flush()  # 确保记录被写入数据库以获取ID
-                record_id = record.id
-                logger.info(f"成功保存图片记录到数据库: ID: {record_id}，路径: {record.full_path}")
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    record = image.to_db_instance()
+                    record.is_registered = False
+                    record.register_time = None
+                    record.last_used_time = datetime.now()
+                    session.add(record)
+                    session.flush()  # 确保记录被写入数据库以获取ID
+                    record_id = record.id
+                    logger.info(f"成功保存图片记录到数据库: ID: {record_id}，路径: {record.full_path}")
         except Exception as e:
             logger.error(f"保存图片记录到数据库时发生错误: {e}")
             return False
@@ -254,18 +255,21 @@ class ImageManager:
             return (bool): 更新成功返回 True，失败返回 False
         """
         try:
-            with get_db_session() as session:
-                statement = select(Images).filter_by(image_hash=image.file_hash, image_type=ImageType.IMAGE).limit(1)
-                record = session.exec(statement).first()
-                if not record:
-                    logger.error(f"未找到哈希值为 {image.file_hash} 的图片记录，无法更新描述")
-                    return False
-                self._normalize_image_registration_fields(record)
-                record.description = image.description
-                record.last_used_time = datetime.now()
-                record.vlm_processed = image.vlm_processed
-                session.add(record)
-                logger.info(f"成功更新图片描述: {image.file_hash}，新描述: {image.description}")
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    statement = (
+                        select(Images).filter_by(image_hash=image.file_hash, image_type=ImageType.IMAGE).limit(1)
+                    )
+                    record = session.exec(statement).first()
+                    if not record:
+                        logger.error(f"未找到哈希值为 {image.file_hash} 的图片记录，无法更新描述")
+                        return False
+                    self._normalize_image_registration_fields(record)
+                    record.description = image.description
+                    record.last_used_time = datetime.now()
+                    record.vlm_processed = image.vlm_processed
+                    session.add(record)
+                    logger.info(f"成功更新图片描述: {image.file_hash}，新描述: {image.description}")
         except Exception as e:
             logger.error(f"更新图片描述时发生错误: {e}")
             return False
@@ -311,17 +315,18 @@ class ImageManager:
         Returns:
             Optional[MaiImage]: 命中则返回构造好的 MaiImage，否则返回 None。
         """
-        with get_db_session() as session:
-            statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.IMAGE).limit(1)
-            if record := session.exec(statement).first():
-                self._normalize_image_registration_fields(record)
-                logger.info(f"图片已存在于数据库中，哈希值: {hash_str}")
-                record.last_used_time = datetime.now()
-                record.query_count += 1
-                session.add(record)
-                session.flush()
-                return MaiImage.from_db_instance(record)
-            return None
+        with DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.IMAGE).limit(1)
+                if record := session.exec(statement).first():
+                    self._normalize_image_registration_fields(record)
+                    logger.info(f"图片已存在于数据库中，哈希值: {hash_str}")
+                    record.last_used_time = datetime.now()
+                    record.query_count += 1
+                    session.add(record)
+                    session.flush()
+                    return MaiImage.from_db_instance(record)
+                return None
 
     async def ensure_image_saved(self, image_bytes: bytes) -> MaiImage:
         """先保存图片记录，确保后续可以按哈希回填图片内容。"""

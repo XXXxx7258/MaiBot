@@ -15,7 +15,7 @@ import Levenshtein
 
 from src.common.data_models.image_data_model import MaiEmoji
 from src.common.data_models.llm_service_data_models import LLMGenerationOptions
-from src.common.database.database import get_db_session, get_db_session_manual
+from src.common.database.database import DB_WRITE_THREAD_LOCK, get_db_session, get_db_session_manual
 from src.common.database.database_model import Images, ImageType
 from src.common.logger import get_logger
 from src.common.utils.utils_image import ImageUtils
@@ -296,12 +296,13 @@ class EmojiManager:
 
     def _mark_emoji_path_restored(self, emoji_hash: str, new_full_path: str) -> None:
         """同步：在文件回填后更新数据库记录的 full_path 与 no_file_flag。"""
-        with get_db_session() as session:
-            statement = select(Images).filter_by(image_hash=emoji_hash, image_type=ImageType.EMOJI).limit(1)
-            if result := session.exec(statement).first():
-                result.full_path = new_full_path
-                result.no_file_flag = False
-                session.add(result)
+        with DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(image_hash=emoji_hash, image_type=ImageType.EMOJI).limit(1)
+                if result := session.exec(statement).first():
+                    result.full_path = new_full_path
+                    result.no_file_flag = False
+                    session.add(result)
 
     async def get_emoji_description(
         self,
@@ -376,35 +377,37 @@ class EmojiManager:
 
     def _get_existing_emoji_if_file_valid(self, hash_str: str) -> Optional[MaiEmoji]:
         """同步：查找已存在且文件仍可用的表情包记录，命中则刷新使用计数。"""
-        with get_db_session() as session:
-            statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.EMOJI).limit(1)
-            if record := session.exec(statement).first():
-                record_path = Path(record.full_path)
-                if not record.no_file_flag and record_path.exists():
-                    record.last_used_time = datetime.now()
-                    record.query_count += 1
-                    session.add(record)
-                    return MaiEmoji.from_db_instance(record)
-            return None
+        with DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.EMOJI).limit(1)
+                if record := session.exec(statement).first():
+                    record_path = Path(record.full_path) if record.full_path else None
+                    if not record.no_file_flag and record_path is not None and record_path.exists():
+                        record.last_used_time = datetime.now()
+                        record.query_count += 1
+                        session.add(record)
+                        return MaiEmoji.from_db_instance(record)
+                return None
 
     def _save_or_update_emoji_record(self, emoji: MaiEmoji) -> None:
         """同步：写入或刷新表情包数据库记录（用于已计算 hash 的新缓存表情包）。"""
-        with get_db_session() as session:
-            statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
-            if existing_record := session.exec(statement).first():
-                existing_record.full_path = str(emoji.full_path)
-                existing_record.no_file_flag = False
-                existing_record.last_used_time = datetime.now()
-                existing_record.query_count += 1
-                session.add(existing_record)
-            else:
-                image_record = emoji.to_db_instance()
-                image_record.is_registered = False
-                image_record.is_banned = False
-                image_record.no_file_flag = False
-                image_record.last_used_time = datetime.now()
-                image_record.query_count = 1
-                session.add(image_record)
+        with DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
+                if existing_record := session.exec(statement).first():
+                    existing_record.full_path = str(emoji.full_path)
+                    existing_record.no_file_flag = False
+                    existing_record.last_used_time = datetime.now()
+                    existing_record.query_count += 1
+                    session.add(existing_record)
+                else:
+                    image_record = emoji.to_db_instance()
+                    image_record.is_registered = False
+                    image_record.is_banned = False
+                    image_record.no_file_flag = False
+                    image_record.last_used_time = datetime.now()
+                    image_record.query_count = 1
+                    session.add(image_record)
 
     async def ensure_emoji_saved(
         self,
@@ -484,17 +487,20 @@ class EmojiManager:
             logger.debug(f"表情包描述后台任务结束时捕获异常，哈希值: {emoji_hash}，错误: {exc}")
 
     def _persist_cached_emoji_description(self, emoji: MaiEmoji) -> None:
-        """同步：将已构建的表情包描述兜底回写到 Images 记录。"""
-        with get_db_session() as session:
-            try:
-                statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
-                if image_record := session.exec(statement).first():
-                    image_record.full_path = str(emoji.full_path)
-                    image_record.description = emoji.description
-                    image_record.no_file_flag = False
-                    session.add(image_record)
-            except Exception as exc:
-                logger.error(f"Update cached emoji description failed: {exc}")
+        """同步：将已构建的表情包描述兜底回写到 Images 记录。失败时仅记录日志，不抛出。"""
+        try:
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    statement = (
+                        select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
+                    )
+                    if image_record := session.exec(statement).first():
+                        image_record.full_path = str(emoji.full_path)
+                        image_record.description = emoji.description
+                        image_record.no_file_flag = False
+                        session.add(image_record)
+        except Exception as exc:
+            logger.error(f"Update cached emoji description failed: {exc}")
 
     async def _build_and_cache_emoji_description(
         self,
@@ -561,57 +567,63 @@ class EmojiManager:
             return "failed"
 
         try:
-            with get_db_session() as session:
-                statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
-                existing_record = session.exec(statement).first()
-                if existing_record:
-                    if existing_record.is_banned:
-                        logger.info(f"[register_emoji] Emoji is banned, skipping: {emoji.file_hash}")
-                        return "skipped"
-                    if existing_record.is_registered and _is_available_emoji_record(existing_record):
-                        # logger.info(f"[register_emoji] Emoji already registered, skipping: {emoji.file_hash}")
-                        return "skipped"
-
-                    normalized_description = str(emoji.description or existing_record.description or "").strip()
-                    normalized_emotions = _normalize_emoji_tag_text(normalized_description)
-                    register_time = existing_record.register_time or datetime.now()
-
-                    existing_record.full_path = str(emoji.full_path)
-                    existing_record.description = normalized_description
-                    existing_record.query_count = max(int(existing_record.query_count), int(emoji.query_count))
-                    existing_record.last_used_time = emoji.last_used_time or existing_record.last_used_time
-                    existing_record.is_registered = True
-                    existing_record.is_banned = False
-                    existing_record.no_file_flag = False
-                    existing_record.register_time = register_time
-                    session.add(existing_record)
-
-                    emoji.description = normalized_description
-                    emoji.emotion = normalized_emotions
-                    emoji.query_count = existing_record.query_count
-                    emoji.last_used_time = existing_record.last_used_time
-                    emoji.register_time = register_time
-
-                    logger.info(
-                        f"[register_emoji] Updated existing record and registered emoji, ID: {existing_record.id}, path: {emoji.full_path}"
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    statement = (
+                        select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
                     )
-                    return "registered"
+                    existing_record = session.exec(statement).first()
+                    if existing_record:
+                        if existing_record.is_banned:
+                            logger.info(f"[register_emoji] Emoji is banned, skipping: {emoji.file_hash}")
+                            return "skipped"
+                        if existing_record.is_registered and _is_available_emoji_record(existing_record):
+                            # logger.info(f"[register_emoji] Emoji already registered, skipping: {emoji.file_hash}")
+                            return "skipped"
+
+                        normalized_description = str(emoji.description or existing_record.description or "").strip()
+                        normalized_emotions = _normalize_emoji_tag_text(normalized_description)
+                        register_time = existing_record.register_time or datetime.now()
+
+                        existing_record.full_path = str(emoji.full_path)
+                        existing_record.description = normalized_description
+                        existing_record.query_count = max(int(existing_record.query_count), int(emoji.query_count))
+                        existing_record.last_used_time = emoji.last_used_time or existing_record.last_used_time
+                        existing_record.is_registered = True
+                        existing_record.is_banned = False
+                        existing_record.no_file_flag = False
+                        existing_record.register_time = register_time
+                        session.add(existing_record)
+
+                        emoji.description = normalized_description
+                        emoji.emotion = normalized_emotions
+                        emoji.query_count = existing_record.query_count
+                        emoji.last_used_time = existing_record.last_used_time
+                        emoji.register_time = register_time
+
+                        logger.info(
+                            f"[register_emoji] Updated existing record and registered emoji, ID: {existing_record.id}, path: {emoji.full_path}"
+                        )
+                        return "registered"
         except Exception as e:
             logger.error(f"[register_emoji] Database query failed: {e}")
             return "failed"
 
         try:
-            with get_db_session() as session:
-                image_record = emoji.to_db_instance()
-                image_record.is_registered = True
-                image_record.is_banned = False
-                image_record.no_file_flag = False
-                image_record.register_time = datetime.now()
-                session.add(image_record)
-                session.flush()
-                emoji.register_time = image_record.register_time
-                record_id = image_record.id
-                logger.info(f"[register_emoji] Registered emoji to database, ID: {record_id}, path: {emoji.full_path}")
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    image_record = emoji.to_db_instance()
+                    image_record.is_registered = True
+                    image_record.is_banned = False
+                    image_record.no_file_flag = False
+                    image_record.register_time = datetime.now()
+                    session.add(image_record)
+                    session.flush()
+                    emoji.register_time = image_record.register_time
+                    record_id = image_record.id
+                    logger.info(
+                        f"[register_emoji] Registered emoji to database, ID: {record_id}, path: {emoji.full_path}"
+                    )
         except Exception as e:
             logger.error(f"[register_emoji] Failed to write database record: {e}")
             return "failed"
@@ -641,18 +653,21 @@ class EmojiManager:
 
         # 删除数据库记录
         try:
-            with get_db_session() as session:
-                statement = select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
-                if image_record := session.exec(statement).first():
-                    if no_desc:
-                        session.delete(image_record)
-                        logger.info(f"[删除表情包] 成功删除数据库中的空表情包记录: {emoji.file_name}")
+            with DB_WRITE_THREAD_LOCK:
+                with get_db_session() as session:
+                    statement = (
+                        select(Images).filter_by(image_hash=emoji.file_hash, image_type=ImageType.EMOJI).limit(1)
+                    )
+                    if image_record := session.exec(statement).first():
+                        if no_desc:
+                            session.delete(image_record)
+                            logger.info(f"[删除表情包] 成功删除数据库中的空表情包记录: {emoji.file_name}")
+                        else:
+                            image_record.no_file_flag = True
+                            session.add(image_record)
+                            logger.info(f"[删除表情包] 成功修改数据库中的表情包记录: {emoji.file_name}")
                     else:
-                        image_record.no_file_flag = True
-                        session.add(image_record)
-                        logger.info(f"[删除表情包] 成功修改数据库中的表情包记录: {emoji.file_name}")
-                else:
-                    logger.warning(f"[删除表情包] 数据库中未找到表情包记录: {emoji.file_name}")
+                        logger.warning(f"[删除表情包] 数据库中未找到表情包记录: {emoji.file_name}")
         except Exception as e:
             logger.error(f"[删除表情包] 删除数据库记录时出错: {e}")
             # 如果数据库记录删除失败，但文件可能已删除，记录一个警告
@@ -866,8 +881,19 @@ class EmojiManager:
             if 0 <= emoji_index < len(selected_emojis):
                 emoji_to_delete = selected_emojis[emoji_index]
                 logger.info(f"[决策] 删除表情包: {emoji_to_delete.description}")
-                if await asyncio.to_thread(self.delete_emoji, emoji_to_delete):
+                # 先从内存列表中移除，关闭并发选表时仍能命中该表情的窗口；
+                # 若后续删除失败再恢复，保持列表与数据库一致。
+                try:
                     self.emojis.remove(emoji_to_delete)
+                except ValueError:
+                    logger.warning("[替换表情包] 候选表情已不在内存列表中，跳过本次替换")
+                    return False
+                delete_success = False
+                try:
+                    delete_success = await asyncio.to_thread(self.delete_emoji, emoji_to_delete)
+                except Exception as exc:
+                    logger.error(f"[替换表情包] 删除表情包时抛出异常: {exc}")
+                if delete_success:
                     register_status = await asyncio.to_thread(self.register_emoji_to_db, new_emoji)
                     if register_status == "registered":
                         self.emojis.append(new_emoji)
@@ -880,6 +906,8 @@ class EmojiManager:
                     else:
                         logger.error(f"[register_emoji] Failed to register replacement emoji: {new_emoji.description}")
                 else:
+                    # 删除失败：恢复内存列表以避免对象丢失
+                    self.emojis.append(emoji_to_delete)
                     logger.error("[错误] 删除表情包失败，无法完成替换")
             else:
                 logger.error(f"[决策] 无效的表情包编号: {emoji_index + 1}")
@@ -1007,30 +1035,31 @@ class EmojiManager:
         file_removal_count = 0
         available_emojis: list[MaiEmoji] = []
 
-        with get_db_session() as session:
-            statement = select(Images).filter_by(image_type=ImageType.EMOJI)
-            records = session.exec(statement).all()
-            for record in records:
-                record_path = _resolve_existing_emoji_path(record.full_path)
-                if record.no_file_flag or record_path is None:
-                    logger.warning(
-                        f"[完整性检查] 表情包数据库记录缺少实际文件，删除数据库记录: id={record.id}, path={record.full_path}"
-                    )
-                    session.delete(record)
-                    record_removal_count += 1
-                    continue
-                if not record.is_registered or record.is_banned:
-                    tracked_paths.add(record_path)
-                    continue
-                try:
-                    available_emojis.append(MaiEmoji.from_db_instance(record))
-                    tracked_paths.add(record_path)
-                except Exception as exc:
-                    logger.error(
-                        f"[完整性检查] 加载表情包记录时出错，将删除异常记录: {exc}\n记录ID: {record.id}, 路径: {record.full_path}"
-                    )
-                    session.delete(record)
-                    record_removal_count += 1
+        with DB_WRITE_THREAD_LOCK:
+            with get_db_session() as session:
+                statement = select(Images).filter_by(image_type=ImageType.EMOJI)
+                records = session.exec(statement).all()
+                for record in records:
+                    record_path = _resolve_existing_emoji_path(record.full_path)
+                    if record.no_file_flag or record_path is None:
+                        logger.warning(
+                            f"[完整性检查] 表情包数据库记录缺少实际文件，删除数据库记录: id={record.id}, path={record.full_path}"
+                        )
+                        session.delete(record)
+                        record_removal_count += 1
+                        continue
+                    if not record.is_registered or record.is_banned:
+                        tracked_paths.add(record_path)
+                        continue
+                    try:
+                        available_emojis.append(MaiEmoji.from_db_instance(record))
+                        tracked_paths.add(record_path)
+                    except Exception as exc:
+                        logger.error(
+                            f"[完整性检查] 加载表情包记录时出错，将删除异常记录: {exc}\n记录ID: {record.id}, 路径: {record.full_path}"
+                        )
+                        session.delete(record)
+                        record_removal_count += 1
 
         for emoji_file in EMOJI_DIR.iterdir():
             if not emoji_file.is_file():
