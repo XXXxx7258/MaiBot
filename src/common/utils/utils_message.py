@@ -188,14 +188,17 @@ class MessageUtils:
     def store_message_to_db(message: "SessionMessage"):
         """存储消息到数据库，此方法没有update机制。
 
-        加锁在同步方法本体，保证所有写入路径（包括同步直接调用与 async wrapper）
-        都被串行化，参见 `DB_WRITE_THREAD_LOCK` 注释。
+        把阻塞型工作（图片格式识别 + 文件写出）放到锁外预处理，锁内只做 DB upsert，
+        避免单条大图阻塞所有线程池写。参见 `DB_WRITE_THREAD_LOCK` 注释。
         """
         from src.common.database.database import get_db_session
 
+        # 锁外：阻塞型 IO/CPU 预处理（图片格式识别 + 文件落盘）
+        prepared_images = MessageUtils._prepare_image_components(message.raw_message.components)
+        # 锁内：仅做 DB 操作，尽快释放
         with DB_WRITE_THREAD_LOCK:
             with get_db_session() as session:
-                MessageUtils._persist_image_components(message.raw_message.components, session)
+                MessageUtils._upsert_prepared_images(prepared_images, session)
                 db_message = message.to_db_instance()
                 session.add(db_message)
 
@@ -209,36 +212,32 @@ class MessageUtils:
         await asyncio.to_thread(MessageUtils.store_message_to_db, message)
 
     @staticmethod
-    def _persist_image_components(components: List[StandardMessageComponents], session: Any) -> None:
-        """将消息中仍携带二进制数据的图片组件保存到图片库。"""
-        from src.common.database.database_model import Images, ImageType
+    def _prepare_image_components(
+        components: List[StandardMessageComponents],
+    ) -> List[Dict[str, str]]:
+        """递归收集 ImageComponent 的待持久化信息，并完成文件落盘。
 
+        返回字典列表，每项形如 ``{"image_hash", "description", "full_path"}``；
+        仅做阻塞型 IO/CPU 工作（格式识别 + 文件写出），不接触数据库。
+        """
+        prepared: List[Dict[str, str]] = []
         for component in components:
             if isinstance(component, ImageComponent):
-                MessageUtils._persist_image_component(component, session, Images, ImageType)
+                if entry := MessageUtils._prepare_single_image(component):
+                    prepared.append(entry)
             elif isinstance(component, ForwardNodeComponent):
                 for forward_component in component.forward_components:
-                    MessageUtils._persist_image_components(forward_component.content, session)
+                    prepared.extend(MessageUtils._prepare_image_components(forward_component.content))
+        return prepared
 
     @staticmethod
-    def _persist_image_component(
-        component: ImageComponent, session: Any, images_model: Any, image_type_model: Any
-    ) -> None:
-        """保存图片文件和图片库记录，确保后续可以通过消息 hash 回读原图。"""
+    def _prepare_single_image(component: ImageComponent) -> Optional[Dict[str, str]]:
+        """落盘单张图片并返回其哈希/路径/描述快照。"""
         if not component.binary_data:
-            return
-
+            return None
         image_hash = component.binary_hash.strip()
         if not image_hash:
-            return
-
-        statement = select(images_model).filter_by(image_hash=image_hash, image_type=image_type_model.IMAGE).limit(1)
-        existing_record = session.exec(statement).first()
-        if existing_record is not None and Path(existing_record.full_path).is_file():
-            existing_record.no_file_flag = False
-            existing_record.last_used_time = datetime.now()
-            session.add(existing_record)
-            return
+            return None
 
         image_dir = Path(__file__).parent.parent.parent.parent / "data" / "images"
         image_dir.mkdir(parents=True, exist_ok=True)
@@ -247,24 +246,44 @@ class MessageUtils:
         if not image_path.exists():
             image_path.write_bytes(component.binary_data)
 
-        if existing_record is not None:
-            existing_record.description = component.content.strip()
-            existing_record.full_path = str(image_path.absolute().resolve())
-            existing_record.no_file_flag = False
-            existing_record.last_used_time = datetime.now()
-            existing_record.vlm_processed = bool(component.content.strip())
-            session.add(existing_record)
-        else:
-            session.add(
-                images_model(
-                    image_hash=image_hash,
-                    description=component.content.strip(),
-                    full_path=str(image_path.absolute().resolve()),
-                    image_type=image_type_model.IMAGE,
-                    last_used_time=datetime.now(),
-                    vlm_processed=bool(component.content.strip()),
+        return {
+            "image_hash": image_hash,
+            "description": component.content.strip(),
+            "full_path": str(image_path.absolute().resolve()),
+        }
+
+    @staticmethod
+    def _upsert_prepared_images(prepared: List[Dict[str, str]], session: Any) -> None:
+        """在已开启的 DB 会话内 upsert 预处理好的图片库记录。"""
+        if not prepared:
+            return
+        from src.common.database.database_model import Images, ImageType
+
+        for entry in prepared:
+            image_hash = entry["image_hash"]
+            description = entry["description"]
+            full_path = entry["full_path"]
+            statement = select(Images).filter_by(image_hash=image_hash, image_type=ImageType.IMAGE).limit(1)
+            existing_record = session.exec(statement).first()
+            if existing_record is not None:
+                existing_record.description = description or existing_record.description
+                existing_record.full_path = full_path
+                existing_record.no_file_flag = False
+                existing_record.last_used_time = datetime.now()
+                if description:
+                    existing_record.vlm_processed = True
+                session.add(existing_record)
+            else:
+                session.add(
+                    Images(
+                        image_hash=image_hash,
+                        description=description,
+                        full_path=full_path,
+                        image_type=ImageType.IMAGE,
+                        last_used_time=datetime.now(),
+                        vlm_processed=bool(description),
+                    )
                 )
-            )
 
     @staticmethod
     def _detect_image_format(image_bytes: bytes) -> str:

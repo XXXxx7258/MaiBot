@@ -427,8 +427,7 @@ class EmojiManager:
 
         logger.info(f"表情包不存在于数据库中，准备缓存新表情包，哈希值: {hash_str}")
         tmp_file_path = EMOJI_DIR / f"{hash_str}.tmp"
-        with tmp_file_path.open("wb") as file:
-            file.write(emoji_bytes)
+        await asyncio.to_thread(tmp_file_path.write_bytes, emoji_bytes)
 
         emoji = MaiEmoji(full_path=tmp_file_path, image_bytes=emoji_bytes)
         await emoji.calculate_hash_format()
@@ -605,13 +604,9 @@ class EmojiManager:
                             f"[register_emoji] Updated existing record and registered emoji, ID: {existing_record.id}, path: {emoji.full_path}"
                         )
                         return "registered"
-        except Exception as e:
-            logger.error(f"[register_emoji] Database query failed: {e}")
-            return "failed"
 
-        try:
-            with DB_WRITE_THREAD_LOCK:
-                with get_db_session() as session:
+                    # 不存在则插入新记录（lookup 与 insert 共享同一把锁与同一事务，
+                    # 避免并发注册同 hash 时双方都越过 existing 检查后双写）。
                     image_record = emoji.to_db_instance()
                     image_record.is_registered = True
                     image_record.is_banned = False
@@ -624,11 +619,10 @@ class EmojiManager:
                     logger.info(
                         f"[register_emoji] Registered emoji to database, ID: {record_id}, path: {emoji.full_path}"
                     )
+                    return "registered"
         except Exception as e:
-            logger.error(f"[register_emoji] Failed to write database record: {e}")
+            logger.error(f"[register_emoji] Database operation failed: {e}")
             return "failed"
-
-        return "registered"
 
     def delete_emoji(self, emoji: MaiEmoji, no_desc: bool = False) -> bool:
         """
@@ -882,12 +876,13 @@ class EmojiManager:
                 emoji_to_delete = selected_emojis[emoji_index]
                 logger.info(f"[决策] 删除表情包: {emoji_to_delete.description}")
                 # 先从内存列表中移除，关闭并发选表时仍能命中该表情的窗口；
-                # 若后续删除失败再恢复，保持列表与数据库一致。
+                # 若后续删除失败再恢复到原位置，保持列表与数据库一致。
                 try:
-                    self.emojis.remove(emoji_to_delete)
+                    original_index = self.emojis.index(emoji_to_delete)
                 except ValueError:
                     logger.warning("[替换表情包] 候选表情已不在内存列表中，跳过本次替换")
                     return False
+                self.emojis.pop(original_index)
                 delete_success = False
                 try:
                     delete_success = await asyncio.to_thread(self.delete_emoji, emoji_to_delete)
@@ -906,8 +901,8 @@ class EmojiManager:
                     else:
                         logger.error(f"[register_emoji] Failed to register replacement emoji: {new_emoji.description}")
                 else:
-                    # 删除失败：恢复内存列表以避免对象丢失
-                    self.emojis.append(emoji_to_delete)
+                    # 删除失败：将原表情按原位置回插，避免相对顺序变化
+                    self.emojis.insert(min(original_index, len(self.emojis)), emoji_to_delete)
                     logger.error("[错误] 删除表情包失败，无法完成替换")
             else:
                 logger.error(f"[决策] 无效的表情包编号: {emoji_index + 1}")
@@ -1022,17 +1017,21 @@ class EmojiManager:
         logger.info(f"[构建描述] 成功为表情包构建情绪标签: {target_emoji.description}")
         return True, target_emoji
 
-    def check_emoji_file_integrity(self) -> None:
-        """
-        检查表情包文件和数据库注册记录的一致性。
+    def _scan_emoji_integrity(self) -> tuple[list[MaiEmoji], set[Path], list[Path], int]:
+        """同步：扫描数据库与目录，返回内存状态快照与待删孤儿文件，不修改 self.*。
 
-        数据库记录存在但文件缺失时删除数据库记录；文件存在但没有数据库记录时删除文件。
+        Returns:
+            tuple[
+                list[MaiEmoji]: 已注册且可用的表情列表（用于刷新 self.emojis）,
+                set[Path]: 数据库中仍有记录的文件路径集合（用于刷新 self._known_emoji_file_paths）,
+                list[Path]: 文件系统中无对应数据库记录的孤儿文件，等待主 loop 异步删除,
+                int: 本轮已从数据库中删除的记录数,
+            ]
         """
         _ensure_directories()
-        logger.info("[完整性检查] 开始检查表情包文件和注册记录一致性...")
         tracked_paths: set[Path] = set()
         record_removal_count = 0
-        file_removal_count = 0
+        orphan_files: list[Path] = []
         available_emojis: list[MaiEmoji] = []
 
         with DB_WRITE_THREAD_LOCK:
@@ -1067,16 +1066,35 @@ class EmojiManager:
             resolved_file = emoji_file.absolute().resolve()
             if resolved_file in tracked_paths:
                 continue
-            try:
-                emoji_file.unlink()
-                file_removal_count += 1
-                logger.warning(f"[完整性检查] 表情包文件缺少数据库记录，删除文件: {emoji_file}")
-            except Exception as exc:
-                logger.error(f"[完整性检查] 删除无注册记录的表情包文件失败: {emoji_file}, error={exc}")
+            orphan_files.append(emoji_file)
 
+        return available_emojis, tracked_paths, orphan_files, record_removal_count
+
+    async def check_emoji_file_integrity(self) -> None:
+        """检查表情包文件和数据库注册记录的一致性。
+
+        DB 扫描与孤儿文件清点放到线程池里执行，内存状态写回与孤儿文件实际删除则在
+        事件循环里完成，避免与 ``ensure_emoji_saved`` 的内存写入相互竞争。
+        """
+        logger.info("[完整性检查] 开始检查表情包文件和注册记录一致性...")
+        available_emojis, tracked_paths, orphan_files, record_removal_count = await asyncio.to_thread(
+            self._scan_emoji_integrity
+        )
+
+        # 主 loop 内单线程地更新内存状态，关闭"worker 线程在事件循环外覆盖 self.emojis"的窗口。
         self.emojis = available_emojis
         self._known_emoji_file_paths = tracked_paths
         self._emoji_num = len(self.emojis)
+
+        file_removal_count = 0
+        for orphan in orphan_files:
+            try:
+                await asyncio.to_thread(orphan.unlink)
+                file_removal_count += 1
+                logger.warning(f"[完整性检查] 表情包文件缺少数据库记录，删除文件: {orphan}")
+            except Exception as exc:
+                logger.error(f"[完整性检查] 删除无注册记录的表情包文件失败: {orphan}, error={exc}")
+
         logger.info(
             f"[完整性检查] 表情包完整性检查完成，删除数据库记录 {record_removal_count} 条，删除图片文件 {file_removal_count} 个"
         )
@@ -1094,7 +1112,7 @@ class EmojiManager:
 
             _ensure_directories()
             try:
-                await asyncio.to_thread(self.check_emoji_file_integrity)
+                await self.check_emoji_file_integrity()
             except Exception as e:
                 logger.error(f"[emoji_maintenance] Maintenance task failed: {e}")
 

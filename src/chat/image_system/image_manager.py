@@ -232,6 +232,18 @@ class ImageManager:
         try:
             with DB_WRITE_THREAD_LOCK:
                 with get_db_session() as session:
+                    # 并发的 ensure_image_saved 可能已经先插入同 hash 记录；
+                    # 在同一把锁内重新查询并改走 upsert，关闭 lookup→insert 之间的竞争窗口。
+                    statement = (
+                        select(Images).filter_by(image_hash=image.file_hash, image_type=ImageType.IMAGE).limit(1)
+                    )
+                    if existing := session.exec(statement).first():
+                        self._normalize_image_registration_fields(existing)
+                        existing.last_used_time = datetime.now()
+                        existing.query_count += 1
+                        session.add(existing)
+                        logger.debug(f"图片记录已存在，跳过重复插入: {image.file_hash}")
+                        return True
                     record = image.to_db_instance()
                     record.is_registered = False
                     record.register_time = None
@@ -324,7 +336,6 @@ class ImageManager:
                     record.last_used_time = datetime.now()
                     record.query_count += 1
                     session.add(record)
-                    session.flush()
                     return MaiImage.from_db_instance(record)
                 return None
 
@@ -341,8 +352,7 @@ class ImageManager:
 
         logger.info(f"图片不存在于数据库中，准备保存新图片，哈希值: {hash_str}")
         tmp_file_path = IMAGE_DIR / f"{hash_str}.tmp"
-        with tmp_file_path.open("wb") as f:
-            f.write(image_bytes)
+        await asyncio.to_thread(tmp_file_path.write_bytes, image_bytes)
         mai_image = MaiImage(full_path=tmp_file_path, image_bytes=image_bytes)
         await mai_image.calculate_hash_format()
         if not await asyncio.to_thread(self.register_image_to_db, mai_image):

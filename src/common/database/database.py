@@ -31,13 +31,21 @@ _DB_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_URL = f"sqlite:///{_DB_FILE}"
 
 
-# 串行化所有 SQLite 写事务的进程级互斥锁。
+# 串行化所有"从线程池写 SQLite"路径的进程级互斥锁。
 # 底层 SQLite WAL 仅允许单写，busy_timeout 仅 1s（见上方 PRAGMA），bot 进程同时存在
 # 多个 event loop（bot.py 主 loop、WebUI 在另一个线程的独立 loop、临时 asyncio.run 调用等），
 # 因此锁必须是进程级的 threading.Lock 而不是 asyncio.Lock；后者只能互斥同一个 loop 内的协程，
 # 跨 loop / 跨线程时形同虚设。
-# 所有走 `asyncio.to_thread` 把写入下放到线程池的 helper 都应该在 `with get_db_session()`
-# 外层套一层 `with DB_WRITE_THREAD_LOCK:`，避免多个写线程同时撞 SQLite busy_timeout。
+#
+# 契约（仅覆盖线程池场景）：
+#   - 所有走 `asyncio.to_thread` 把写入下放到线程池的 helper 都应该在 `with get_db_session()`
+#     外层套一层 `with DB_WRITE_THREAD_LOCK:`，避免多个写线程同时撞 SQLite busy_timeout。
+#   - 仍直接在事件循环里执行的同步 DB 写（如 emoji_manager.update_emoji_usage / ban_emoji
+#     等历史路径）当前不在保护范围内，与线程池写入仍可能产生短暂竞争；这些路径应在后续
+#     逐步迁移到线程池模式后才纳入本锁保护范围。
+#   - 锁内禁止做慢 IO（图片格式识别、文件 write 等），应在获取锁之前预处理完成。
+#   - 本锁不可重入（`threading.Lock` 而非 `RLock`）。任何已经持有本锁的代码路径不得再调用
+#     另一个会获取本锁的 helper，否则会自死锁。
 DB_WRITE_THREAD_LOCK = threading.Lock()
 
 
