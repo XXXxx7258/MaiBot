@@ -109,7 +109,7 @@ class ImageManager:
             hash_str = hashlib.sha256(image_bytes).hexdigest()
 
         try:
-            if record := self._get_image_record(hash_str):
+            if record := await asyncio.to_thread(self._get_image_record, hash_str):
                 if record.vlm_processed and record.description:
                     return record.description
         except Exception as e:
@@ -158,7 +158,9 @@ class ImageManager:
         if image_hash in self._pending_description_tasks:
             return
 
-        task = asyncio.create_task(self._build_description_in_background(image_hash, image_bytes, saved_image=saved_image))
+        task = asyncio.create_task(
+            self._build_description_in_background(image_hash, image_bytes, saved_image=saved_image)
+        )
         self._pending_description_tasks[image_hash] = task
         task.add_done_callback(lambda finished_task: self._finalize_description_build(image_hash, finished_task))
 
@@ -300,21 +302,34 @@ class ImageManager:
             return False
         return True
 
+    def _lookup_and_touch_image_record(self, hash_str: str) -> Optional[MaiImage]:
+        """同步：按哈希查找已存在的图片记录，命中则刷新使用计数并返回。
+
+        Args:
+            hash_str: 图片 sha256 哈希。
+
+        Returns:
+            Optional[MaiImage]: 命中则返回构造好的 MaiImage，否则返回 None。
+        """
+        with get_db_session() as session:
+            statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.IMAGE).limit(1)
+            if record := session.exec(statement).first():
+                self._normalize_image_registration_fields(record)
+                logger.info(f"图片已存在于数据库中，哈希值: {hash_str}")
+                record.last_used_time = datetime.now()
+                record.query_count += 1
+                session.add(record)
+                session.flush()
+                return MaiImage.from_db_instance(record)
+            return None
+
     async def ensure_image_saved(self, image_bytes: bytes) -> MaiImage:
         """先保存图片记录，确保后续可以按哈希回填图片内容。"""
         hash_str = hashlib.sha256(image_bytes).hexdigest()
 
         try:
-            with get_db_session() as session:
-                statement = select(Images).filter_by(image_hash=hash_str, image_type=ImageType.IMAGE).limit(1)
-                if record := session.exec(statement).first():
-                    self._normalize_image_registration_fields(record)
-                    logger.info(f"图片已存在于数据库中，哈希值: {hash_str}")
-                    record.last_used_time = datetime.now()
-                    record.query_count += 1
-                    session.add(record)
-                    session.flush()
-                    return MaiImage.from_db_instance(record)
+            if existing := await asyncio.to_thread(self._lookup_and_touch_image_record, hash_str):
+                return existing
         except Exception as e:
             logger.error(f"查询图片记录时发生错误: {e}")
             raise e
@@ -325,7 +340,7 @@ class ImageManager:
             f.write(image_bytes)
         mai_image = MaiImage(full_path=tmp_file_path, image_bytes=image_bytes)
         await mai_image.calculate_hash_format()
-        if not self.register_image_to_db(mai_image):
+        if not await asyncio.to_thread(self.register_image_to_db, mai_image):
             raise RuntimeError(f"保存图片记录到数据库失败: {hash_str}")
         return mai_image
 
@@ -348,7 +363,7 @@ class ImageManager:
         desc = await self._generate_image_description(image_bytes, mai_image.image_format)
         mai_image.description = desc
         mai_image.vlm_processed = True
-        if not self.update_image_description(mai_image):
+        if not await asyncio.to_thread(self.update_image_description, mai_image):
             raise RuntimeError(f"更新图片描述失败: {mai_image.file_hash}")
         return mai_image
 
