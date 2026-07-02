@@ -240,6 +240,8 @@ class ClientRegistry:
         """APIProvider.client_type -> Provider 注册信息映射表。"""
         self.client_instance_cache: Dict[str, BaseClient] = {}
         """APIProvider.name -> BaseClient的映射表"""
+        self._per_loop_client_cache: Dict[Tuple[int | None, str], BaseClient] = {}
+        """(事件循环 id, APIProvider.name) -> BaseClient，用于 force_new 场景的按循环复用。"""
         self._owner_client_types: Dict[str, Set[str]] = {}
         """插件 ID -> 该插件拥有的 client_type 集合。"""
         config_manager.register_reload_callback(self.clear_client_instance_cache)
@@ -429,6 +431,14 @@ class ClientRegistry:
         for provider_name in stale_provider_names:
             self.client_instance_cache.pop(provider_name, None)
 
+        stale_loop_keys = [
+            key
+            for key, client in self._per_loop_client_cache.items()
+            if client.api_provider.client_type == normalized_client_type
+        ]
+        for key in stale_loop_keys:
+            self._per_loop_client_cache.pop(key, None)
+
     def get_client_class_instance(self, api_provider: APIProvider, force_new: bool = False) -> BaseClient:
         """获取注册的 API 客户端实例。
 
@@ -443,11 +453,22 @@ class ClientRegistry:
 
         ensure_client_type_loaded(api_provider.client_type)
 
-        # 如果强制创建新实例，直接创建不使用缓存
+        # 如果强制创建新实例，按事件循环缓存复用。
+        # 历史上 force_new 用于规避缓存实例绑定到其他事件循环的问题（fab46561）；
+        # 每次真的新建会在事件循环上重建 SSL context（Windows 加载证书库可达数秒），
+        # 因此改为同一循环内复用实例，跨循环各自独立，效果等价且不再阻塞循环。
         if force_new:
-            if registration := self.client_registry.get(api_provider.client_type):
-                return registration.factory(api_provider)
-            raise KeyError(f"'{api_provider.client_type}' 类型的 Client 未注册")
+            try:
+                loop_key = id(asyncio.get_running_loop())
+            except RuntimeError:
+                loop_key = None
+            cache_key = (loop_key, api_provider.name)
+            if cache_key not in self._per_loop_client_cache:
+                if registration := self.client_registry.get(api_provider.client_type):
+                    self._per_loop_client_cache[cache_key] = registration.factory(api_provider)
+                else:
+                    raise KeyError(f"'{api_provider.client_type}' 类型的 Client 未注册")
+            return self._per_loop_client_cache[cache_key]
 
         # 正常的缓存逻辑
         if api_provider.name not in self.client_instance_cache:
@@ -460,6 +481,7 @@ class ClientRegistry:
     def clear_client_instance_cache(self) -> None:
         """清空客户端实例缓存。"""
         self.client_instance_cache.clear()
+        self._per_loop_client_cache.clear()
         logger.info("检测到配置重载，已清空LLM客户端实例缓存")
 
 
