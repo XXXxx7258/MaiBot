@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import threading
 import time
@@ -29,8 +30,7 @@ class PromptPreviewLogger:
     _io_executor: ThreadPoolExecutor | None = None
     _executor_lock = threading.Lock()
     _stem_lock = threading.Lock()
-    _last_stem_base: str = ""
-    _last_stem_suffix: int = 0
+    _last_stem_by_chat_dir: Dict[Path, Tuple[str, int]] = {}
 
     @classmethod
     def _get_io_executor(cls) -> ThreadPoolExecutor:
@@ -44,12 +44,12 @@ class PromptPreviewLogger:
     def _build_file_stem(cls, chat_dir: Path) -> str:
         with cls._stem_lock:
             base_stem = str(int(time.time() * 1000))
-            suffix_index = cls._last_stem_suffix + 1 if base_stem == cls._last_stem_base else 0
+            last_stem_base, last_stem_suffix = cls._last_stem_by_chat_dir.get(chat_dir, ("", 0))
+            suffix_index = last_stem_suffix + 1 if base_stem == last_stem_base else 0
             while True:
                 candidate_stem = base_stem if suffix_index == 0 else f"{base_stem}_{suffix_index}"
                 if not (chat_dir / f"{candidate_stem}.json").exists():
-                    cls._last_stem_base = base_stem
-                    cls._last_stem_suffix = suffix_index
+                    cls._last_stem_by_chat_dir[chat_dir] = (base_stem, suffix_index)
                     return candidate_stem
                 suffix_index += 1
 
@@ -80,7 +80,7 @@ class PromptPreviewLogger:
             logger.exception(f"Prompt 预览目录后台清理失败: {exc}")
 
     @staticmethod
-    def _group_sort_key(item: tuple[str, list[Path]]) -> float:
+    def _group_sort_key(item: Tuple[str, List[Path]]) -> float:
         stem = item[0]
         try:
             return float(stem.split("_", 1)[0])
@@ -95,7 +95,7 @@ class PromptPreviewLogger:
         """超过阈值时按批次删除最老的若干组预览文件。"""
 
         max_preview_groups = cls._get_max_preview_groups_per_chat()
-        grouped_files: dict[str, list[Path]] = {}
+        grouped_files: Dict[str, List[Path]] = {}
         for file_path in chat_dir.iterdir():
             if not file_path.is_file():
                 continue
